@@ -13,8 +13,11 @@ use App\Filament\Resources\Products\RelationManagers\ProductImagesRelationManage
 use App\Models\AiRun;
 use App\Models\AiSuggestion;
 use App\Models\AiSetting;
+use App\Models\CommerceSetting;
+use App\Models\Currency;
 use App\Models\Product;
 use App\Models\ProductImageCandidate;
+use App\Models\Warehouse;
 use App\Services\Ai\AiSettingsService;
 use App\Services\Ai\ProductEnrichmentService;
 use App\Services\Catalog\ProductCompletenessService;
@@ -142,13 +145,44 @@ class ProductResource extends Resource
                             ->required()
                             ->numeric()
                             ->minValue(0)
-                            ->prefix('₴'),
+                            ->default(0)
+                            ->prefix('₴')
+                            ->visible(fn (): bool => ! self::multiCurrencyEnabled()),
                         TextInput::make('old_price')
                             ->label('Стара ціна')
                             ->numeric()
                             ->minValue(0)
                             ->prefix('₴')
-                            ->helperText('Якщо більше за поточну ціну, storefront покаже відсоток знижки.'),
+                            ->helperText('Якщо більше за поточну ціну, storefront покаже відсоток знижки.')
+                            ->visible(fn (): bool => ! self::multiCurrencyEnabled()),
+                        Repeater::make('prices')
+                            ->label('Ціни за валютами')
+                            ->relationship()
+                            ->schema([
+                                Select::make('currency_id')
+                                    ->label('Валюта')
+                                    ->options(fn (): array => self::currencyOptions())
+                                    ->searchable()
+                                    ->distinct()
+                                    ->disableOptionsWhenSelectedInSiblingRepeaterItems()
+                                    ->required(),
+                                TextInput::make('price')
+                                    ->label('Ціна')
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->required(),
+                                TextInput::make('compare_at_price')
+                                    ->label('Стара ціна')
+                                    ->numeric()
+                                    ->minValue(0),
+                                Toggle::make('is_active')
+                                    ->label('Активна')
+                                    ->default(true),
+                            ])
+                            ->columns(4)
+                            ->defaultItems(0)
+                            ->columnSpanFull()
+                            ->visible(fn (): bool => self::multiCurrencyEnabled()),
                         TextInput::make('purchase_price')
                             ->label('Закупівельна ціна')
                             ->numeric()
@@ -160,7 +194,45 @@ class ProductResource extends Resource
                             ->numeric()
                             ->minValue(0)
                             ->default(0)
-                            ->helperText('Кошик не дозволяє замовити більше доступного залишку.'),
+                            ->helperText('Кошик не дозволяє замовити більше доступного залишку.')
+                            ->visible(fn (): bool => ! self::multiWarehouseEnabled()),
+                        Repeater::make('stockBalances')
+                            ->label('Залишки за складами')
+                            ->relationship()
+                            ->schema([
+                                Select::make('warehouse_id')
+                                    ->label('Склад')
+                                    ->options(fn (): array => self::warehouseOptions())
+                                    ->searchable()
+                                    ->distinct()
+                                    ->disableOptionsWhenSelectedInSiblingRepeaterItems()
+                                    ->required(),
+                                TextInput::make('quantity')
+                                    ->label('Кількість')
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->default(0)
+                                    ->required(),
+                                TextInput::make('reserved_quantity')
+                                    ->label('Зарезервовано')
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->default(0)
+                                    ->disabled()
+                                    ->dehydrated(false),
+                                Placeholder::make('available_quantity')
+                                    ->label('Доступно')
+                                    ->content(fn (callable $get): string => number_format(
+                                        max(0, (float) ($get('quantity') ?? 0) - (float) ($get('reserved_quantity') ?? 0)),
+                                        3,
+                                        ',',
+                                        ' ',
+                                    )),
+                            ])
+                            ->columns(4)
+                            ->defaultItems(0)
+                            ->columnSpanFull()
+                            ->visible(fn (): bool => self::multiWarehouseEnabled()),
                     ])
                     ->columns(4),
                 Section::make('Публікація та бейджі')
@@ -349,7 +421,7 @@ class ProductResource extends Resource
     {
         return $table
             ->recordTitleAttribute('name')
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['brand', 'category', 'images']))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['brand', 'category', 'images', 'prices.currency', 'stockBalances.warehouse']))
             ->columns([
                 Split::make([
                     ImageColumn::make('image_url')
@@ -394,11 +466,12 @@ class ProductResource extends Resource
                             Stack::make([
                                 TextColumn::make('price')
                                     ->label('Ціна')
-                                    ->state(fn (Product $record): string => self::formatMoney($record->price))
+                                    ->state(fn (Product $record): string => self::productPriceLine($record))
+                                    ->tooltip(fn (Product $record): ?string => self::productPriceTooltip($record))
                                     ->sortable(),
                                 TextColumn::make('product_old_price')
                                     ->label('Стара ціна')
-                                    ->state(fn (Product $record): string => self::productOldPriceLine($record))
+                                    ->state(fn (Product $record): string => self::productPriceMetaLine($record))
                                     ->color('gray')
                                     ->lineClamp(1),
                             ])->space(1),
@@ -411,6 +484,7 @@ class ProductResource extends Resource
                                 TextColumn::make('product_stock')
                                     ->label('Залишок')
                                     ->state(fn (Product $record): string => self::productStockLine($record))
+                                    ->tooltip(fn (Product $record): ?string => self::productStockTooltip($record))
                                     ->color('gray')
                                     ->lineClamp(1),
                             ])->space(1),
@@ -784,9 +858,68 @@ class ProductResource extends Resource
         return 'Стара: '.($record->old_price ? self::formatMoney($record->old_price) : '-');
     }
 
+    private static function productPriceLine(Product $record): string
+    {
+        if (! self::multiCurrencyEnabled()) {
+            return self::formatMoney($record->price);
+        }
+
+        $settings = CommerceSetting::current();
+        $price = $record->prices->firstWhere('currency_id', $settings->default_currency_id);
+
+        if (! $price) {
+            return 'Без деф. ціни';
+        }
+
+        return self::formatMoney($price->price, $price->currency?->symbol ?: $price->currency?->code ?: '₴');
+    }
+
+    private static function productPriceMetaLine(Product $record): string
+    {
+        if (! self::multiCurrencyEnabled()) {
+            return self::productOldPriceLine($record);
+        }
+
+        $settings = CommerceSetting::current();
+        $otherPrices = $record->prices
+            ->where('currency_id', '!=', $settings->default_currency_id)
+            ->where('is_active', true)
+            ->count();
+
+        return $otherPrices > 0 ? '+'.$otherPrices.' валют' : 'Інших валют немає';
+    }
+
+    private static function productPriceTooltip(Product $record): ?string
+    {
+        if (! self::multiCurrencyEnabled() || $record->prices->isEmpty()) {
+            return null;
+        }
+
+        return $record->prices
+            ->sortBy(fn ($price): string => $price->currency?->code ?? '')
+            ->map(fn ($price): string => ($price->currency?->code ?? '-').': '.self::formatMoney($price->price, $price->currency?->symbol ?: $price->currency?->code ?: ''))
+            ->implode("\n");
+    }
+
     private static function productStockLine(Product $record): string
     {
+        if (self::multiWarehouseEnabled()) {
+            return 'Разом: '.number_format((float) $record->stockBalances->sum('quantity'), 3, ',', ' ');
+        }
+
         return 'Залишок: '.$record->stock;
+    }
+
+    private static function productStockTooltip(Product $record): ?string
+    {
+        if (! self::multiWarehouseEnabled() || $record->stockBalances->isEmpty()) {
+            return null;
+        }
+
+        return $record->stockBalances
+            ->sortBy(fn ($balance): string => $balance->warehouse?->name ?? '')
+            ->map(fn ($balance): string => ($balance->warehouse?->name ?? '-').': '.number_format((float) $balance->quantity, 3, ',', ' '))
+            ->implode("\n");
     }
 
     private static function productCompletenessHint(Product $record): string
@@ -794,13 +927,13 @@ class ProductResource extends Resource
         return Str::limit($record->completenessMissingSummary(), 48);
     }
 
-    private static function formatMoney(mixed $value): string
+    private static function formatMoney(mixed $value, string $symbol = '₴'): string
     {
         if ($value === null || $value === '') {
             return '-';
         }
 
-        return number_format((float) $value, 2, ',', ' ').' ₴';
+        return trim(number_format((float) $value, 2, ',', ' ').' '.$symbol);
     }
 
     private static function stockStatusColor(?string $state): string
@@ -811,5 +944,51 @@ class ProductResource extends Resource
             'out_of_stock' => 'danger',
             default => 'gray',
         };
+    }
+
+    private static function multiCurrencyEnabled(): bool
+    {
+        return CommerceSetting::current()->multi_currency_enabled;
+    }
+
+    private static function multiWarehouseEnabled(): bool
+    {
+        return CommerceSetting::current()->multi_warehouse_enabled;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function currencyOptions(): array
+    {
+        $defaultCurrencyId = CommerceSetting::current()->default_currency_id;
+
+        return Currency::query()
+            ->where('is_active', true)
+            ->orderByDesc('is_base')
+            ->orderBy('code')
+            ->get()
+            ->mapWithKeys(fn (Currency $currency): array => [
+                $currency->id => $currency->code.((int) $currency->id === (int) $defaultCurrencyId ? ' (за замовчуванням)' : ''),
+            ])
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function warehouseOptions(): array
+    {
+        $defaultWarehouseId = CommerceSetting::current()->default_warehouse_id;
+
+        return Warehouse::query()
+            ->where('is_active', true)
+            ->orderByDesc('is_default')
+            ->orderBy('name')
+            ->get()
+            ->mapWithKeys(fn (Warehouse $warehouse): array => [
+                $warehouse->id => $warehouse->name.((int) $warehouse->id === (int) $defaultWarehouseId ? ' (за замовчуванням)' : ''),
+            ])
+            ->all();
     }
 }

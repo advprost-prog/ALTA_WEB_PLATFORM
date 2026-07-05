@@ -9,6 +9,7 @@ Route::get('/', [StorefrontController::class, 'home'])->name('home');
 Route::get('/catalog', [StorefrontController::class, 'catalog'])->name('catalog');
 Route::get('/category/{category:slug}', [StorefrontController::class, 'category'])->name('category.show');
 Route::get('/product/{product:slug}', [StorefrontController::class, 'product'])->name('product.show');
+Route::post('/currency', [StorefrontController::class, 'switchCurrency'])->name('currency.switch');
 
 Route::get('/cart', [StorefrontController::class, 'cart'])->name('cart');
 Route::post('/cart/{product}/add', [StorefrontController::class, 'addToCart'])->name('cart.add');

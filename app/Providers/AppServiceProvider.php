@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Models\Category;
+use App\Services\Commerce\ProductPricingService;
 use App\Services\Themes\ThemeResolver;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\View;
@@ -29,6 +30,7 @@ class AppServiceProvider extends ServiceProvider
             if ($storefrontPayload === null) {
                 $themeResolver = app(ThemeResolver::class);
                 $theme = $themeResolver->resolveForRequest($request);
+                $pricingService = app(ProductPricingService::class);
 
                 $storefrontPayload = [
                     'navigationCategories' => Category::active()
@@ -36,6 +38,9 @@ class AppServiceProvider extends ServiceProvider
                         ->orderBy('name')
                         ->take(8)
                         ->get(),
+                    'storefrontActiveCurrencies' => $pricingService->activeCurrencies(),
+                    'storefrontCurrentCurrency' => $pricingService->currentCurrency($request),
+                    'storefrontCurrencySwitcherVisible' => $pricingService->currencySwitcherVisible(),
                     'storefrontTheme' => $theme,
                     'themeCssVariables' => $themeResolver->getCssVariables($theme),
                     'themeLayoutConfig' => $themeResolver->getLayoutConfig($theme),

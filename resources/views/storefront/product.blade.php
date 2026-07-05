@@ -2,8 +2,12 @@
 
 @section('content')
     @php
-        $isPurchasable = $product->isPurchasable();
-        $stockLabel = \App\Models\Product::STOCK_STATUSES[$product->stock_status] ?? $product->stock_status;
+        $pricingService = app(\App\Services\Commerce\ProductPricingService::class);
+        $availabilityService = app(\App\Services\Commerce\ProductAvailabilityService::class);
+        $priceView = $pricingService->priceView($product);
+        $availabilityView = $availabilityService->availabilityView($product);
+        $isAvailable = $availabilityView['is_available'];
+        $isPurchasable = $isAvailable && $priceView['is_available_for_selected_currency'];
         $productPlaceholder = asset('images/placeholders/product-placeholder.svg');
     @endphp
 
@@ -25,7 +29,7 @@
                 <div class="relative overflow-hidden rounded-md border border-white/10 bg-zinc-950">
                     <img src="{{ $product->image_url }}" alt="{{ $product->image_alt_text ?: $product->name }}" class="aspect-[4/3] w-full object-cover" onerror="this.onerror=null;this.src='{{ $productPlaceholder }}';">
                     <div class="absolute left-4 top-4 flex flex-wrap gap-2">
-                        @unless ($isPurchasable)
+                        @unless ($isAvailable)
                             <span class="badge bg-zinc-800 text-zinc-200">Немає в наявності</span>
                         @endunless
                         @if ($product->is_sale)
@@ -38,8 +42,8 @@
                             <span class="badge bg-cyan-300 text-neutral-950">Новинка</span>
                         @endif
                     </div>
-                    @if ($product->discount_percent)
-                        <span class="absolute bottom-4 right-4 rounded bg-neutral-950 px-4 py-2 text-lg font-black text-lime-300">-{{ $product->discount_percent }}%</span>
+                    @if ($priceView['discount_percent'])
+                        <span class="absolute bottom-4 right-4 rounded bg-neutral-950 px-4 py-2 text-lg font-black text-lime-300">-{{ $priceView['discount_percent'] }}%</span>
                     @endif
                 </div>
                 @if ($product->images->isNotEmpty())
@@ -69,10 +73,12 @@
             <div class="lg:pt-2">
                 <div class="flex flex-wrap gap-2">
                     <span class="status-pill">
-                        <span class="status-dot {{ $isPurchasable ? 'bg-lime-300' : 'bg-rose-400' }}"></span>
-                        {{ $stockLabel }}
+                        <span class="status-dot {{ $isAvailable ? 'bg-lime-300' : 'bg-rose-400' }}"></span>
+                        {{ $availabilityView['label'] }}
                     </span>
-                    <span class="status-pill">Залишок: {{ $product->stock }} шт</span>
+                    @if ($availabilityView['quantity_label'])
+                        <span class="status-pill">{{ $availabilityView['quantity_label'] }}</span>
+                    @endif
                     <span class="status-pill">Артикул: {{ $product->sku }}</span>
                 </div>
 
@@ -86,15 +92,20 @@
                 <p class="mt-6 text-lg leading-8 text-zinc-300">{{ $product->short_description }}</p>
 
                 <div class="mt-8 flex flex-wrap items-end gap-4">
-                    <div class="text-5xl font-black text-white">{{ number_format((float) $product->price, 0, '.', ' ') }} ₴</div>
-                    @if ($product->old_price)
-                        <div class="pb-2 text-xl font-bold text-zinc-500 line-through">{{ number_format((float) $product->old_price, 0, '.', ' ') }} ₴</div>
+                    <div>
+                        <div class="text-5xl font-black text-white">{{ $priceView['formatted_price'] }}</div>
+                        @if ($priceView['fallback_message'])
+                            <div class="mt-2 text-xs font-bold uppercase text-zinc-500">{{ $priceView['fallback_message'] }}</div>
+                        @endif
+                    </div>
+                    @if ($priceView['formatted_compare_at_price'])
+                        <div class="pb-2 text-xl font-bold text-zinc-500 line-through">{{ $priceView['formatted_compare_at_price'] }}</div>
                     @endif
                 </div>
 
                 <form method="POST" action="{{ route('cart.add', $product) }}" class="mt-8 grid max-w-xl gap-3 sm:grid-cols-[120px_1fr]">
                     @csrf
-                    <input type="number" min="1" max="{{ max(1, $product->stock) }}" name="quantity" value="1" class="field" @disabled(! $isPurchasable)>
+                    <input type="number" min="1" max="{{ max(1, $availabilityView['max_quantity']) }}" name="quantity" value="1" class="field" @disabled(! $isPurchasable)>
                     <button class="btn-primary w-full" @disabled(! $isPurchasable)>{{ $isPurchasable ? 'Додати до кошика' : 'Товар недоступний' }}</button>
                 </form>
 

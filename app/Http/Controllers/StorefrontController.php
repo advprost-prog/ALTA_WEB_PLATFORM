@@ -5,23 +5,33 @@ namespace App\Http\Controllers;
 use App\Models\Banner;
 use App\Models\Brand;
 use App\Models\Category;
-use App\Models\Customer;
+use App\Models\CommerceSetting;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\Promotion;
+use App\Services\Commerce\CheckoutService;
+use App\Services\Commerce\ProductPricingService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
+use RuntimeException;
 
 class StorefrontController extends Controller
 {
-    private const MAX_CART_QUANTITY = 99;
+    private const CHECKOUT_TOKEN_SESSION_KEY = 'storefront_checkout_token';
+    private const CHECKOUT_PROCESSING_TOKEN_SESSION_KEY = 'storefront_checkout_processing_token';
+
+    public function __construct(
+        private readonly CheckoutService $checkoutService,
+        private readonly ProductPricingService $pricingService,
+    ) {}
 
     public function home(): View
     {
+        $productRelations = $this->checkoutService->productRelations();
+
         $categories = Category::active()
             ->withCount(['products' => fn ($query) => $query->active()])
             ->orderBy('sort_order')
@@ -32,10 +42,10 @@ class StorefrontController extends Controller
             'heroBanner' => Banner::active()->where('placement', 'home_hero')->orderBy('sort_order')->first(),
             'promoBanners' => Banner::active()->where('placement', 'home_promo')->orderBy('sort_order')->take(2)->get(),
             'categories' => Category::buildHierarchy($categories)->take(8),
-            'featuredProducts' => Product::active()->featured()->with(['brand', 'category', 'specifications'])->latest()->take(8)->get(),
-            'saleProducts' => Product::active()->where('is_sale', true)->with(['brand', 'category', 'specifications'])->latest()->take(4)->get(),
-            'newProducts' => Product::active()->where('is_new', true)->with(['brand', 'category', 'specifications'])->latest()->take(4)->get(),
-            'hitProducts' => Product::active()->where('is_hit', true)->with(['brand', 'category', 'specifications'])->latest()->take(4)->get(),
+            'featuredProducts' => Product::active()->featured()->with($productRelations)->latest()->take(8)->get(),
+            'saleProducts' => Product::active()->where('is_sale', true)->with($productRelations)->latest()->take(4)->get(),
+            'newProducts' => Product::active()->where('is_new', true)->with($productRelations)->latest()->take(4)->get(),
+            'hitProducts' => Product::active()->where('is_hit', true)->with($productRelations)->latest()->take(4)->get(),
             'brands' => Brand::active()->withCount(['products' => fn ($query) => $query->active()])->orderBy('name')->take(8)->get(),
             'promotions' => Promotion::active()->orderBy('sort_order')->take(3)->get(),
         ]);
@@ -78,14 +88,17 @@ class StorefrontController extends Controller
     {
         abort_unless($product->is_active, 404);
 
-        $product->load(['brand', 'category', 'images', 'specifications']);
+        $product->load(array_values(array_unique(array_merge(
+            ['images'],
+            $this->checkoutService->productRelations(),
+        ))));
 
         return view('storefront.product', [
             'product' => $product,
             'relatedProducts' => Product::active()
                 ->where('category_id', $product->category_id)
                 ->whereKeyNot($product->getKey())
-                ->with(['brand', 'category', 'specifications'])
+                ->with($this->checkoutService->productRelations())
                 ->take(4)
                 ->get(),
         ]);
@@ -93,37 +106,35 @@ class StorefrontController extends Controller
 
     public function cart(): View
     {
-        return view('storefront.cart', $this->cartPayload());
+        $payload = $this->checkoutService->cartPayload(session('cart', []));
+        session(['cart' => $payload['cart']]);
+
+        return view('storefront.cart', $payload);
     }
 
     public function addToCart(Request $request, Product $product): RedirectResponse
     {
         abort_unless($product->is_active, 404);
 
-        if (! $product->isPurchasable()) {
-            return back()->with('status', 'Цей товар зараз недоступний для замовлення.');
-        }
-
-        $quantity = min(
-            max(1, (int) $request->integer('quantity', 1)),
-            min($product->stock, self::MAX_CART_QUANTITY),
+        $result = $this->checkoutService->addToCart(
+            $product,
+            (int) $request->integer('quantity', 1),
+            session('cart', []),
         );
-        $cart = session('cart', []);
-        $cart[$product->id] = min(($cart[$product->id] ?? 0) + $quantity, min($product->stock, self::MAX_CART_QUANTITY));
 
-        session(['cart' => $cart]);
+        session(['cart' => $result['cart']]);
 
-        return back()->with('status', 'Товар додано до кошика.');
+        return back()->with('status', $result['status']);
     }
 
     public function updateCart(Request $request): RedirectResponse
     {
         $requestedCart = collect($request->input('quantities', []))
-            ->mapWithKeys(fn ($quantity, $productId): array => [(int) $productId => max(0, min((int) $quantity, self::MAX_CART_QUANTITY))])
+            ->mapWithKeys(fn ($quantity, $productId): array => [(int) $productId => (int) $quantity])
             ->filter()
             ->all();
 
-        session(['cart' => $this->sanitizeCart($requestedCart)]);
+        session(['cart' => $this->checkoutService->sanitizeCart($requestedCart)]);
 
         return back()->with('status', 'Кошик оновлено.');
     }
@@ -139,24 +150,26 @@ class StorefrontController extends Controller
 
     public function checkout(): View|RedirectResponse
     {
-        $payload = $this->cartPayload();
+        $payload = $this->checkoutService->cartPayload(session('cart', []));
+        session(['cart' => $payload['cart']]);
 
         if ($payload['items']->isEmpty()) {
             return redirect()->route('cart')->with('status', 'Додайте товари перед оформленням.');
         }
+
+        if (! $payload['can_checkout']) {
+            return redirect()->route('cart')->with('status', $payload['messages'][0] ?? 'Перевірте кошик перед оформленням.');
+        }
+
+        $payload['checkout_token'] = $this->issueCheckoutToken();
 
         return view('storefront.checkout', $payload);
     }
 
     public function placeOrder(Request $request): RedirectResponse
     {
-        $payload = $this->cartPayload();
-
-        if ($payload['items']->isEmpty()) {
-            return redirect()->route('cart')->with('status', 'Кошик порожній.');
-        }
-
         $validated = $request->validate([
+            'checkout_token' => ['required', 'string'],
             'name' => ['required', 'string', 'max:255'],
             'phone' => ['required', 'string', 'max:255'],
             'email' => ['nullable', 'email', 'max:255'],
@@ -167,67 +180,53 @@ class StorefrontController extends Controller
             'customer_comment' => ['nullable', 'string', 'max:2000'],
         ]);
 
+        $checkoutToken = (string) $validated['checkout_token'];
+
+        if (! $this->reserveCheckoutToken($request, $checkoutToken)) {
+            return redirect()->route('cart')->with('status', 'Сесія оформлення вже використана. Відкрийте checkout ще раз.');
+        }
+
         try {
-            $order = DB::transaction(function () use ($validated, $payload): Order {
-                $customer = Customer::updateOrCreate(
-                    ['phone' => $validated['phone']],
-                    [
-                        'name' => $validated['name'],
-                        'email' => $validated['email'] ?? null,
-                        'city' => $validated['city'] ?? null,
-                        'address' => $validated['address'] ?? null,
-                    ],
-                );
+            $payload = $this->checkoutService->cartPayload(session('cart', []));
+            session(['cart' => $payload['cart']]);
 
-                $order = Order::create([
-                    'customer_id' => $customer->id,
-                    'customer_name' => $validated['name'],
-                    'phone' => $validated['phone'],
-                    'email' => $validated['email'] ?? null,
-                    'total_amount' => $payload['total'],
-                    'status' => 'new',
-                    'delivery_method' => $validated['delivery_method'],
-                    'payment_method' => $validated['payment_method'],
-                    'customer_comment' => $validated['customer_comment'] ?? null,
-                ]);
+            if ($payload['items']->isEmpty()) {
+                return redirect()->route('cart')->with('status', 'Кошик порожній.');
+            }
 
-                foreach ($payload['items'] as $item) {
-                    $product = Product::query()->lockForUpdate()->find($item['product']->id);
+            if (! $payload['can_checkout']) {
+                return redirect()->route('cart')->with('status', $payload['messages'][0] ?? 'Перевірте кошик перед оформленням.');
+            }
 
-                    if (! $product?->isPurchasable() || $product->stock < $item['quantity']) {
-                        throw new \RuntimeException('Cart product is no longer available.');
-                    }
+            $order = $this->checkoutService->placeOrder(session('cart', []), $validated);
+        } catch (RuntimeException $exception) {
+            $this->releaseCheckoutToken($request);
 
-                    $order->items()->create([
-                        'product_id' => $product->id,
-                        'product_name' => $product->name,
-                        'sku' => $product->sku,
-                        'quantity' => $item['quantity'],
-                        'price' => $product->price,
-                        'total' => $item['line_total'],
-                    ]);
-
-                    $product->decrement('stock', $item['quantity']);
-
-                    if ($product->fresh()->stock <= 0) {
-                        $product->update(['stock_status' => 'out_of_stock']);
-                    }
-                }
-
-                return $order;
-            });
-        } catch (\RuntimeException) {
-            return redirect()->route('cart')->with('status', 'Кошик оновлено: частина товарів більше недоступна.');
+            return redirect()->route('cart')->with('status', $exception->getMessage());
         }
 
         session()->forget('cart');
+        $this->clearCheckoutToken($request);
 
         return redirect()->route('checkout.thank-you', $order)->with('status', 'Замовлення прийнято.');
     }
 
     public function thankYou(Order $order): View
     {
-        return view('storefront.thank-you', ['order' => $order->load('items')]);
+        return view('storefront.thank-you', ['order' => $order->load(['items', 'currency'])]);
+    }
+
+    public function switchCurrency(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'currency_id' => ['required', 'integer'],
+            'redirect_to' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $currency = $this->pricingService->selectCurrency((int) $validated['currency_id'], $request);
+        $target = $this->safeRedirectTarget($validated['redirect_to'] ?? null);
+
+        return redirect($target)->with('status', 'Валюту змінено на '.$currency->code.'.');
     }
 
     public function deliveryPayment(): View
@@ -245,29 +244,46 @@ class StorefrontController extends Controller
         return view('storefront.pages.about');
     }
 
-    /**
-     * @return array{items: Collection<int, array{product: Product, quantity: int, line_total: float}>, subtotal: float, total: float}
-     */
-    private function cartPayload(): array
+    private function issueCheckoutToken(): string
     {
-        $cart = $this->sanitizeCart(session('cart', []));
-        session(['cart' => $cart]);
+        $token = Str::uuid()->toString();
 
-        $products = Product::purchasable()->whereIn('id', array_keys($cart))->with(['brand', 'category'])->get();
+        request()->session()->put(self::CHECKOUT_TOKEN_SESSION_KEY, $token);
+        request()->session()->forget(self::CHECKOUT_PROCESSING_TOKEN_SESSION_KEY);
 
-        $items = $products->map(fn (Product $product): array => [
-            'product' => $product,
-            'quantity' => min((int) $cart[$product->id], $product->stock),
-            'line_total' => (float) $product->price * min((int) $cart[$product->id], $product->stock),
+        return $token;
+    }
+
+    private function reserveCheckoutToken(Request $request, string $token): bool
+    {
+        $sessionToken = $request->session()->get(self::CHECKOUT_TOKEN_SESSION_KEY);
+
+        if (! is_string($sessionToken) || ! hash_equals($sessionToken, $token)) {
+            return false;
+        }
+
+        $processingToken = $request->session()->get(self::CHECKOUT_PROCESSING_TOKEN_SESSION_KEY);
+
+        if (is_string($processingToken) && hash_equals($processingToken, $token)) {
+            return false;
+        }
+
+        $request->session()->put(self::CHECKOUT_PROCESSING_TOKEN_SESSION_KEY, $token);
+
+        return true;
+    }
+
+    private function releaseCheckoutToken(Request $request): void
+    {
+        $request->session()->forget(self::CHECKOUT_PROCESSING_TOKEN_SESSION_KEY);
+    }
+
+    private function clearCheckoutToken(Request $request): void
+    {
+        $request->session()->forget([
+            self::CHECKOUT_TOKEN_SESSION_KEY,
+            self::CHECKOUT_PROCESSING_TOKEN_SESSION_KEY,
         ]);
-
-        $subtotal = $items->sum('line_total');
-
-        return [
-            'items' => $items,
-            'subtotal' => $subtotal,
-            'total' => $subtotal,
-        ];
     }
 
     private function catalogProductQuery(Request $request, bool $allowCategoryFilter = true): Builder
@@ -275,25 +291,18 @@ class StorefrontController extends Controller
         $search = trim((string) $request->input('q', ''));
 
         $query = Product::active()
-            ->with(['brand', 'category', 'specifications'])
+            ->with($this->checkoutService->productRelations())
             ->when($search !== '', fn (Builder $query) => $query->where(fn (Builder $query) => $query
-                ->where('name', 'like', '%' . $search . '%')
-                ->orWhere('sku', 'like', '%' . $search . '%')
-                ->orWhere('short_description', 'like', '%' . $search . '%')))
+                ->where('name', 'like', '%'.$search.'%')
+                ->orWhere('sku', 'like', '%'.$search.'%')
+                ->orWhere('short_description', 'like', '%'.$search.'%')))
             ->when($allowCategoryFilter && $request->filled('category'), fn (Builder $query) => $query->whereRelation('category', 'slug', (string) $request->input('category')))
             ->when($request->filled('brand'), fn (Builder $query) => $query->whereRelation('brand', 'slug', (string) $request->input('brand')))
             ->when($request->boolean('sale'), fn (Builder $query) => $query->where('is_sale', true))
             ->when($request->boolean('new'), fn (Builder $query) => $query->where('is_new', true))
             ->when($request->boolean('hit'), fn (Builder $query) => $query->where('is_hit', true));
 
-        match ($request->input('stock')) {
-            'available' => $query->where('stock', '>', 0)->whereIn('stock_status', ['in_stock', 'low_stock']),
-            'preorder' => $query->where('stock_status', 'preorder'),
-            'out' => $query->where(fn (Builder $query) => $query
-                ->where('stock', '<=', 0)
-                ->orWhere('stock_status', 'out_of_stock')),
-            default => null,
-        };
+        $this->applyStockFilter($query, $request);
 
         match ($request->input('sort', 'new')) {
             'cheap' => $query->orderBy('price')->orderByDesc('created_at'),
@@ -305,27 +314,36 @@ class StorefrontController extends Controller
         return $query;
     }
 
-    /**
-     * @param  array<int|string, int|string>  $cart
-     * @return array<int, int>
-     */
-    private function sanitizeCart(array $cart): array
+    private function applyStockFilter(Builder $query, Request $request): void
     {
-        $requested = collect($cart)
-            ->mapWithKeys(fn ($quantity, $productId): array => [(int) $productId => max(0, min((int) $quantity, self::MAX_CART_QUANTITY))])
-            ->filter();
+        $settings = CommerceSetting::current();
 
-        if ($requested->isEmpty()) {
-            return [];
+        match ($request->input('stock')) {
+            'available' => $query
+                ->whereIn('stock_status', ['in_stock', 'low_stock', 'preorder'])
+                ->whereHas('stockBalances', fn (Builder $query) => $this->availableStockBalanceConstraint($query, $settings)),
+            'preorder' => $query->where('stock_status', 'preorder'),
+            'out' => $query->where(fn (Builder $query) => $query
+                ->where('stock_status', 'out_of_stock')
+                ->orWhereDoesntHave('stockBalances', fn (Builder $query) => $this->availableStockBalanceConstraint($query, $settings))),
+            default => null,
+        };
+    }
+
+    private function availableStockBalanceConstraint(Builder $query, CommerceSetting $settings): Builder
+    {
+        return $query
+            ->when(! $settings->multi_warehouse_enabled, fn (Builder $query) => $query->where('warehouse_id', $settings->default_warehouse_id))
+            ->whereRaw('(quantity - reserved_quantity) > 0')
+            ->whereRelation('warehouse', 'is_active', true);
+    }
+
+    private function safeRedirectTarget(?string $target): string
+    {
+        if (! $target || ! str_starts_with($target, url('/'))) {
+            return route('home');
         }
 
-        return Product::purchasable()
-            ->whereIn('id', $requested->keys())
-            ->pluck('stock', 'id')
-            ->mapWithKeys(fn (int $stock, int $productId): array => [
-                $productId => min($requested[$productId], $stock, self::MAX_CART_QUANTITY),
-            ])
-            ->filter()
-            ->all();
+        return $target;
     }
 }

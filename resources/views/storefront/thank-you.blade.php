@@ -1,6 +1,11 @@
 @extends('layouts.storefront', ['title' => 'Дякуємо'])
 
 @section('content')
+    @php
+        $pricingService = app(\App\Services\Commerce\ProductPricingService::class);
+        $orderCurrency = $order->currency;
+    @endphp
+
     <section class="section-shell">
         <div class="grid gap-8 lg:grid-cols-[1fr_380px]">
             <div class="rounded-md border border-emerald-400/20 bg-emerald-400/10 p-8">
@@ -33,13 +38,13 @@
                     @foreach ($order->items as $item)
                         <div class="border-b border-white/10 pb-4 last:border-b-0">
                             <div class="font-bold leading-5 text-white">{{ $item->product_name }}</div>
-                            <div class="mt-1 text-sm text-zinc-500">{{ $item->quantity }} x {{ number_format((float) $item->price, 0, '.', ' ') }} ₴</div>
+                            <div class="mt-1 text-sm text-zinc-500">{{ $item->quantity }} x {{ $pricingService->formatAmount($item->price, $orderCurrency ?: $order->currency_code) }}</div>
                         </div>
                     @endforeach
                 </div>
                 <div class="mt-5 flex items-center justify-between border-t border-white/10 pt-5">
                     <span class="font-bold text-zinc-400">Сума</span>
-                    <span class="text-3xl font-black text-white">{{ number_format((float) $order->total_amount, 0, '.', ' ') }} ₴</span>
+                    <span class="text-3xl font-black text-white">{{ $pricingService->formatAmount($order->total_amount, $orderCurrency ?: $order->currency_code) }}</span>
                 </div>
                 <div class="mt-5 grid gap-2 text-sm font-bold text-zinc-400">
                     <div>Статус: <span class="text-amber-300">{{ \App\Models\Order::STATUSES[$order->status] ?? $order->status }}</span></div>

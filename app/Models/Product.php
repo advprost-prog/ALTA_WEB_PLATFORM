@@ -4,11 +4,16 @@ namespace App\Models;
 
 use App\Models\Concerns\ResolvesImageUrls;
 use App\Services\Catalog\ProductCompletenessService;
+use App\Services\Commerce\StockService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model as EloquentModel;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\Schema;
+use RuntimeException;
 
 class Product extends Model
 {
@@ -63,6 +68,25 @@ class Product extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        static::creating(function (self $product): void {
+            $product->price ??= 0;
+            $product->stock ??= 0;
+            $product->stock_status ??= 'in_stock';
+        });
+
+        static::created(function (self $product): void {
+            $product->syncDefaultCommerceRecords();
+        });
+
+        static::updated(function (self $product): void {
+            if ($product->wasChanged(['price', 'old_price', 'stock'])) {
+                $product->syncDefaultCommerceRecords();
+            }
+        });
+    }
+
     public function isPurchasable(): bool
     {
         return $this->is_active
@@ -106,6 +130,35 @@ class Product extends Model
     public function orderItems(): HasMany
     {
         return $this->hasMany(OrderItem::class);
+    }
+
+    public function prices(): HasMany
+    {
+        return $this->hasMany(ProductPrice::class);
+    }
+
+    public function stockBalances(): HasMany
+    {
+        return $this->hasMany(StockBalance::class);
+    }
+
+    public function stockMovements(): HasMany
+    {
+        return $this->hasMany(StockMovement::class);
+    }
+
+    public function defaultPrice(): HasOne
+    {
+        $currencyId = CommerceSetting::query()->value('default_currency_id');
+
+        return $this->hasOne(ProductPrice::class)->where('currency_id', $currencyId);
+    }
+
+    public function defaultStockBalance(): HasOne
+    {
+        $warehouseId = CommerceSetting::query()->value('default_warehouse_id');
+
+        return $this->hasOne(StockBalance::class)->where('warehouse_id', $warehouseId);
     }
 
     public function aiSuggestions(): HasMany
@@ -178,6 +231,45 @@ class Product extends Model
         return app(ProductCompletenessService::class)->missingSummary($this);
     }
 
+    public function applyStockChange(
+        float $quantityDelta,
+        string $type = StockMovement::TYPE_ADJUSTMENT,
+        ?EloquentModel $related = null,
+        ?int $warehouseId = null,
+        ?string $note = null,
+    ): void {
+        if (! $this->commerceTablesReady()) {
+            $newStock = (int) $this->stock + (int) $quantityDelta;
+
+            if ($newStock < 0) {
+                throw new RuntimeException('Insufficient stock for this product.');
+            }
+
+            $this->forceFill([
+                'stock' => $newStock,
+            ])->save();
+
+            return;
+        }
+
+        $settings = CommerceSetting::current();
+        $warehouseId ??= $settings->default_warehouse_id;
+
+        if (! $warehouseId) {
+            return;
+        }
+
+        app(StockService::class)->applyDelta(
+            product: $this,
+            warehouseId: $warehouseId,
+            delta: $quantityDelta,
+            type: $type,
+            note: $note,
+            createdBy: auth()->id(),
+            related: $related,
+        );
+    }
+
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);
@@ -197,5 +289,62 @@ class Product extends Model
             ->where('is_hit', true)
             ->orWhere('is_new', true)
             ->orWhere('is_sale', true));
+    }
+
+    private function syncDefaultCommerceRecords(): void
+    {
+        if (! $this->commerceTablesReady()) {
+            return;
+        }
+
+        $settings = CommerceSetting::current();
+
+        if ($settings->default_currency_id && ! $settings->multi_currency_enabled) {
+            ProductPrice::query()->updateOrCreate(
+                [
+                    'product_id' => $this->getKey(),
+                    'currency_id' => $settings->default_currency_id,
+                ],
+                [
+                    'price' => $this->price,
+                    'compare_at_price' => $this->old_price,
+                    'is_active' => true,
+                ],
+            );
+        }
+
+        if (! $settings->default_warehouse_id || $settings->multi_warehouse_enabled) {
+            return;
+        }
+
+        $balance = StockBalance::query()->firstOrNew([
+            'product_id' => $this->getKey(),
+            'warehouse_id' => $settings->default_warehouse_id,
+        ]);
+
+        $newQuantity = (float) $this->stock;
+
+        $balance->forceFill([
+            'quantity' => $newQuantity,
+            'reserved_quantity' => $balance->reserved_quantity ?? 0,
+        ]);
+
+        if ($balance->exists) {
+            $balance->save();
+
+            return;
+        }
+
+        $balance->saveQuietly();
+    }
+
+    private function commerceTablesReady(): bool
+    {
+        return Schema::hasTable('commerce_settings')
+            && Schema::hasTable('currencies')
+            && Schema::hasTable('warehouses')
+            && Schema::hasTable('product_prices')
+            && Schema::hasTable('stock_balances')
+            && Schema::hasTable('stock_movements');
     }
 }

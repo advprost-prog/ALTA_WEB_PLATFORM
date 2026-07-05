@@ -4,6 +4,7 @@
     $productPlaceholder = asset('images/placeholders/product-placeholder.svg');
     $categoryPlaceholder = asset('images/placeholders/category-placeholder.svg');
     $bannerPlaceholder = asset('images/placeholders/banner-placeholder.svg');
+    $pricingService = app(\App\Services\Commerce\ProductPricingService::class);
     $heroVariant = ($themeLayoutConfig ?? [])['heroVariant'] ?? 'dark_promo';
     $categoryGridVariant = ($themeLayoutConfig ?? [])['categoryGridVariant'] ?? 'cards';
     $heroOverlay = ($themeComponentConfig ?? [])['heroOverlay'] ?? true;
@@ -132,7 +133,7 @@
                             <img src="{{ $product->image_url }}" alt="{{ $product->image_alt_text ?: $product->name }}" class="aspect-square rounded object-cover" loading="lazy" onerror="this.onerror=null;this.src='{{ $productPlaceholder }}';">
                             <span>
                                 <span class="block text-sm font-black text-white">{{ $product->name }}</span>
-                                <span class="mt-2 block text-xl font-black text-amber-300">{{ number_format((float) $product->price, 0, '.', ' ') }} ₴</span>
+                                <span class="mt-2 block text-xl font-black text-amber-300">{{ $pricingService->priceView($product)['formatted_price'] }}</span>
                                 <span class="mt-1 block text-xs font-bold uppercase text-zinc-500">{{ $product->brand?->name }}</span>
                             </span>
                         </a>
@@ -148,7 +149,7 @@
                             <img src="{{ $product->image_url }}" alt="{{ $product->image_alt_text ?: $product->name }}" class="aspect-square rounded object-cover" loading="lazy" onerror="this.onerror=null;this.src='{{ $productPlaceholder }}';">
                             <span>
                                 <span class="block text-sm font-black text-white">{{ $product->name }}</span>
-                                <span class="mt-2 block text-xl font-black text-lime-300">{{ number_format((float) $product->price, 0, '.', ' ') }} ₴</span>
+                                <span class="mt-2 block text-xl font-black text-lime-300">{{ $pricingService->priceView($product)['formatted_price'] }}</span>
                                 <span class="mt-1 block text-xs font-bold uppercase text-zinc-500">{{ $product->sku }}</span>
                             </span>
                         </a>

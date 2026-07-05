@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Models\CommerceSetting;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Concerns\CreatesCommerceData;
 use Tests\TestCase;
@@ -72,5 +73,35 @@ class FilamentAccessTest extends TestCase
             ->assertSee('Моторні оливи')
             ->assertSee('SKU AT-OIL-530-4L')
             ->assertSee('В наявності');
+    }
+
+    public function test_product_resource_simple_mode_hides_multi_currency_and_multi_warehouse_fields(): void
+    {
+        CommerceSetting::current()->update([
+            'multi_currency_enabled' => false,
+            'multi_warehouse_enabled' => false,
+        ]);
+
+        $this->actingAs($this->createUserWithRole(UserRole::Admin))
+            ->get('/admin/products/create')
+            ->assertOk()
+            ->assertSee('Ціна')
+            ->assertSee('Залишок')
+            ->assertDontSee('Ціни за валютами')
+            ->assertDontSee('Залишки за складами');
+    }
+
+    public function test_product_resource_extended_mode_shows_multi_currency_and_multi_warehouse_fields(): void
+    {
+        CommerceSetting::current()->update([
+            'multi_currency_enabled' => true,
+            'multi_warehouse_enabled' => true,
+        ]);
+
+        $this->actingAs($this->createUserWithRole(UserRole::Admin))
+            ->get('/admin/products/create')
+            ->assertOk()
+            ->assertSee('Ціни за валютами')
+            ->assertSee('Залишки за складами');
     }
 }

@@ -3,21 +3,25 @@
 namespace App\Filament\Resources\Orders;
 
 use App\Filament\Resources\Orders\Pages\CreateOrder;
-use App\Filament\Resources\Orders\Pages\EditOrder;
 use App\Filament\Resources\Orders\Pages\ListOrders;
 use App\Filament\Resources\Orders\Pages\ViewOrder;
+use App\Models\CommerceSetting;
+use App\Models\Currency;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\Warehouse;
+use App\Services\Commerce\ProductPricingService;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
@@ -89,6 +93,30 @@ class OrderResource extends Resource
                         TextInput::make('payment_method')
                             ->label('Спосіб оплати')
                             ->maxLength(255),
+                        Select::make('currency_id')
+                            ->label('Валюта')
+                            ->options(fn (): array => Currency::query()
+                                ->where('is_active', true)
+                                ->orderByDesc('is_base')
+                                ->orderBy('code')
+                                ->pluck('code', 'id')
+                                ->all())
+                            ->searchable()
+                            ->disabled(fn (string $operation): bool => $operation !== 'create')
+                            ->dehydrated(fn (string $operation): bool => $operation === 'create')
+                            ->visible(fn (): bool => self::multiCurrencyEnabled()),
+                        Select::make('warehouse_id')
+                            ->label('Склад')
+                            ->options(fn (): array => Warehouse::query()
+                                ->where('is_active', true)
+                                ->orderByDesc('is_default')
+                                ->orderBy('name')
+                                ->pluck('name', 'id')
+                                ->all())
+                            ->searchable()
+                            ->disabled(fn (string $operation): bool => $operation !== 'create')
+                            ->dehydrated(fn (string $operation): bool => $operation === 'create')
+                            ->visible(fn (): bool => self::multiWarehouseEnabled()),
                         TextInput::make('total_amount')
                             ->label('Сума')
                             ->required()
@@ -120,10 +148,24 @@ class OrderResource extends Resource
 
                                         $set('product_name', $product->name);
                                         $set('sku', $product->sku);
+                                        $set('unit_price', $product->price);
                                         $set('price', $product->price);
                                         $set('quantity', 1);
                                         $set('total', $product->price);
+                                        $set('warehouse_id', CommerceSetting::current()->default_warehouse_id);
                                     }),
+                                Select::make('warehouse_id')
+                                    ->label('Склад списання')
+                                    ->options(fn (): array => Warehouse::query()
+                                        ->orderByDesc('is_default')
+                                        ->orderBy('name')
+                                        ->pluck('name', 'id')
+                                        ->all())
+                                    ->searchable()
+                                    ->disabled(fn (string $operation): bool => $operation !== 'create')
+                                    ->dehydrated(fn (string $operation): bool => $operation === 'create')
+                                    ->placeholder('За замовчуванням'),
+                                Hidden::make('unit_price'),
                                 TextInput::make('product_name')
                                     ->label('Назва')
                                     ->required()
@@ -154,8 +196,10 @@ class OrderResource extends Resource
                                     ->prefix('₴')
                                     ->required(),
                             ])
-                            ->columns(6)
-                            ->defaultItems(1),
+                            ->columns(7)
+                            ->defaultItems(1)
+                            ->disabled(fn (string $operation): bool => $operation !== 'create')
+                            ->dehydrated(fn (string $operation): bool => $operation === 'create'),
                     ]),
                 Section::make('Коментарі')
                     ->description('Коментар покупця та внутрішня нотатка менеджера.')
@@ -189,7 +233,13 @@ class OrderResource extends Resource
                     ->placeholder('-'),
                 TextEntry::make('total_amount')
                     ->label('Сума')
-                    ->money('UAH'),
+                    ->formatStateUsing(fn (mixed $state, Order $record): string => self::formatOrderMoney($state, $record)),
+                TextEntry::make('currency_code')
+                    ->label('Валюта')
+                    ->placeholder('-'),
+                TextEntry::make('warehouse.name')
+                    ->label('Склад')
+                    ->placeholder('-'),
                 TextEntry::make('status')
                     ->label('Статус')
                     ->badge()
@@ -240,8 +290,16 @@ class OrderResource extends Resource
                     ->searchable(),
                 TextColumn::make('total_amount')
                     ->label('Сума')
-                    ->money('UAH')
+                    ->formatStateUsing(fn (mixed $state, Order $record): string => self::formatOrderMoney($state, $record))
                     ->sortable(),
+                TextColumn::make('currency_code')
+                    ->label('Валюта')
+                    ->placeholder('-')
+                    ->toggleable(),
+                TextColumn::make('warehouse.name')
+                    ->label('Склад')
+                    ->placeholder('-')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('status')
                     ->label('Статус')
                     ->badge()
@@ -298,7 +356,7 @@ class OrderResource extends Resource
             'index' => ListOrders::route('/'),
             'create' => CreateOrder::route('/create'),
             'view' => ViewOrder::route('/{record}'),
-            'edit' => EditOrder::route('/{record}/edit'),
+            'edit' => ViewOrder::route('/{record}/edit'),
         ];
     }
 
@@ -313,5 +371,23 @@ class OrderResource extends Resource
             'cancelled' => 'danger',
             default => 'gray',
         };
+    }
+
+    private static function multiCurrencyEnabled(): bool
+    {
+        return CommerceSetting::current()->multi_currency_enabled;
+    }
+
+    private static function multiWarehouseEnabled(): bool
+    {
+        return CommerceSetting::current()->multi_warehouse_enabled;
+    }
+
+    private static function formatOrderMoney(mixed $state, ?Order $record = null): string
+    {
+        return app(ProductPricingService::class)->formatAmount(
+            $state,
+            $record?->currency ?: $record?->currency_code,
+        );
     }
 }

@@ -5,11 +5,16 @@ namespace Database\Seeders;
 use App\Models\Banner;
 use App\Models\Brand;
 use App\Models\Category;
+use App\Models\CommerceSetting;
+use App\Models\Currency;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\ProductPrice;
 use App\Models\Promotion;
 use App\Models\SiteSetting;
+use App\Models\StockBalance;
+use App\Models\Warehouse;
 use App\Services\Admin\AdminUserProvisioner;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
@@ -24,6 +29,21 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         app(AdminUserProvisioner::class)->provision();
+
+        $currency = Currency::ensureDefault();
+        $warehouse = Warehouse::ensureDefault();
+        $commerceSettings = CommerceSetting::query()->first()
+            ?? CommerceSetting::query()->create([
+                'multi_currency_enabled' => false,
+                'multi_warehouse_enabled' => false,
+                'default_currency_id' => $currency->id,
+                'default_warehouse_id' => $warehouse->id,
+            ]);
+
+        $commerceSettings->forceFill([
+            'default_currency_id' => $currency->id,
+            'default_warehouse_id' => $warehouse->id,
+        ])->save();
 
         $productPlaceholder = '/images/placeholders/product-placeholder.svg';
 
@@ -559,6 +579,29 @@ class DatabaseSeeder extends Seeder
 
             $product->save();
 
+            ProductPrice::query()->updateOrCreate(
+                [
+                    'product_id' => $product->id,
+                    'currency_id' => $commerceSettings->default_currency_id,
+                ],
+                [
+                    'price' => $product->price,
+                    'compare_at_price' => $product->old_price,
+                    'is_active' => true,
+                ],
+            );
+
+            StockBalance::query()->updateOrCreate(
+                [
+                    'product_id' => $product->id,
+                    'warehouse_id' => $commerceSettings->default_warehouse_id,
+                ],
+                [
+                    'quantity' => $product->stock,
+                    'reserved_quantity' => 0,
+                ],
+            );
+
             $galleryImage = $product->images()->firstOrNew(['sort_order' => 1]);
             $galleryImage->alt = $data['name'];
 
@@ -603,6 +646,10 @@ class DatabaseSeeder extends Seeder
             ['number' => 'AT-DEMO-00001'],
             [
                 'customer_id' => $customer->id,
+                'currency_id' => $commerceSettings->default_currency_id,
+                'currency_code' => $currency->code,
+                'exchange_rate_to_base' => $currency->rate_to_base,
+                'warehouse_id' => $commerceSettings->default_warehouse_id,
                 'customer_name' => $customer->name,
                 'phone' => $customer->phone,
                 'email' => $customer->email,
@@ -621,6 +668,8 @@ class DatabaseSeeder extends Seeder
                     'product_name' => $demoProduct->name,
                     'sku' => $demoProduct->sku,
                     'quantity' => 1,
+                    'warehouse_id' => $commerceSettings->default_warehouse_id,
+                    'unit_price' => $demoProduct->price,
                     'price' => $demoProduct->price,
                     'total' => $demoProduct->price,
                 ],

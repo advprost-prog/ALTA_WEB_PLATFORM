@@ -4,6 +4,7 @@ namespace App\Filament\Widgets;
 
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\CommerceSetting;
 use App\Services\Catalog\ProductCompletenessService;
 use Filament\Support\Icons\Heroicon;
 use Filament\Widgets\StatsOverviewWidget;
@@ -47,6 +48,16 @@ class CommerceStatsOverview extends StatsOverviewWidget
                 ->where('stock', '<=', 0)
                 ->orWhere('stock_status', 'out_of_stock'))
             ->count();
+        $settings = CommerceSetting::current();
+        $negativeStock = Product::query()
+            ->where('stock', '<', 0)
+            ->count();
+        $withoutDefaultPrice = Product::query()
+            ->whereDoesntHave('prices', fn ($query) => $query->where('currency_id', $settings->default_currency_id))
+            ->count();
+        $withoutDefaultStockBalance = Product::query()
+            ->whereDoesntHave('stockBalances', fn ($query) => $query->where('warehouse_id', $settings->default_warehouse_id))
+            ->count();
 
         return [
             Stat::make('Замовлень', Order::count())
@@ -81,6 +92,18 @@ class CommerceStatsOverview extends StatsOverviewWidget
                 ->description('Потребують уваги')
                 ->descriptionIcon(Heroicon::OutlinedExclamationTriangle)
                 ->color($outOfStock > 0 ? 'danger' : 'success'),
+            Stat::make('Відʼємний залишок', $negativeStock)
+                ->description('Має бути 0')
+                ->descriptionIcon(Heroicon::OutlinedExclamationTriangle)
+                ->color($negativeStock > 0 ? 'danger' : 'success'),
+            Stat::make('Без дефолтної ціни', $withoutDefaultPrice)
+                ->description('Немає product_price')
+                ->descriptionIcon(Heroicon::OutlinedBanknotes)
+                ->color($withoutDefaultPrice > 0 ? 'warning' : 'success'),
+            Stat::make('Без дефолтного складу', $withoutDefaultStockBalance)
+                ->description('Немає stock_balance')
+                ->descriptionIcon(Heroicon::OutlinedArchiveBox)
+                ->color($withoutDefaultStockBalance > 0 ? 'warning' : 'success'),
             Stat::make('Оборот', number_format($activeRevenue, 0, '.', ' ') . ' ₴')
                 ->description('Без скасованих замовлень')
                 ->descriptionIcon(Heroicon::OutlinedBanknotes)

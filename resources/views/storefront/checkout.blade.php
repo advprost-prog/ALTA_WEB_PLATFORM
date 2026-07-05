@@ -22,6 +22,7 @@
 
         <form method="POST" action="{{ route('checkout.place') }}" class="mt-8 grid gap-8 lg:grid-cols-[1fr_420px]">
             @csrf
+            <input type="hidden" name="checkout_token" value="{{ $checkout_token }}">
             <div class="grid gap-5">
                 <div class="at-card p-5">
                     <h2 class="text-xl font-black text-white">Контакти</h2>
@@ -92,7 +93,7 @@
                             <img src="{{ $item['product']->image_url }}" alt="{{ $item['product']->image_alt_text ?: $item['product']->name }}" class="h-16 w-16 rounded object-cover" loading="lazy" onerror="this.onerror=null;this.src='{{ $productPlaceholder }}';">
                             <div>
                                 <div class="font-bold leading-5 text-white">{{ $item['product']->name }}</div>
-                                <div class="mt-1 text-sm text-zinc-500">{{ $item['quantity'] }} x {{ number_format((float) $item['product']->price, 0, '.', ' ') }} ₴</div>
+                                <div class="mt-1 text-sm text-zinc-500">{{ $item['quantity'] }} x {{ $item['formatted_unit_price'] }}</div>
                             </div>
                         </div>
                     @endforeach
@@ -104,7 +105,7 @@
                     </div>
                     <div class="flex items-center justify-between text-zinc-400">
                         <span>До сплати</span>
-                        <span class="text-3xl font-black text-white">{{ number_format($total, 0, '.', ' ') }} ₴</span>
+                        <span class="text-3xl font-black text-white">{{ app(\App\Services\Commerce\ProductPricingService::class)->formatAmount($total, $currency) }}</span>
                     </div>
                 </div>
                 <button class="btn-primary mt-6 w-full">Підтвердити замовлення</button>

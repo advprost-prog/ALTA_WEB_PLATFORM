@@ -96,6 +96,18 @@
                         <a class="nav-link" href="{{ route('about') }}">Про нас</a>
                         <a class="nav-link" href="{{ route('contacts') }}">Контакти</a>
                     </nav>
+                    @if ($storefrontCurrencySwitcherVisible ?? false)
+                        <form method="POST" action="{{ route('currency.switch') }}" class="hidden sm:block">
+                            @csrf
+                            <input type="hidden" name="redirect_to" value="{{ request()->fullUrl() }}">
+                            <label for="currency-switcher" class="sr-only">Валюта</label>
+                            <select id="currency-switcher" name="currency_id" class="rounded border border-white/15 bg-neutral-950 px-2 py-2 text-xs font-black uppercase text-white outline-none transition hover:border-amber-300 focus:border-amber-300" onchange="this.form.submit()">
+                                @foreach (($storefrontActiveCurrencies ?? collect()) as $currency)
+                                    <option value="{{ $currency->id }}" @selected(($storefrontCurrentCurrency ?? null)?->id === $currency->id)>{{ $currency->code }}</option>
+                                @endforeach
+                            </select>
+                        </form>
+                    @endif
                     <a href="{{ route('cart') }}" class="inline-flex items-center gap-2 rounded bg-white px-3 py-2 text-sm font-black text-neutral-950 transition hover:bg-amber-300 sm:px-4">
                         <span class="hidden sm:inline">Кошик</span>
                         <span class="grid h-6 min-w-6 place-items-center rounded bg-neutral-950 px-2 text-xs text-white">{{ $cartCount }}</span>
@@ -120,6 +132,18 @@
                             <a href="{{ route('category.show', $category) }}" class="rounded border border-white/10 px-4 py-3 text-sm font-bold text-zinc-200">{{ $category->name }}</a>
                         @endforeach
                     </div>
+                    @endif
+                    @if ($storefrontCurrencySwitcherVisible ?? false)
+                        <form method="POST" action="{{ route('currency.switch') }}">
+                            @csrf
+                            <input type="hidden" name="redirect_to" value="{{ request()->fullUrl() }}">
+                            <label for="mobile-currency-switcher" class="sr-only">Валюта</label>
+                            <select id="mobile-currency-switcher" name="currency_id" class="field" onchange="this.form.submit()">
+                                @foreach (($storefrontActiveCurrencies ?? collect()) as $currency)
+                                    <option value="{{ $currency->id }}" @selected(($storefrontCurrentCurrency ?? null)?->id === $currency->id)>{{ $currency->code }}</option>
+                                @endforeach
+                            </select>
+                        </form>
                     @endif
                     <nav class="grid gap-2 text-sm font-black uppercase text-zinc-300">
                         <a class="rounded px-2 py-2 hover:text-amber-300" href="{{ route('delivery-payment') }}">Доставка і оплата</a>
