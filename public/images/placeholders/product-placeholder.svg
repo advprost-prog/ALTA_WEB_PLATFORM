@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" role="img" aria-labelledby="title desc">
+  <title id="title">Alta-Trade Product Placeholder</title>
+  <desc id="desc">Dark Alta-Trade product placeholder with amber and cyan accents.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#101114"/>
+      <stop offset="0.58" stop-color="#17191d"/>
+      <stop offset="1" stop-color="#050607"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" x2="1">
+      <stop offset="0" stop-color="#ffb703"/>
+      <stop offset="1" stop-color="#18d7ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="900" fill="url(#bg)"/>
+  <path d="M0 700h1200v200H0z" fill="#0b0c0f"/>
+  <path d="M120 690h960" stroke="url(#accent)" stroke-width="10" stroke-linecap="round"/>
+  <path d="M242 500h716l-74-168c-15-34-45-55-82-55H401c-36 0-67 21-82 55l-77 168Z" fill="#202329" stroke="#3f444d" stroke-width="8"/>
+  <path d="M365 505h470" stroke="#ffb703" stroke-width="24" stroke-linecap="round"/>
+  <circle cx="374" cy="574" r="78" fill="#101114" stroke="#18d7ff" stroke-width="16"/>
+  <circle cx="826" cy="574" r="78" fill="#101114" stroke="#18d7ff" stroke-width="16"/>
+  <path d="M410 332h380l48 108H360z" fill="#15171b" stroke="#18d7ff" stroke-opacity=".45" stroke-width="6"/>
+  <rect x="86" y="86" width="220" height="70" rx="8" fill="#ffb703"/>
+  <text x="196" y="132" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="900" fill="#101114">ALTA-TRADE</text>
+  <text x="600" y="760" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="82" font-weight="900" fill="#f8fafc">Product</text>
+  <text x="600" y="818" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" fill="#9ca3af">stable local fallback image</text>
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900">
+  <rect width="1200" height="900" fill="#101114"/>
+  <path d="M0 650h1200v250H0z" fill="#050607"/>
+  <path d="M155 676h890" stroke="#ffb703" stroke-width="12" stroke-linecap="round"/>
+  <rect x="420" y="230" width="310" height="410" rx="34" fill="#202329" stroke="#18d7ff" stroke-width="10"/>
+  <path d="M485 180h180v80H485z" fill="#ffb703"/>
+  <path d="M458 370h244v126H458z" fill="#15171b"/>
+  <text x="580" y="448" text-anchor="middle" font-family="Arial" font-size="62" font-weight="900" fill="#ffb703">5W-30</text>
+  <text x="600" y="760" text-anchor="middle" font-family="Arial" font-size="64" font-weight="900" fill="#f8fafc">Motor Oils</text>
+</svg>

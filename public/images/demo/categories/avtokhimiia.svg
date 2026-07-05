@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900">
+  <rect width="1200" height="900" fill="#101114"/>
+  <path d="M0 650h1200v250H0z" fill="#050607"/>
+  <rect x="455" y="285" width="290" height="360" rx="38" fill="#202329" stroke="#18d7ff" stroke-width="10"/>
+  <rect x="500" y="210" width="200" height="88" rx="16" fill="#ffb703"/>
+  <path d="M500 430h200" stroke="#ffb703" stroke-width="24" stroke-linecap="round"/>
+  <path d="M770 245c95 15 156 62 183 138" stroke="#18d7ff" stroke-width="18" stroke-linecap="round"/>
+  <text x="600" y="760" text-anchor="middle" font-family="Arial" font-size="64" font-weight="900" fill="#f8fafc">Auto Chemistry</text>
+</svg>

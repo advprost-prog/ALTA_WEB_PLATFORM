@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900">
+  <rect width="1200" height="900" fill="#101114"/>
+  <path d="M360 605 710 255l116 116-350 350z" fill="#202329" stroke="#18d7ff" stroke-width="10"/>
+  <circle cx="770" cy="315" r="74" fill="#101114" stroke="#ffb703" stroke-width="20"/>
+  <path d="M352 600l-72 72" stroke="#ffb703" stroke-width="34" stroke-linecap="round"/>
+  <text x="600" y="805" text-anchor="middle" font-family="Arial" font-size="54" font-weight="900" fill="#f8fafc">Tools</text>
+</svg>

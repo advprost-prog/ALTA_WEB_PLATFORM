@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900">
+  <rect width="1200" height="900" fill="#101114"/>
+  <path d="M0 650h1200v250H0z" fill="#050607"/>
+  <circle cx="600" cy="430" r="210" fill="#202329" stroke="#18d7ff" stroke-width="12"/>
+  <circle cx="600" cy="430" r="76" fill="#101114" stroke="#ffb703" stroke-width="14"/>
+  <path d="M600 222v96M600 542v96M392 430h96M712 430h96" stroke="#3f444d" stroke-width="18" stroke-linecap="round"/>
+  <rect x="730" y="315" width="130" height="230" rx="26" fill="#ffb703"/>
+  <text x="600" y="760" text-anchor="middle" font-family="Arial" font-size="64" font-weight="900" fill="#f8fafc">Brake System</text>
+</svg>

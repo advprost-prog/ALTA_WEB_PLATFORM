@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" role="img" aria-labelledby="title desc">
+  <title id="title">Alta-Trade Category Placeholder</title>
+  <desc id="desc">Dark Alta-Trade category placeholder with amber and cyan accents.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#101114"/>
+      <stop offset="0.55" stop-color="#1b1e24"/>
+      <stop offset="1" stop-color="#050607"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" x2="1">
+      <stop offset="0" stop-color="#18d7ff"/>
+      <stop offset="1" stop-color="#ffb703"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="900" fill="url(#bg)"/>
+  <path d="M0 0h1200v180H0z" fill="#0b0c0f"/>
+  <path d="M110 210h980v476H110z" fill="#15171b" stroke="#30343b" stroke-width="8"/>
+  <path d="M190 290h250v140H190zM475 290h250v140H475zM760 290h250v140H760zM190 470h250v140H190zM475 470h250v140H475zM760 470h250v140H760z" fill="#202329" stroke="#3f444d" stroke-width="6"/>
+  <path d="M190 650h820" stroke="url(#accent)" stroke-width="12" stroke-linecap="round"/>
+  <rect x="86" y="74" width="220" height="70" rx="8" fill="#ffb703"/>
+  <text x="196" y="120" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="900" fill="#101114">ALTA-TRADE</text>
+  <text x="600" y="778" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="82" font-weight="900" fill="#f8fafc">Category</text>
+  <text x="600" y="836" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" fill="#9ca3af">stable local fallback image</text>
+</svg>

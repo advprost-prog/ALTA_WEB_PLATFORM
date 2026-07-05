@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 700">
+  <rect width="1600" height="700" fill="#101114"/>
+  <path d="M0 510h1600v190H0z" fill="#050607"/>
+  <path d="M102 493h980" stroke="#ffb703" stroke-width="12" stroke-linecap="round"/>
+  <path d="M900 185c220 0 360 105 460 270H690c48-162 108-270 210-270Z" fill="#202329" stroke="#18d7ff" stroke-width="10"/>
+  <text x="112" y="260" font-family="Arial" font-size="96" font-weight="900" fill="#f8fafc">Alta-Trade</text>
+  <text x="118" y="330" font-family="Arial" font-size="36" font-weight="700" fill="#ffb703">commerce engine demo banner</text>
+</svg>
