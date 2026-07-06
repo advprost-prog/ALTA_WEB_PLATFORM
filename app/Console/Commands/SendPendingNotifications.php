@@ -6,6 +6,7 @@ use App\Enums\NotificationChannel;
 use App\Enums\NotificationStatus;
 use App\Enums\OrderNotificationEvent;
 use App\Models\NotificationOutbox;
+use App\Services\Commerce\NotificationMailManager;
 use App\Services\Commerce\OrderNotificationService;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
@@ -22,7 +23,7 @@ class SendPendingNotifications extends Command
 
     protected $description = 'Send pending notification outbox records without changing order lifecycle or stock.';
 
-    public function handle(OrderNotificationService $notifications): int
+    public function handle(OrderNotificationService $notifications, NotificationMailManager $mail): int
     {
         $limit = max(1, min(500, (int) $this->option('limit')));
         $dryRun = (bool) $this->option('dry-run');
@@ -62,6 +63,10 @@ class SendPendingNotifications extends Command
         $this->line('limit: '.$limit);
         $this->line('matched: '.$pending->count());
 
+        $delivery = $mail->summary();
+        $this->line('delivery_source: '.(string) $delivery['source']);
+        $this->line('delivery_mailer: '.(string) $delivery['mailer']);
+
         $summary = [
             'processed' => 0,
             'sent' => 0,
@@ -84,7 +89,7 @@ class SendPendingNotifications extends Command
             } catch (Throwable $exception) {
                 $notification->forceFill([
                     'status' => NotificationStatus::Failed->value,
-                    'error_message' => mb_substr($this->safeError($exception), 0, 2000),
+                    'error_message' => mb_substr($mail->redact($exception->getMessage()), 0, 2000),
                     'sent_at' => null,
                 ])->save();
 
@@ -120,36 +125,5 @@ class SendPendingNotifications extends Command
         $value = trim((string) $value);
 
         return $value === '' ? null : $value;
-    }
-
-    private function safeError(Throwable $exception): string
-    {
-        $message = trim($exception->getMessage());
-
-        if ($message === '') {
-            $message = $exception::class;
-        }
-
-        foreach ($this->mailSecrets() as $secret) {
-            $message = str_replace($secret, '[redacted]', $message);
-        }
-
-        return $message;
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function mailSecrets(): array
-    {
-        return collect([
-            config('mail.mailers.smtp.username'),
-            config('mail.mailers.smtp.password'),
-        ])
-            ->filter(fn (mixed $value): bool => is_string($value) && trim($value) !== '')
-            ->map(fn (string $value): string => trim($value))
-            ->unique()
-            ->values()
-            ->all();
     }
 }

@@ -2,19 +2,22 @@
 
 namespace App\Console\Commands;
 
-use App\Mail\OrderNotificationMail;
+use App\Services\Commerce\NotificationMailManager;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Throwable;
 
 class TestNotificationEmail extends Command
 {
-    protected $signature = 'notifications:test-email {email}';
+    protected $signature = 'notifications:test-email
+        {email}
+        {--env-only : Use Laravel environment mail config only}
+        {--db-only : Use admin-configured notification mail settings only}
+        {--no-save-result : Do not update DB settings last test status}';
 
     protected $description = 'Send a technical test email for notification delivery without writing order data.';
 
-    public function handle(): int
+    public function handle(NotificationMailManager $mail): int
     {
         $email = trim((string) $this->argument('email'));
         $validator = Validator::make(['email' => $email], [
@@ -27,15 +30,32 @@ class TestNotificationEmail extends Command
             return self::FAILURE;
         }
 
-        $this->line('current_mailer: '.(string) config('mail.default'));
+        if ($this->option('env-only') && $this->option('db-only')) {
+            $this->error('Use only one of --env-only or --db-only.');
+
+            return self::FAILURE;
+        }
+
+        $source = match (true) {
+            (bool) $this->option('env-only') => NotificationMailManager::SOURCE_ENV,
+            (bool) $this->option('db-only') => NotificationMailManager::SOURCE_DB,
+            default => NotificationMailManager::SOURCE_AUTO,
+        };
+
+        $summary = $mail->summary($source);
+
+        $this->line('current_source: '.(string) $summary['source']);
+        $this->line('current_mailer: '.(string) $summary['mailer']);
+        $this->line('from_address: '.((string) ($summary['from_address'] ?? '') ?: '-'));
 
         try {
-            Mail::to($email)->send(new OrderNotificationMail(
-                notificationSubject: 'Тестове повідомлення ALTA',
-                notificationBody: 'Це тестове повідомлення для перевірки email-доставки ALTA_WEB_PLATFORM.',
-            ));
+            $mail->sendTestEmail(
+                recipient: $email,
+                source: $source,
+                saveResult: ! $this->option('no-save-result'),
+            );
         } catch (Throwable $exception) {
-            $this->error('Email delivery failed: '.$this->safeError($exception));
+            $this->error('Email delivery failed: '.$mail->redact($exception->getMessage()));
 
             return self::FAILURE;
         }
@@ -43,36 +63,5 @@ class TestNotificationEmail extends Command
         $this->info('Email delivery succeeded.');
 
         return self::SUCCESS;
-    }
-
-    private function safeError(Throwable $exception): string
-    {
-        $message = trim($exception->getMessage());
-
-        if ($message === '') {
-            $message = $exception::class;
-        }
-
-        foreach ($this->mailSecrets() as $secret) {
-            $message = str_replace($secret, '[redacted]', $message);
-        }
-
-        return $message;
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function mailSecrets(): array
-    {
-        return collect([
-            config('mail.mailers.smtp.username'),
-            config('mail.mailers.smtp.password'),
-        ])
-            ->filter(fn (mixed $value): bool => is_string($value) && trim($value) !== '')
-            ->map(fn (string $value): string => trim($value))
-            ->unique()
-            ->values()
-            ->all();
     }
 }

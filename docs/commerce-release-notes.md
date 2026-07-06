@@ -101,7 +101,7 @@ Multi-warehouse mode:
 7. Run `php artisan route:clear`
 8. Run `php artisan view:clear`
 9. Run `php artisan commerce:health-check`
-10. For email delivery, set `MAIL_*` in the environment; never commit SMTP credentials
+10. For email delivery, set `MAIL_*` in the environment or configure `Сервер повідомлень` in admin; never commit SMTP credentials
 11. Run `php artisan config:clear`
 12. Run `php artisan notifications:test-email test@example.com`
 13. Run `php artisan notifications:send-pending --dry-run`
@@ -123,4 +123,5 @@ Do not use `php artisan migrate:fresh` on staging or production.
 - payment and delivery method names are snapshotted on each order
 - manual `paid` status does not imply a real payment gateway transaction
 - post-shipment returns remain out of scope and should not be modeled as a simple cancel
+- notification mail server settings can be managed in admin; passwords are encrypted in DB and `.env` remains a fallback
 - see `docs/order-lifecycle.md` for the current transition map and stabilization rules

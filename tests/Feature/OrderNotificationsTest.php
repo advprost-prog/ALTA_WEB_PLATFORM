@@ -196,10 +196,22 @@ class OrderNotificationsTest extends TestCase
         [$order] = $this->placeCheckoutOrder(email: null);
         $order->forceFill(['email' => 'buyer@example.test'])->save();
 
-        Mail::shouldReceive('to')
+        Mail::shouldReceive('mailer')
             ->once()
-            ->with('buyer@example.test')
-            ->andThrow(new RuntimeException('SMTP transport down'));
+            ->with((string) config('mail.default'))
+            ->andReturn(new class
+            {
+                public function to(string $email): object
+                {
+                    return new class
+                    {
+                        public function send(OrderNotificationMail $mail): void
+                        {
+                            throw new RuntimeException('SMTP transport down');
+                        }
+                    };
+                }
+            });
 
         app(OrderLifecycleService::class)->confirm($order, $this->createUserWithRole(UserRole::Manager));
 
@@ -215,10 +227,22 @@ class OrderNotificationsTest extends TestCase
 
     public function test_mailer_failure_does_not_rollback_checkout(): void
     {
-        Mail::shouldReceive('to')
+        Mail::shouldReceive('mailer')
             ->once()
-            ->with('buyer@example.test')
-            ->andThrow(new RuntimeException('SMTP transport down'));
+            ->with((string) config('mail.default'))
+            ->andReturn(new class
+            {
+                public function to(string $email): object
+                {
+                    return new class
+                    {
+                        public function send(OrderNotificationMail $mail): void
+                        {
+                            throw new RuntimeException('SMTP transport down');
+                        }
+                    };
+                }
+            });
 
         [$order] = $this->placeCheckoutOrder(email: 'buyer@example.test');
 

@@ -11,6 +11,7 @@ use App\Enums\PaymentStatus;
 use App\Models\CommerceSetting;
 use App\Models\Currency;
 use App\Models\DeliveryMethod;
+use App\Models\NotificationMailSetting;
 use App\Models\NotificationOutbox;
 use App\Models\NotificationTemplate;
 use App\Models\Order;
@@ -23,6 +24,7 @@ use App\Models\StockMovement;
 use App\Models\Warehouse;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 
 class CommerceHealthCheck extends Command
 {
@@ -762,6 +764,106 @@ class CommerceHealthCheck extends Command
     {
         $environment = (string) config('app.env', app()->environment());
         $isProduction = $environment === 'production';
+        $critical = [];
+        $warnings = [];
+
+        if (! Schema::hasTable('notification_mail_settings')) {
+            $critical[] = $this->issue(
+                true,
+                'notification_mail_settings_table_missing',
+                'Таблиця notification_mail_settings відсутня. Запустіть міграції.',
+            );
+
+            [$envCritical, $envWarnings] = $this->envMailIssues($isProduction);
+
+            return [
+                array_merge($critical, $envCritical),
+                array_merge($warnings, $envWarnings),
+            ];
+        }
+
+        $settingsCount = NotificationMailSetting::query()->count();
+        $settings = NotificationMailSetting::query()->orderBy('id')->first();
+
+        $warnings[] = $this->issue(
+            $settingsCount === 0,
+            'notification_mail_settings_missing',
+            'Немає запису notification mail settings. Буде використано env fallback.',
+        );
+        $warnings[] = $this->issue(
+            $settingsCount > 1,
+            'notification_mail_settings_multiple',
+            'Знайдено кілька записів notification mail settings. Використовується перший за ID.',
+            $this->sampleList($this->ids(NotificationMailSetting::query()->orderBy('id')->limit(10)->get())),
+        );
+
+        if (! $settings?->is_enabled) {
+            [$envCritical, $envWarnings] = $this->envMailIssues($isProduction);
+
+            return [
+                array_merge($critical, $envCritical),
+                array_merge($warnings, $envWarnings),
+            ];
+        }
+
+        $mailer = $settings->normalizedMailer();
+        $errors = $settings->configurationErrors();
+
+        $critical[] = $this->issue(
+            in_array('mailer', $errors, true),
+            'notification_mail_settings_mailer_invalid',
+            'DB notification mail settings має невідомий mailer.',
+            ['mailer='.$mailer],
+        );
+        $critical[] = $this->issue(
+            in_array('host', $errors, true),
+            'notification_mail_settings_smtp_host_missing',
+            'DB SMTP override увімкнений, але host порожній.',
+        );
+        $critical[] = $this->issue(
+            in_array('port', $errors, true),
+            'notification_mail_settings_smtp_port_missing',
+            'DB SMTP override увімкнений, але port порожній.',
+        );
+        $critical[] = $this->issue(
+            in_array('from_address', $errors, true),
+            'notification_mail_settings_from_address_invalid',
+            'DB notification MAIL_FROM_ADDRESS порожній або невалідний.',
+            filled($settings->from_address) ? ['from='.$settings->from_address] : [],
+        );
+        $critical[] = $this->issue(
+            in_array('encryption', $errors, true),
+            'notification_mail_settings_encryption_invalid',
+            'DB notification mail encryption має бути none, tls або ssl.',
+            ['encryption='.($settings->encryption ?: 'none')],
+        );
+        $critical[] = $this->issue(
+            in_array('password_decrypt', $errors, true),
+            'notification_mail_settings_password_decrypt_failed',
+            'SMTP password у DB settings неможливо розшифрувати. Перевірте APP_KEY або очистіть пароль.',
+        );
+
+        $warnings[] = $this->issue(
+            $isProduction && in_array($mailer, ['log', 'array'], true),
+            'notification_mail_settings_non_smtp_in_production',
+            'Production notification mail override використовує non-SMTP mailer.',
+            ['mailer='.$mailer],
+        );
+        $warnings[] = $this->issue(
+            $settings->last_test_status === NotificationMailSetting::TEST_STATUS_FAILED,
+            'notification_mail_settings_last_test_failed',
+            'Останній тест notification mail settings завершився помилкою.',
+            $settings->last_test_error ? [$settings->last_test_error] : [],
+        );
+
+        return [$critical, $warnings];
+    }
+
+    /**
+     * @return array{0: array<int, array{code: string, message: string, count: int, examples: array<int, string>}|null>, 1: array<int, array{code: string, message: string, count: int, examples: array<int, string>}|null>}
+     */
+    private function envMailIssues(bool $isProduction): array
+    {
         $mailer = trim((string) config('mail.default', ''));
         $smtp = (array) config('mail.mailers.smtp', []);
         $smtpHost = trim((string) ($smtp['host'] ?? ''));

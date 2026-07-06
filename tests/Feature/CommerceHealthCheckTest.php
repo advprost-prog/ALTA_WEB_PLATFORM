@@ -7,6 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\CommerceSetting;
 use App\Models\DeliveryMethod;
+use App\Models\NotificationMailSetting;
 use App\Models\Order;
 use App\Models\PaymentMethod;
 use App\Models\ProductPrice;
@@ -72,6 +73,44 @@ class CommerceHealthCheckTest extends TestCase
             ->expectsOutputToContain('mail_smtp_host_missing')
             ->expectsOutputToContain('mail_smtp_port_missing')
             ->expectsOutputToContain('mail_from_address_missing')
+            ->assertExitCode(1);
+    }
+
+    public function test_commerce_health_check_reports_incomplete_db_mail_settings(): void
+    {
+        CommerceSetting::current();
+        NotificationMailSetting::current()->forceFill([
+            'is_enabled' => true,
+            'mailer' => 'smtp',
+            'host' => '',
+            'port' => null,
+            'from_address' => '',
+        ])->save();
+
+        $this->artisan('commerce:health-check')
+            ->expectsOutputToContain('notification_mail_settings_smtp_host_missing')
+            ->expectsOutputToContain('notification_mail_settings_smtp_port_missing')
+            ->expectsOutputToContain('notification_mail_settings_from_address_invalid')
+            ->assertExitCode(1);
+    }
+
+    public function test_commerce_health_check_reports_db_mail_password_decrypt_failure_without_secret(): void
+    {
+        CommerceSetting::current();
+        NotificationMailSetting::current()->forceFill([
+            'is_enabled' => true,
+            'mailer' => 'smtp',
+            'host' => 'smtp.example.test',
+            'port' => 587,
+            'from_address' => 'shop@example.test',
+            'username' => 'smtp-user@example.test',
+            'password_encrypted' => 'not-a-valid-encrypted-payload',
+        ])->save();
+
+        $this->artisan('commerce:health-check --json')
+            ->expectsOutputToContain('notification_mail_settings_password_decrypt_failed')
+            ->doesntExpectOutputToContain('smtp-user@example.test')
+            ->doesntExpectOutputToContain('not-a-valid-encrypted-payload')
             ->assertExitCode(1);
     }
 

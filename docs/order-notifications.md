@@ -131,11 +131,16 @@ Invalid transitions do not create notifications. Repeated cancel is blocked befo
 
 Email uses Laravel Mail with `OrderNotificationMail`. SMTP credentials are not stored in code and `.env` is not modified by this feature.
 
+Notification email delivery resolves settings in this order:
+
+1. Admin-configured notification mail settings from the database, when enabled and complete.
+2. Laravel mail configuration from environment variables when the DB override is disabled or incomplete.
+
 If the project uses the default local `log` mailer, mail is treated as sent by Laravel and written to logs. If a real SMTP mailer is configured and sending fails, the outbox row is marked `failed`; the order status change remains committed.
 
 ### SMTP Setup
 
-Production email delivery should be configured through environment variables only:
+Production email delivery can be configured from the admin panel or through environment variables. Environment variables remain the fallback and are still the preferred DevOps-level baseline:
 
 - `MAIL_MAILER=smtp`
 - `MAIL_HOST`
@@ -150,15 +155,47 @@ Do not commit SMTP usernames, passwords, tokens, or `.env`. Local and staging en
 
 `config/mail.php` supports both Laravel's `MAIL_SCHEME` key and the operator-facing `MAIL_ENCRYPTION` key for SMTP encryption.
 
+Encryption mode always depends on the selected SMTP provider and port:
+
+- `ssl`: implicit SSL, commonly port `465`; use this when the provider explicitly requires SSL.
+- `tls`: STARTTLS upgrade, only when the SMTP server supports STARTTLS on the selected port.
+- `none`: no transport encryption; not recommended for production.
+
+### Admin Mail Settings
+
+Admins can configure notification email delivery in the Filament page `Сервер повідомлень` under `Налаштування / Повідомлення`.
+
+The page stores application-level notification mail settings in `notification_mail_settings`; it never edits `.env`.
+
+Supported fields:
+
+- enable/disable notification SMTP override
+- mailer: `smtp`, `log`, or `array`
+- SMTP host, port, encryption, timeout, and TLS peer verification
+- username and encrypted password
+- from address and from name
+
+The SMTP password is encrypted with Laravel Crypt before it is written to the database. The full password is never rendered back in the form, returned in JSON, printed by CLI commands, or included in health-check output. Leaving the password field empty on save keeps the existing password. Use the explicit `Очистити пароль` action to remove it.
+
+The admin page can send a test email using the saved DB settings and records `last_tested_at`, `last_test_status`, and a redacted `last_test_error`. If the application key changes and the saved password cannot be decrypted, health-check reports it instead of throwing a fatal error.
+
+Resend and `notifications:send-pending` use the current settings at send time. If an admin changes SMTP settings, the next resend attempt uses the new settings.
+
 ### Test Email Command
 
-Use this command to verify Laravel Mail transport without creating order data or notification outbox rows:
+Use this command to verify the same notification delivery path without creating order data or notification outbox rows:
 
 ```bash
 php artisan notifications:test-email test@example.com
 ```
 
-The command validates the email address, prints the current mailer, sends a simple technical email, returns exit code `0` on success, and returns exit code `1` on failure. It redacts configured SMTP username/password values from failure output.
+The command validates the email address, prints the current source (`db` or `env`), current mailer, and from address, sends a simple technical email, returns exit code `0` on success, and returns exit code `1` on failure. It redacts configured SMTP username/password values from failure output.
+
+Options:
+
+- `--env-only`
+- `--db-only`
+- `--no-save-result`
 
 ### Send Pending Command
 
@@ -178,7 +215,7 @@ Options:
 
 The command only selects `pending` rows. It does not touch `sent` history, order statuses, stock balances, or stock movements. It continues processing if one notification fails and prints a summary with `processed`, `sent`, `failed`, and `skipped`.
 
-`--dry-run` lists matching rows without sending mail or mutating the database.
+The command prints the current delivery source and mailer without exposing credentials. `--dry-run` lists matching rows without sending mail or mutating the database.
 
 ### Retry Policy
 
@@ -193,7 +230,7 @@ The command only selects `pending` rows. It does not touch `sent` history, order
 Filament resources:
 
 - `NotificationTemplateResource`: list/view/edit templates, filter by event/channel/activity, edit subject/body/is_active, show available variables, and warn that PHP/Blade/eval are not executed.
-- `NotificationOutboxResource`: read-only list/view of notification attempts, shows channel/status/current mailer/error message, filters by order/event/channel/status/date, resend action for `pending`, `failed`, and `skipped`.
+- `NotificationOutboxResource`: read-only list/view of notification attempts, shows channel/status/mail source/mailer/error message, filters by order/event/channel/status/date, resend action for `pending`, `failed`, and `skipped`.
 
 `OrderResource` view includes a read-only `Повідомлення` section with outbox rows for the order. It also exposes a resend action for resendable notifications on that order.
 
@@ -213,13 +250,19 @@ Filament resources:
 - missing production SMTP configuration: critical
 - incomplete local SMTP configuration when `MAIL_MAILER=smtp`: warning
 - invalid `MAIL_FROM_ADDRESS`: warning or critical depending on environment
+- missing or duplicate DB notification mail settings: warning
+- enabled but incomplete DB notification mail settings: critical
+- DB SMTP password decrypt failure: critical
+- failed last DB test email: warning
 
 Warnings do not fail the command. Critical issues still make the command exit non-zero.
 
 ## Security Notes
 
-- SMTP credentials live in environment variables, not in Git.
+- SMTP credentials live in environment variables or encrypted DB settings, not in Git.
 - `.env` must not be committed.
+- The admin page does not edit `.env`.
+- DB SMTP passwords are stored encrypted with Laravel Crypt.
 - Template content is rendered through a simple variable replacer, not PHP, Blade, or `eval`.
 - Rendered email body content is escaped by the mail view.
 - Transport failures are written to outbox as redacted `error_message` text where configured SMTP username/password values are known.

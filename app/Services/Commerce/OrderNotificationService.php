@@ -14,12 +14,15 @@ use App\Models\NotificationTemplate;
 use App\Models\Order;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use RuntimeException;
 use Throwable;
 
 class OrderNotificationService
 {
+    public function __construct(
+        private readonly NotificationMailManager $mailManager,
+    ) {}
+
     /**
      * @param  array<string, mixed>  $extraPayload
      */
@@ -77,7 +80,7 @@ class OrderNotificationService
                 NotificationChannel::Log => $this->sendLog($notification),
             };
         } catch (Throwable $exception) {
-            return $this->fail($notification, $exception->getMessage());
+            return $this->fail($notification, $exception->getMessage(), $this->mailManager->lastSummary());
         }
     }
 
@@ -263,12 +266,19 @@ class OrderNotificationService
             return $this->skip($notification, 'У замовленні немає email клієнта.');
         }
 
-        Mail::to($notification->recipient)->send(new OrderNotificationMail(
-            notificationSubject: $notification->subject ?: 'Повідомлення щодо замовлення',
-            notificationBody: (string) $notification->body,
-        ));
+        try {
+            $summary = $this->mailManager->send(
+                recipient: $notification->recipient,
+                mailable: new OrderNotificationMail(
+                    notificationSubject: $notification->subject ?: 'Повідомлення щодо замовлення',
+                    notificationBody: (string) $notification->body,
+                ),
+            );
+        } catch (Throwable $exception) {
+            return $this->fail($notification, $exception->getMessage(), $this->mailManager->lastSummary());
+        }
 
-        return $this->markSent($notification);
+        return $this->markSent($notification, $summary);
     }
 
     private function sendLog(NotificationOutbox $notification): NotificationOutbox
@@ -285,34 +295,46 @@ class OrderNotificationService
         return $this->markSent($notification);
     }
 
-    private function markSent(NotificationOutbox $notification): NotificationOutbox
+    /**
+     * @param  array<string, mixed>|null  $mailSummary
+     */
+    private function markSent(NotificationOutbox $notification, ?array $mailSummary = null): NotificationOutbox
     {
         $notification->forceFill([
             'status' => NotificationStatus::Sent->value,
             'error_message' => null,
             'sent_at' => now(),
+            'payload' => $this->payloadWithMailSummary($notification, $mailSummary),
         ])->save();
 
         return $notification->refresh();
     }
 
-    private function skip(NotificationOutbox $notification, string $reason): NotificationOutbox
+    /**
+     * @param  array<string, mixed>|null  $mailSummary
+     */
+    private function skip(NotificationOutbox $notification, string $reason, ?array $mailSummary = null): NotificationOutbox
     {
         $notification->forceFill([
             'status' => NotificationStatus::Skipped->value,
             'error_message' => $this->cleanError($reason),
             'sent_at' => null,
+            'payload' => $this->payloadWithMailSummary($notification, $mailSummary),
         ])->save();
 
         return $notification->refresh();
     }
 
-    private function fail(NotificationOutbox $notification, string $reason): NotificationOutbox
+    /**
+     * @param  array<string, mixed>|null  $mailSummary
+     */
+    private function fail(NotificationOutbox $notification, string $reason, ?array $mailSummary = null): NotificationOutbox
     {
         $notification->forceFill([
             'status' => NotificationStatus::Failed->value,
             'error_message' => $this->cleanError($reason),
             'sent_at' => null,
+            'payload' => $this->payloadWithMailSummary($notification, $mailSummary),
         ])->save();
 
         return $notification->refresh();
@@ -320,28 +342,27 @@ class OrderNotificationService
 
     private function cleanError(string $reason): string
     {
-        $reason = trim($reason);
-
-        foreach ($this->mailSecrets() as $secret) {
-            $reason = str_replace($secret, '[redacted]', $reason);
-        }
-
-        return mb_substr($reason, 0, 2000);
+        return mb_substr($this->mailManager->redact(trim($reason)), 0, 2000);
     }
 
     /**
-     * @return array<int, string>
+     * @param  array<string, mixed>|null  $mailSummary
+     * @return array<string, mixed>|null
      */
-    private function mailSecrets(): array
+    private function payloadWithMailSummary(NotificationOutbox $notification, ?array $mailSummary): ?array
     {
-        return collect([
-            config('mail.mailers.smtp.username'),
-            config('mail.mailers.smtp.password'),
-        ])
-            ->filter(fn (mixed $value): bool => is_string($value) && trim($value) !== '')
-            ->map(fn (string $value): string => trim($value))
-            ->unique()
-            ->values()
-            ->all();
+        $payload = $notification->payload ?? [];
+
+        if ($mailSummary === null) {
+            return $payload === [] ? null : $payload;
+        }
+
+        $payload['mail'] = [
+            'source' => (string) ($mailSummary['source'] ?? 'env'),
+            'mailer' => (string) ($mailSummary['mailer'] ?? config('mail.default')),
+            'from_address' => $mailSummary['from_address'] ?? null,
+        ];
+
+        return $payload;
     }
 }

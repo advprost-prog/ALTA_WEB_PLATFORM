@@ -59,9 +59,13 @@ class NotificationOutboxResource extends Resource
                     ->label('Канал')
                     ->formatStateUsing(fn (?string $state): string => NotificationChannel::labelFor($state))
                     ->badge(),
+                TextEntry::make('mail_source')
+                    ->label('Mail source')
+                    ->state(fn (NotificationOutbox $record): string => (string) data_get($record->payload, 'mail.source', '-'))
+                    ->badge(),
                 TextEntry::make('mailer')
                     ->label('Mailer')
-                    ->state(fn (): string => (string) config('mail.default'))
+                    ->state(fn (NotificationOutbox $record): string => (string) data_get($record->payload, 'mail.mailer', '-'))
                     ->badge(),
                 TextEntry::make('recipient')->label('Отримувач')->placeholder('-'),
                 TextEntry::make('status')
@@ -99,9 +103,14 @@ class NotificationOutboxResource extends Resource
                     ->label('Канал')
                     ->formatStateUsing(fn (?string $state): string => NotificationChannel::labelFor($state))
                     ->badge(),
+                TextColumn::make('mail_source')
+                    ->label('Mail source')
+                    ->state(fn (NotificationOutbox $record): string => (string) data_get($record->payload, 'mail.source', '-'))
+                    ->badge()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('mailer')
                     ->label('Mailer')
-                    ->state(fn (): string => (string) config('mail.default'))
+                    ->state(fn (NotificationOutbox $record): string => (string) data_get($record->payload, 'mail.mailer', '-'))
                     ->badge()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('recipient')

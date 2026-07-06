@@ -6,8 +6,10 @@ use App\Enums\NotificationChannel;
 use App\Enums\NotificationStatus;
 use App\Enums\OrderNotificationEvent;
 use App\Mail\OrderNotificationMail;
+use App\Models\NotificationMailSetting;
 use App\Models\NotificationOutbox;
 use App\Models\Order;
+use App\Services\Commerce\NotificationMailManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
 use RuntimeException;
@@ -29,6 +31,7 @@ class NotificationMailCommandsTest extends TestCase
         Mail::fake();
 
         $this->artisan('notifications:test-email buyer@example.test')
+            ->expectsOutputToContain('current_source: env')
             ->expectsOutputToContain('current_mailer:')
             ->expectsOutputToContain('Email delivery succeeded.')
             ->assertExitCode(0);
@@ -44,14 +47,20 @@ class NotificationMailCommandsTest extends TestCase
             'mail.mailers.smtp.password' => 'smtp-secret-password',
         ]);
 
-        Mail::shouldReceive('to')
+        Mail::shouldReceive('mailer')
             ->once()
-            ->with('buyer@example.test')
+            ->with('smtp')
             ->andReturn(new class
             {
-                public function send(OrderNotificationMail $mail): void
+                public function to(string $email): object
                 {
-                    throw new RuntimeException('SMTP auth failed for smtp-user@example.test with smtp-secret-password');
+                    return new class
+                    {
+                        public function send(OrderNotificationMail $mail): void
+                        {
+                            throw new RuntimeException('SMTP auth failed for smtp-user@example.test with smtp-secret-password');
+                        }
+                    };
                 }
             });
 
@@ -62,12 +71,53 @@ class NotificationMailCommandsTest extends TestCase
             ->assertExitCode(1);
     }
 
+    public function test_test_email_command_uses_db_settings_when_enabled(): void
+    {
+        Mail::fake();
+        NotificationMailSetting::current()->forceFill([
+            'is_enabled' => true,
+            'mailer' => 'array',
+            'from_address' => 'shop@example.test',
+        ])->save();
+
+        $this->artisan('notifications:test-email buyer@example.test')
+            ->expectsOutputToContain('current_source: db')
+            ->expectsOutputToContain('current_mailer: array')
+            ->expectsOutputToContain('from_address: shop@example.test')
+            ->expectsOutputToContain('Email delivery succeeded.')
+            ->assertExitCode(0);
+
+        $this->assertSame(NotificationMailSetting::TEST_STATUS_SUCCESS, NotificationMailSetting::current()->last_test_status);
+        Mail::assertSent(OrderNotificationMail::class, fn (OrderNotificationMail $mail): bool => $mail->usesMailer(NotificationMailManager::DB_MAILER_KEY));
+    }
+
+    public function test_test_email_command_can_force_env_only(): void
+    {
+        config(['mail.default' => 'log']);
+        Mail::fake();
+        NotificationMailSetting::current()->forceFill([
+            'is_enabled' => true,
+            'mailer' => 'array',
+            'from_address' => 'shop@example.test',
+        ])->save();
+
+        $this->artisan('notifications:test-email buyer@example.test --env-only --no-save-result')
+            ->expectsOutputToContain('current_source: env')
+            ->expectsOutputToContain('current_mailer: log')
+            ->expectsOutputToContain('Email delivery succeeded.')
+            ->assertExitCode(0);
+
+        $this->assertNull(NotificationMailSetting::current()->last_test_status);
+        Mail::assertSent(OrderNotificationMail::class, fn (OrderNotificationMail $mail): bool => $mail->usesMailer('log'));
+    }
+
     public function test_send_pending_command_sends_pending_notifications(): void
     {
         Mail::fake();
         $notification = $this->createPendingNotification($this->createOrder(), 'buyer@example.test');
 
         $this->artisan('notifications:send-pending')
+            ->expectsOutputToContain('delivery_source: env')
             ->expectsOutputToContain('processed: 1')
             ->expectsOutputToContain('sent: 1')
             ->assertExitCode(0);
@@ -114,15 +164,28 @@ class NotificationMailCommandsTest extends TestCase
     public function test_send_pending_command_marks_failed_on_mailer_exception_without_exposing_secret(): void
     {
         config([
+            'mail.default' => 'log',
             'mail.mailers.smtp.password' => 'smtp-secret-password',
         ]);
 
         $notification = $this->createPendingNotification($this->createOrder(['email' => 'fail@example.test']), 'fail@example.test');
 
-        Mail::shouldReceive('to')
+        Mail::shouldReceive('mailer')
             ->once()
-            ->with('fail@example.test')
-            ->andThrow(new RuntimeException('SMTP transport down: smtp-secret-password'));
+            ->with('log')
+            ->andReturn(new class
+            {
+                public function to(string $email): object
+                {
+                    return new class
+                    {
+                        public function send(OrderNotificationMail $mail): void
+                        {
+                            throw new RuntimeException('SMTP transport down: smtp-secret-password');
+                        }
+                    };
+                }
+            });
 
         $this->artisan('notifications:send-pending')
             ->expectsOutputToContain('processed: 1')
