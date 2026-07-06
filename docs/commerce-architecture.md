@@ -334,6 +334,33 @@ Each event stores:
 
 Checkout creates a system event with `Замовлення створено`. Service-driven status changes create history rows with the acting user id when the action came from the admin panel. History is append-only in the normal application flow and is not edited through the order UI.
 
+## Order Notifications
+
+Order notification templates live in `notification_templates`, and delivery attempts live in `notification_outbox`.
+
+Detailed operator notes live in [`docs/order-notifications.md`](order-notifications.md).
+
+Supported first-phase channels:
+
+- `email`
+- `admin_panel`
+- `log`
+
+Supported first-phase customer email events:
+
+- `order_created`
+- `order_confirmed`
+- `order_processing`
+- `order_ready_to_ship`
+- `order_shipped`
+- `order_completed`
+- `order_cancelled`
+- `payment_paid`
+
+Checkout and `OrderLifecycleService` trigger notification creation only after the order transaction or lifecycle transaction succeeds. Notification failures are stored in outbox as `failed` or `skipped` and do not roll back checkout, status transitions, history, or stock compensation.
+
+The outbox is an audit trail. Sent records are not mutated into repeat sends; a manual resend creates a new attempt. `NotificationOutboxResource` is read-only except for the explicit resend action on safe statuses.
+
 ## Cancellation And Stock Compensation
 
 Checkout creates a `stock_movements.type = sale` movement and decreases the selected fulfillment warehouse balance.
@@ -381,7 +408,7 @@ This phase intentionally does not include:
 - online payment gateways
 - LiqPay, WayForPay, Stripe, or card acquiring
 - Nova Poshta API integration
-- automatic SMS, email, Viber, or Telegram notifications
+- SMS, Viber, Telegram, WhatsApp, CRM, or Nova Poshta notification integrations
 - automatic post-shipment returns
 - accounting postings
 - CRM or ERP integration
@@ -452,6 +479,9 @@ It checks:
 - order items without `unit_price` or `warehouse_id`
 - stock movements without `product_id` or `warehouse_id`
 - the latest stock movement per product and warehouse, compared against the current balance when that check is safe
+- missing base order notification templates
+- broken notification outbox records
+- pending or failed notification warnings
 
 Use `--json` for machine-readable output in release tooling.
 

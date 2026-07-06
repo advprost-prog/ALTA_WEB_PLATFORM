@@ -9,6 +9,7 @@ use App\Models\CommerceSetting;
 use App\Models\Currency;
 use App\Models\Customer;
 use App\Models\DeliveryMethod;
+use App\Models\NotificationTemplate;
 use App\Models\Order;
 use App\Models\PaymentMethod;
 use App\Models\Product;
@@ -36,6 +37,7 @@ class DatabaseSeeder extends Seeder
         $warehouse = Warehouse::ensureDefault();
         PaymentMethod::ensureDefaults();
         DeliveryMethod::ensureDefaults();
+        NotificationTemplate::ensureDefaults();
 
         $cashOnDelivery = PaymentMethod::query()->where('code', PaymentMethod::CASH_ON_DELIVERY)->first();
         $novaPoshta = DeliveryMethod::query()->where('code', DeliveryMethod::NOVA_POSHTA)->first();

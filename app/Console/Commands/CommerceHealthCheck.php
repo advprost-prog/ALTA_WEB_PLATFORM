@@ -3,11 +3,16 @@
 namespace App\Console\Commands;
 
 use App\Enums\DeliveryStatus;
+use App\Enums\NotificationChannel;
+use App\Enums\NotificationStatus;
+use App\Enums\OrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\CommerceSetting;
 use App\Models\Currency;
 use App\Models\DeliveryMethod;
+use App\Models\NotificationOutbox;
+use App\Models\NotificationTemplate;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\PaymentMethod;
@@ -250,12 +255,16 @@ class CommerceHealthCheck extends Command
         );
 
         $criticalIssues = array_merge($criticalIssues, $this->lifecycleIssues());
+        [$notificationCriticalIssues, $notificationWarningIssues] = $this->notificationIssues();
+        $criticalIssues = array_merge($criticalIssues, $notificationCriticalIssues);
 
         $criticalIssues = array_values(array_filter($criticalIssues));
+        $warningIssues = array_values(array_filter($notificationWarningIssues));
 
         return [
             'status' => $criticalIssues === [] ? 'ok' : 'failed',
             'critical_count' => count($criticalIssues),
+            'warning_count' => count($warningIssues),
             'settings_count' => $settingsCount,
             'default_currency' => $defaultCurrency ? [
                 'id' => $defaultCurrency->id,
@@ -268,6 +277,7 @@ class CommerceHealthCheck extends Command
                 'active' => (bool) $defaultWarehouse->is_active,
             ] : null,
             'issues' => $criticalIssues,
+            'warnings' => $warningIssues,
         ];
     }
 
@@ -282,17 +292,35 @@ class CommerceHealthCheck extends Command
         $this->line('default_currency: '.$this->summaryValue($report['default_currency']));
         $this->line('default_warehouse: '.$this->summaryValue($report['default_warehouse']));
 
-        if ($report['issues'] === []) {
+        if ($report['issues'] === [] && $report['warnings'] === []) {
             $this->newLine();
             $this->info('Критичних проблем не знайдено.');
 
             return;
         }
 
-        $this->newLine();
-        $this->warn('Критичні проблеми:');
+        if ($report['issues'] !== []) {
+            $this->newLine();
+            $this->warn('Критичні проблеми:');
+            $this->renderIssues($report['issues']);
+        } else {
+            $this->newLine();
+            $this->info('Критичних проблем не знайдено.');
+        }
 
-        foreach ($report['issues'] as $issue) {
+        if ($report['warnings'] !== []) {
+            $this->newLine();
+            $this->warn('Попередження:');
+            $this->renderIssues($report['warnings']);
+        }
+    }
+
+    /**
+     * @param  array<int, array{code: string, message: string, count: int, examples: array<int, string>}>  $issues
+     */
+    private function renderIssues(array $issues): void
+    {
+        foreach ($issues as $issue) {
             $this->line('- '.$issue['code'].': '.$issue['message']);
 
             if ($issue['count'] > 0) {
@@ -547,6 +575,185 @@ class CommerceHealthCheck extends Command
     }
 
     /**
+     * @return array{0: array<int, array{code: string, message: string, count: int, examples: array<int, string>}|null>, 1: array<int, array{code: string, message: string, count: int, examples: array<int, string>}|null>}
+     */
+    private function notificationIssues(): array
+    {
+        $eventValues = $this->enumValues(OrderNotificationEvent::cases());
+        $channelValues = $this->enumValues(NotificationChannel::cases());
+        $statusValues = $this->enumValues(NotificationStatus::cases());
+        $requiredEmailEvents = OrderNotificationEvent::requiredEmailTemplateEvents();
+
+        $missingTemplates = collect($requiredEmailEvents)
+            ->reject(fn (string $event): bool => NotificationTemplate::query()
+                ->where('event', $event)
+                ->where('channel', NotificationChannel::Email->value)
+                ->exists())
+            ->values();
+
+        $duplicateTemplateCodes = NotificationTemplate::query()
+            ->select('code')
+            ->groupBy('code')
+            ->havingRaw('COUNT(*) > 1')
+            ->pluck('code');
+
+        $activeTemplatesWithoutBody = NotificationTemplate::query()
+            ->where('is_active', true)
+            ->whereRaw("TRIM(COALESCE(body, '')) = ''")
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $templatesWithUnknownEvent = NotificationTemplate::query()
+            ->whereNotIn('event', $eventValues)
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $templatesWithUnknownChannel = NotificationTemplate::query()
+            ->whereNotIn('channel', $channelValues)
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $brokenOutbox = NotificationOutbox::query()
+            ->where(fn ($query) => $query
+                ->whereNull('event')
+                ->orWhere('event', '')
+                ->orWhereNull('channel')
+                ->orWhere('channel', '')
+                ->orWhereNull('status')
+                ->orWhere('status', ''))
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $outboxWithUnknownEvent = NotificationOutbox::query()
+            ->whereNotNull('event')
+            ->where('event', '!=', '')
+            ->whereNotIn('event', $eventValues)
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $outboxWithUnknownChannel = NotificationOutbox::query()
+            ->whereNotNull('channel')
+            ->where('channel', '!=', '')
+            ->whereNotIn('channel', $channelValues)
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $outboxWithUnknownStatus = NotificationOutbox::query()
+            ->whereNotNull('status')
+            ->where('status', '!=', '')
+            ->whereNotIn('status', $statusValues)
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $oldPendingNotifications = NotificationOutbox::query()
+            ->where('status', NotificationStatus::Pending->value)
+            ->where('created_at', '<', now()->subDay())
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $failedNotifications = NotificationOutbox::query()
+            ->where('status', NotificationStatus::Failed->value)
+            ->orderByDesc('id')
+            ->limit(20)
+            ->get();
+
+        $emailTemplatesWithoutSubject = NotificationTemplate::query()
+            ->where('channel', NotificationChannel::Email->value)
+            ->where('is_active', true)
+            ->whereRaw("TRIM(COALESCE(subject, '')) = ''")
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        return [
+            [
+                $this->issue(
+                    $missingTemplates->isNotEmpty(),
+                    'notification_templates_missing',
+                    'Відсутні базові email-шаблони повідомлень по замовленнях.',
+                    $this->sampleList($missingTemplates->all()),
+                ),
+                $this->issue(
+                    $duplicateTemplateCodes->isNotEmpty(),
+                    'notification_templates_duplicate_code',
+                    'Є дублікати notification_templates.code.',
+                    $this->sampleList($duplicateTemplateCodes->all()),
+                ),
+                $this->issue(
+                    $activeTemplatesWithoutBody->isNotEmpty(),
+                    'notification_templates_empty_body',
+                    'Є активні шаблони повідомлень із порожнім body.',
+                    $this->sampleList($this->notificationTemplateList($activeTemplatesWithoutBody)),
+                ),
+                $this->issue(
+                    $templatesWithUnknownEvent->isNotEmpty(),
+                    'notification_templates_unknown_event',
+                    'Є шаблони повідомлень із невідомим event.',
+                    $this->sampleList($this->notificationTemplateList($templatesWithUnknownEvent)),
+                ),
+                $this->issue(
+                    $templatesWithUnknownChannel->isNotEmpty(),
+                    'notification_templates_unknown_channel',
+                    'Є шаблони повідомлень із невідомим channel.',
+                    $this->sampleList($this->notificationTemplateList($templatesWithUnknownChannel)),
+                ),
+                $this->issue(
+                    $brokenOutbox->isNotEmpty(),
+                    'notification_outbox_broken_records',
+                    'Є notification outbox записи без event, channel або status.',
+                    $this->sampleList($this->notificationOutboxList($brokenOutbox)),
+                ),
+                $this->issue(
+                    $outboxWithUnknownEvent->isNotEmpty(),
+                    'notification_outbox_unknown_event',
+                    'Є notification outbox записи з невідомим event.',
+                    $this->sampleList($this->notificationOutboxList($outboxWithUnknownEvent)),
+                ),
+                $this->issue(
+                    $outboxWithUnknownChannel->isNotEmpty(),
+                    'notification_outbox_unknown_channel',
+                    'Є notification outbox записи з невідомим channel.',
+                    $this->sampleList($this->notificationOutboxList($outboxWithUnknownChannel)),
+                ),
+                $this->issue(
+                    $outboxWithUnknownStatus->isNotEmpty(),
+                    'notification_outbox_unknown_status',
+                    'Є notification outbox записи з невідомим status.',
+                    $this->sampleList($this->notificationOutboxList($outboxWithUnknownStatus)),
+                ),
+            ],
+            [
+                $this->issue(
+                    $oldPendingNotifications->isNotEmpty(),
+                    'notification_outbox_old_pending',
+                    'Є pending повідомлення старші за 24 години.',
+                    $this->sampleList($this->notificationOutboxList($oldPendingNotifications)),
+                ),
+                $this->issue(
+                    $failedNotifications->isNotEmpty(),
+                    'notification_outbox_failed',
+                    'Є failed повідомлення в outbox.',
+                    $this->sampleList($this->notificationOutboxList($failedNotifications)),
+                ),
+                $this->issue(
+                    $emailTemplatesWithoutSubject->isNotEmpty(),
+                    'notification_email_templates_missing_subject',
+                    'Є активні email-шаблони без subject.',
+                    $this->sampleList($this->notificationTemplateList($emailTemplatesWithoutSubject)),
+                ),
+            ],
+        ];
+    }
+
+    /**
      * @template T of object
      *
      * @param  Collection<int, T>  $items
@@ -582,6 +789,28 @@ class CommerceHealthCheck extends Command
 
                 return $label;
             })
+            ->all();
+    }
+
+    /**
+     * @param  Collection<int, NotificationTemplate>  $items
+     * @return array<int, string>
+     */
+    private function notificationTemplateList(Collection $items): array
+    {
+        return $items
+            ->map(fn (NotificationTemplate $template): string => 'template#'.$template->id.' '.$template->code)
+            ->all();
+    }
+
+    /**
+     * @param  Collection<int, NotificationOutbox>  $items
+     * @return array<int, string>
+     */
+    private function notificationOutboxList(Collection $items): array
+    {
+        return $items
+            ->map(fn (NotificationOutbox $notification): string => 'notification#'.$notification->id.' order#'.($notification->order_id ?? '-').' '.$notification->event.'/'.$notification->channel.' status='.(string) $notification->status)
             ->all();
     }
 

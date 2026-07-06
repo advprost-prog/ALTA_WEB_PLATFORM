@@ -161,4 +161,9 @@ class Order extends Model
     {
         return $this->hasMany(OrderStatusHistory::class)->latest();
     }
+
+    public function notifications(): HasMany
+    {
+        return $this->hasMany(NotificationOutbox::class)->latest();
+    }
 }

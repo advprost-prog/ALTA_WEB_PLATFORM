@@ -3,6 +3,7 @@
 namespace App\Services\Commerce;
 
 use App\Enums\DeliveryStatus;
+use App\Enums\OrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Currency;
@@ -45,6 +46,7 @@ class CheckoutService
         private readonly FulfillmentService $fulfillmentService,
         private readonly StockService $stockService,
         private readonly OrderLifecycleService $orderLifecycleService,
+        private readonly OrderNotificationService $orderNotificationService,
     ) {}
 
     /**
@@ -230,7 +232,7 @@ class CheckoutService
      */
     public function placeOrder(array $cart, array $validated): Order
     {
-        return DB::transaction(function () use ($cart, $validated): Order {
+        $order = DB::transaction(function () use ($cart, $validated): Order {
             $requested = $this->normalizeCart($cart);
 
             if ($requested === []) {
@@ -352,6 +354,10 @@ class CheckoutService
 
             return $order;
         });
+
+        $this->orderNotificationService->queueOrderNotification($order, OrderNotificationEvent::OrderCreated);
+
+        return $order;
     }
 
     /**

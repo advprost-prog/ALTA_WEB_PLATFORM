@@ -3,6 +3,9 @@
 namespace App\Filament\Resources\Orders;
 
 use App\Enums\DeliveryStatus;
+use App\Enums\NotificationChannel;
+use App\Enums\NotificationStatus;
+use App\Enums\OrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Filament\Resources\Orders\Pages\CreateOrder;
@@ -11,6 +14,7 @@ use App\Filament\Resources\Orders\Pages\ViewOrder;
 use App\Models\CommerceSetting;
 use App\Models\Currency;
 use App\Models\DeliveryMethod;
+use App\Models\NotificationOutbox;
 use App\Models\Order;
 use App\Models\OrderStatusHistory;
 use App\Models\PaymentMethod;
@@ -18,6 +22,7 @@ use App\Models\Product;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Services\Commerce\OrderLifecycleService;
+use App\Services\Commerce\OrderNotificationService;
 use App\Services\Commerce\ProductPricingService;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -369,6 +374,43 @@ class OrderResource extends Resource
                             ->columnSpanFull(),
                     ])
                     ->columnSpanFull(),
+                Section::make('Повідомлення')
+                    ->schema([
+                        RepeatableEntry::make('notifications')
+                            ->label('')
+                            ->schema([
+                                TextEntry::make('created_at')
+                                    ->label('Дата')
+                                    ->dateTime(),
+                                TextEntry::make('event')
+                                    ->label('Подія')
+                                    ->formatStateUsing(fn (?string $state): string => OrderNotificationEvent::labelFor($state))
+                                    ->badge(),
+                                TextEntry::make('channel')
+                                    ->label('Канал')
+                                    ->formatStateUsing(fn (?string $state): string => NotificationChannel::labelFor($state))
+                                    ->badge(),
+                                TextEntry::make('recipient')
+                                    ->label('Отримувач')
+                                    ->placeholder('-'),
+                                TextEntry::make('status')
+                                    ->label('Статус')
+                                    ->formatStateUsing(fn (?string $state): string => NotificationStatus::labelFor($state))
+                                    ->color(fn (?string $state): string => NotificationStatus::colorFor($state))
+                                    ->badge(),
+                                TextEntry::make('sent_at')
+                                    ->label('Надіслано')
+                                    ->dateTime()
+                                    ->placeholder('-'),
+                                TextEntry::make('error_message')
+                                    ->label('Помилка')
+                                    ->placeholder('-')
+                                    ->columnSpan(2),
+                            ])
+                            ->columns(7)
+                            ->columnSpanFull(),
+                    ])
+                    ->columnSpanFull(),
             ]);
     }
 
@@ -511,6 +553,7 @@ class OrderResource extends Resource
                     ])
                     ->modalSubmitActionLabel('Скасувати замовлення')
                     ->action(fn (Order $record, array $data): null => self::runLifecycleAction($record, 'cancel', 'Замовлення скасовано', (string) ($data['reason'] ?? ''))),
+                self::resendNotificationsAction(),
                 ViewAction::make(),
                 EditAction::make(),
             ]);
@@ -549,6 +592,39 @@ class OrderResource extends Resource
                 ->danger()
                 ->send();
         }
+
+        return null;
+    }
+
+    public static function resendNotificationsAction(): Action
+    {
+        return Action::make('resendNotifications')
+            ->label('Resend повідомлення')
+            ->icon(Heroicon::OutlinedPaperAirplane)
+            ->visible(fn (Order $record): bool => $record->notifications()->resendable()->exists())
+            ->requiresConfirmation()
+            ->action(fn (Order $record): null => self::resendNotifications($record));
+    }
+
+    private static function resendNotifications(Order $record): null
+    {
+        $notifications = $record->notifications()->resendable()->get();
+        $sent = 0;
+
+        foreach ($notifications as $notification) {
+            if (! $notification instanceof NotificationOutbox) {
+                continue;
+            }
+
+            app(OrderNotificationService::class)->resend($notification, self::currentUser());
+            $sent++;
+        }
+
+        Notification::make()
+            ->title('Повторну відправку запущено')
+            ->body('Створено спроб: '.$sent)
+            ->success()
+            ->send();
 
         return null;
     }

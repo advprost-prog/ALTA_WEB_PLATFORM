@@ -1,6 +1,6 @@
 # Order Lifecycle
 
-Order Lifecycle is the first internal workflow layer for ALTA_WEB_PLATFORM orders. It is intentionally local-only: no payment gateway, Nova Poshta API, CRM/ERP, notifications, or automatic refund flow is connected in this phase.
+Order Lifecycle is the first internal workflow layer for ALTA_WEB_PLATFORM orders. It is intentionally local-first: no payment gateway, Nova Poshta API, CRM/ERP, or automatic refund flow is connected in this phase.
 
 ## Statuses
 
@@ -112,6 +112,23 @@ History rows record:
 
 History is read-only in normal UI. It is an audit trail, not an editable working table.
 
+## Notifications
+
+Order notifications are handled by `App\Services\Commerce\OrderNotificationService` and documented in [`docs/order-notifications.md`](order-notifications.md).
+
+Lifecycle actions create notification outbox records only after the status transaction succeeds:
+
+- checkout: `order_created`
+- confirm: `order_confirmed`
+- processing: `order_processing`
+- ready to ship: `order_ready_to_ship`
+- shipped: `order_shipped`
+- completed: `order_completed`
+- paid: `payment_paid`
+- cancelled: `order_cancelled`
+
+Notification failure never rolls back the checkout or lifecycle status change. The outbox row is marked `failed` or `skipped`, and the operator can resend it manually. Repeated cancel remains blocked by the terminal `cancelled` status, so it does not duplicate either stock compensation or the cancel notification.
+
 ## Cancellation
 
 Before shipment, cancellation:
@@ -160,6 +177,6 @@ Not implemented in this phase:
 - automatic refund flow
 - returns after shipped/completed
 - customer account order tracking
-- SMS, email, Viber, or Telegram notifications
+- SMS, Viber, Telegram, WhatsApp, CRM, or Nova Poshta notification integrations
 - CRM/ERP integration
 - accounting postings

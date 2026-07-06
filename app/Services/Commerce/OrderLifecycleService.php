@@ -3,6 +3,7 @@
 namespace App\Services\Commerce;
 
 use App\Enums\DeliveryStatus;
+use App\Enums\OrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Order;
@@ -47,51 +48,70 @@ class OrderLifecycleService
 
     public function __construct(
         private readonly StockService $stockService,
+        private readonly OrderNotificationService $notificationService,
     ) {}
 
     public function confirm(Order $order, ?User $user = null, ?string $comment = null): Order
     {
-        return $this->changeOrderStatus($order, OrderStatus::Confirmed, $user, $comment);
+        $order = $this->changeOrderStatus($order, OrderStatus::Confirmed, $user, $comment);
+        $this->notificationService->queueOrderNotification($order, OrderNotificationEvent::OrderConfirmed, $user);
+
+        return $order;
     }
 
     public function markProcessing(Order $order, ?User $user = null, ?string $comment = null): Order
     {
-        return DB::transaction(function () use ($order, $user, $comment): Order {
+        $order = DB::transaction(function () use ($order, $user, $comment): Order {
             $this->changeOrderStatus($order, OrderStatus::Processing, $user, $comment);
             $this->changeDeliveryStatus($order, DeliveryStatus::Preparing, $user, $comment);
 
             return $order->refresh();
         });
+        $this->notificationService->queueOrderNotification($order, OrderNotificationEvent::OrderProcessing, $user);
+
+        return $order;
     }
 
     public function markReadyToShip(Order $order, ?User $user = null, ?string $comment = null): Order
     {
-        return DB::transaction(function () use ($order, $user, $comment): Order {
+        $order = DB::transaction(function () use ($order, $user, $comment): Order {
             $this->changeOrderStatus($order, OrderStatus::ReadyToShip, $user, $comment);
             $this->changeDeliveryStatus($order, DeliveryStatus::ReadyToShip, $user, $comment);
 
             return $order->refresh();
         });
+        $this->notificationService->queueOrderNotification($order, OrderNotificationEvent::OrderReadyToShip, $user);
+
+        return $order;
     }
 
     public function markShipped(Order $order, ?User $user = null, ?string $comment = null): Order
     {
-        return DB::transaction(function () use ($order, $user, $comment): Order {
+        $order = DB::transaction(function () use ($order, $user, $comment): Order {
             $this->changeOrderStatus($order, OrderStatus::Shipped, $user, $comment);
             $this->changeDeliveryStatus($order, DeliveryStatus::Shipped, $user, $comment);
 
             return $order->refresh();
         });
+        $this->notificationService->queueOrderNotification($order, OrderNotificationEvent::OrderShipped, $user);
+
+        return $order;
     }
 
     public function markCompleted(Order $order, ?User $user = null, ?string $comment = null): Order
     {
-        return $this->changeOrderStatus($order, OrderStatus::Completed, $user, $comment);
+        $order = $this->changeOrderStatus($order, OrderStatus::Completed, $user, $comment);
+        $this->notificationService->queueOrderNotification($order, OrderNotificationEvent::OrderCompleted, $user);
+
+        return $order;
     }
 
     public function markPaid(Order $order, ?User $user = null, ?string $comment = null): Order
     {
-        return $this->changePaymentStatus($order, PaymentStatus::Paid, $user, $comment);
+        $order = $this->changePaymentStatus($order, PaymentStatus::Paid, $user, $comment);
+        $this->notificationService->queueOrderNotification($order, OrderNotificationEvent::PaymentPaid, $user);
+
+        return $order;
     }
 
     public function cancel(Order $order, ?User $user = null, ?string $reason = null): Order
@@ -102,7 +122,7 @@ class OrderLifecycleService
             throw new RuntimeException('Вкажіть причину скасування замовлення.');
         }
 
-        return DB::transaction(function () use ($order, $user, $reason): Order {
+        $order = DB::transaction(function () use ($order, $user, $reason): Order {
             $order->refresh()->loadMissing(['items.product']);
             $this->assertOrderCanBeChanged($order);
 
@@ -144,6 +164,11 @@ class OrderLifecycleService
 
             return $order->refresh();
         });
+        $this->notificationService->queueOrderNotification($order, OrderNotificationEvent::OrderCancelled, $user, [
+            'cancel_reason' => $reason,
+        ]);
+
+        return $order;
     }
 
     public function changeOrderStatus(
