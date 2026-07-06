@@ -161,6 +161,13 @@ class StorefrontController extends Controller
             return redirect()->route('cart')->with('status', $payload['messages'][0] ?? 'Перевірте кошик перед оформленням.');
         }
 
+        $payload['paymentMethods'] = $this->checkoutService->activePaymentMethods();
+        $payload['deliveryMethods'] = $this->checkoutService->activeDeliveryMethods();
+
+        if ($payload['paymentMethods']->isEmpty() || $payload['deliveryMethods']->isEmpty()) {
+            return redirect()->route('cart')->with('status', 'Оформлення тимчасово недоступне: немає активних способів оплати або доставки.');
+        }
+
         $payload['checkout_token'] = $this->issueCheckoutToken();
 
         return view('storefront.checkout', $payload);
@@ -213,7 +220,7 @@ class StorefrontController extends Controller
 
     public function thankYou(Order $order): View
     {
-        return view('storefront.thank-you', ['order' => $order->load(['items', 'currency'])]);
+        return view('storefront.thank-you', ['order' => $order->load(['items', 'currency', 'paymentMethod', 'deliveryMethod'])]);
     }
 
     public function switchCurrency(Request $request): RedirectResponse

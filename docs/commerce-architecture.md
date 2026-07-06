@@ -230,6 +230,14 @@ Orders and order items store commerce snapshots so historical orders do not depe
 - `exchange_rate_to_base`
 - `warehouse_id`
 - `total_amount`
+- `status`
+- `payment_status`
+- `delivery_status`
+- `payment_method_id`
+- `payment_method_name`
+- `delivery_method_id`
+- `delivery_method_name`
+- lifecycle timestamps such as `confirmed_at`, `paid_at`, `shipped_at`, `completed_at`, and `cancelled_at`
 
 `order_items` stores:
 
@@ -239,6 +247,112 @@ Orders and order items store commerce snapshots so historical orders do not depe
 - `total`
 
 In simple mode, order creation automatically uses the default currency and default warehouse. Checkout runs in a database transaction and blocks stock changes that would make the default balance negative.
+
+## Order Lifecycle
+
+Order lifecycle changes are centralized in `App\Services\Commerce\OrderLifecycleService`.
+
+Detailed operator notes live in [`docs/order-lifecycle.md`](order-lifecycle.md).
+
+Base order statuses:
+
+- `new`: new storefront order
+- `confirmed`: manager confirmed the order
+- `processing`: order is being prepared
+- `ready_to_ship`: order is packed and ready for dispatch
+- `shipped`: order was sent to the customer
+- `completed`: order is closed
+- `cancelled`: order is cancelled
+- `failed` and `returned`: reserved for problem/return flows
+
+Payment statuses:
+
+- `unpaid`
+- `pending`
+- `paid`
+- `partially_paid`
+- `failed`
+- `refunded`
+- `cancelled`
+
+Delivery statuses:
+
+- `not_required`
+- `pending`
+- `preparing`
+- `ready_to_ship`
+- `shipped`
+- `delivered`
+- `failed`
+- `returned`
+- `cancelled`
+
+Checkout creates orders with `status = new`, `delivery_status = pending`, and a payment status based on the selected method. Cash on delivery and cash start as `unpaid`; bank transfer starts as `pending`. The system does not mark online payments as paid because no payment gateway is integrated in this phase.
+
+Filament order actions call `OrderLifecycleService` instead of updating status fields directly. The standard action path is:
+
+- confirm
+- mark processing
+- mark ready to ship
+- mark shipped
+- mark completed
+- mark paid
+- cancel
+
+`completed` and `cancelled` are terminal states for normal admin actions. After an order reaches either state, routine lifecycle changes are blocked unless a future explicit administrative exception action is added.
+
+## Payment And Delivery Methods
+
+Payment methods live in `payment_methods` and delivery methods live in `delivery_methods`.
+
+Seeded payment methods:
+
+- `cash_on_delivery`: Післяплата
+- `bank_transfer`: Банківський переказ
+- `cash`: Готівка
+
+Seeded delivery methods:
+
+- `nova_poshta`: Нова пошта
+- `pickup`: Самовивіз
+- `courier`: Кур’єрська доставка
+
+The storefront checkout shows only active methods. Orders store both the method id and a method-name snapshot, so historical orders remain readable even if a method is renamed or disabled later. The legacy `orders.payment_method` and `orders.delivery_method` fields remain as compatibility/code fields during this transition.
+
+## Order Events
+
+Order lifecycle history lives in `order_status_histories`.
+
+Each event stores:
+
+- `order_id`
+- `type`: `status`, `payment_status`, `delivery_status`, `note`, or `system`
+- `from_value`
+- `to_value`
+- `comment`
+- `created_by`
+
+Checkout creates a system event with `Замовлення створено`. Service-driven status changes create history rows with the acting user id when the action came from the admin panel. History is append-only in the normal application flow and is not edited through the order UI.
+
+## Cancellation And Stock Compensation
+
+Checkout creates a `stock_movements.type = sale` movement and decreases the selected fulfillment warehouse balance.
+
+First-phase cancellation rules:
+
+- orders that are not shipped or completed can be cancelled by a manager
+- cancellation requires a reason/comment
+- cancellation restores each order item quantity through `StockService`
+- the compensation movement uses `stock_movements.type = return`
+- the movement note is `Order cancelled: {order_number}`
+- the original `sale` movement is kept as audit history
+- `status`, `payment_status`, and `delivery_status` are moved to `cancelled`
+- the cancel reason and status history event are stored on the order
+- repeated cancel is blocked by the terminal `cancelled` status, so stock is not returned twice
+
+Orders that are already `shipped` or `completed` are not automatically cancelled in this phase. Post-shipment returns require a future explicit return workflow so stock, refunds, and customer communication can be handled deliberately.
+
+`commerce:health-check` includes read-only lifecycle checks for unknown statuses, missing method snapshots, missing active methods, and missing lifecycle timestamps. It reports issues but never changes order data.
 
 ## Checkout Transaction Guarantees
 
@@ -252,11 +366,26 @@ Inside one database transaction, checkout:
 - resolves one fulfillment warehouse per order item
 - creates the customer/order/order items
 - stores order currency snapshots
+- stores payment and delivery method snapshots
 - stores order item price, total, product name, SKU, and warehouse snapshots
+- creates an order system event
 - calls `StockService` to update `stock_balances`
 - creates `stock_movements.type = sale`
 
 If any product has no valid price, no valid active warehouse, insufficient available quantity, inactive currency, or a stock movement failure, the transaction is rolled back and no partial order remains.
+
+## Lifecycle Phase Limits
+
+This phase intentionally does not include:
+
+- online payment gateways
+- LiqPay, WayForPay, Stripe, or card acquiring
+- Nova Poshta API integration
+- automatic SMS, email, Viber, or Telegram notifications
+- automatic post-shipment returns
+- accounting postings
+- CRM or ERP integration
+- fraud/risk scoring
 
 ## Storefront Backward Compatibility
 

@@ -2,9 +2,14 @@
 
 namespace App\Services\Commerce;
 
+use App\Enums\DeliveryStatus;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Models\Currency;
 use App\Models\Customer;
+use App\Models\DeliveryMethod;
 use App\Models\Order;
+use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductPrice;
 use App\Models\StockMovement;
@@ -17,11 +22,29 @@ class CheckoutService
 {
     public const MAX_CART_QUANTITY = 99;
 
+    private const PAYMENT_METHOD_ALIASES = [
+        'Післяплата' => PaymentMethod::CASH_ON_DELIVERY,
+        'Банківський переказ' => PaymentMethod::BANK_TRANSFER,
+        'Безготівковий рахунок' => PaymentMethod::BANK_TRANSFER,
+        'Готівка' => PaymentMethod::CASH,
+    ];
+
+    private const DELIVERY_METHOD_ALIASES = [
+        'Нова пошта' => DeliveryMethod::NOVA_POSHTA,
+        'Самовивіз' => DeliveryMethod::PICKUP,
+        'Кур’єрська доставка' => DeliveryMethod::COURIER,
+        'Курʼєрська доставка' => DeliveryMethod::COURIER,
+        'Кур’єр' => DeliveryMethod::COURIER,
+        'Курʼєр' => DeliveryMethod::COURIER,
+        'Кур\'єр' => DeliveryMethod::COURIER,
+    ];
+
     public function __construct(
         private readonly ProductPricingService $pricingService,
         private readonly ProductAvailabilityService $availabilityService,
         private readonly FulfillmentService $fulfillmentService,
         private readonly StockService $stockService,
+        private readonly OrderLifecycleService $orderLifecycleService,
     ) {}
 
     /**
@@ -265,6 +288,8 @@ class CheckoutService
 
             /** @var Warehouse $primaryWarehouse */
             $primaryWarehouse = $lines->first()['warehouse'];
+            $paymentMethod = $this->resolvePaymentMethod((string) $validated['payment_method']);
+            $deliveryMethod = $this->resolveDeliveryMethod((string) $validated['delivery_method']);
 
             $order = Order::create([
                 'customer_id' => $customer->id,
@@ -276,9 +301,15 @@ class CheckoutService
                 'phone' => $validated['phone'],
                 'email' => $validated['email'] ?? null,
                 'total_amount' => $lines->sum('total'),
-                'status' => 'new',
-                'delivery_method' => $validated['delivery_method'],
-                'payment_method' => $validated['payment_method'],
+                'status' => OrderStatus::New->value,
+                'payment_status' => $this->initialPaymentStatus($paymentMethod)->value,
+                'delivery_status' => DeliveryStatus::Pending->value,
+                'delivery_method' => $deliveryMethod->code,
+                'delivery_method_id' => $deliveryMethod->id,
+                'delivery_method_name' => $deliveryMethod->name,
+                'payment_method' => $paymentMethod->code,
+                'payment_method_id' => $paymentMethod->id,
+                'payment_method_name' => $paymentMethod->name,
                 'customer_comment' => $validated['customer_comment'] ?? null,
             ]);
 
@@ -317,6 +348,8 @@ class CheckoutService
                 }
             }
 
+            $this->orderLifecycleService->recordSystemEvent($order, 'Замовлення створено');
+
             return $order;
         });
     }
@@ -327,6 +360,22 @@ class CheckoutService
     public function productRelations(): array
     {
         return ['brand', 'category', 'specifications', 'prices.currency', 'stockBalances.warehouse'];
+    }
+
+    /**
+     * @return Collection<int, PaymentMethod>
+     */
+    public function activePaymentMethods(): Collection
+    {
+        return PaymentMethod::query()->active()->ordered()->get();
+    }
+
+    /**
+     * @return Collection<int, DeliveryMethod>
+     */
+    public function activeDeliveryMethods(): Collection
+    {
+        return DeliveryMethod::query()->active()->ordered()->get();
     }
 
     /**
@@ -355,5 +404,69 @@ class CheckoutService
         }
 
         return $currency;
+    }
+
+    private function resolvePaymentMethod(string $value): PaymentMethod
+    {
+        $value = trim($value);
+        $aliasCode = self::PAYMENT_METHOD_ALIASES[$value] ?? null;
+
+        $method = PaymentMethod::query()
+            ->active()
+            ->where(function ($query) use ($value, $aliasCode): void {
+                $query->where('code', $value)
+                    ->orWhere('name', $value);
+
+                if ($aliasCode) {
+                    $query->orWhere('code', $aliasCode);
+                }
+
+                if (ctype_digit($value)) {
+                    $query->orWhereKey((int) $value);
+                }
+            })
+            ->first();
+
+        if (! $method) {
+            throw new RuntimeException('Обраний спосіб оплати недоступний.');
+        }
+
+        return $method;
+    }
+
+    private function resolveDeliveryMethod(string $value): DeliveryMethod
+    {
+        $value = trim($value);
+        $aliasCode = self::DELIVERY_METHOD_ALIASES[$value] ?? null;
+
+        $method = DeliveryMethod::query()
+            ->active()
+            ->where(function ($query) use ($value, $aliasCode): void {
+                $query->where('code', $value)
+                    ->orWhere('name', $value);
+
+                if ($aliasCode) {
+                    $query->orWhere('code', $aliasCode);
+                }
+
+                if (ctype_digit($value)) {
+                    $query->orWhereKey((int) $value);
+                }
+            })
+            ->first();
+
+        if (! $method) {
+            throw new RuntimeException('Обраний спосіб доставки недоступний.');
+        }
+
+        return $method;
+    }
+
+    private function initialPaymentStatus(PaymentMethod $paymentMethod): PaymentStatus
+    {
+        return match ($paymentMethod->code) {
+            PaymentMethod::BANK_TRANSFER => PaymentStatus::Pending,
+            default => PaymentStatus::Unpaid,
+        };
     }
 }

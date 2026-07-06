@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Models\CommerceSetting;
 use App\Models\Currency;
+use App\Models\DeliveryMethod;
 use App\Models\Order;
+use App\Models\PaymentMethod;
 use App\Models\ProductPrice;
 use App\Models\StockBalance;
 use App\Models\StockMovement;
@@ -37,12 +39,42 @@ class CommerceArchitectureTest extends TestCase
             'is_active' => true,
         ]);
 
+        $this->assertDatabaseHas('payment_methods', [
+            'code' => PaymentMethod::CASH_ON_DELIVERY,
+            'name' => 'Післяплата',
+            'is_active' => true,
+        ]);
+
+        $this->assertDatabaseHas('delivery_methods', [
+            'code' => DeliveryMethod::NOVA_POSHTA,
+            'name' => 'Нова пошта',
+            'is_active' => true,
+        ]);
+
         $settings = CommerceSetting::current();
 
         $this->assertFalse($settings->multi_currency_enabled);
         $this->assertFalse($settings->multi_warehouse_enabled);
         $this->assertSame('UAH', $settings->defaultCurrency->code);
         $this->assertSame('Основний склад', $settings->defaultWarehouse->name);
+    }
+
+    public function test_payment_and_delivery_method_defaults_are_idempotent(): void
+    {
+        PaymentMethod::ensureDefaults();
+        DeliveryMethod::ensureDefaults();
+        PaymentMethod::ensureDefaults();
+        DeliveryMethod::ensureDefaults();
+
+        $this->assertSame(1, PaymentMethod::where('code', PaymentMethod::CASH_ON_DELIVERY)->count());
+        $this->assertSame(1, PaymentMethod::where('code', PaymentMethod::BANK_TRANSFER)->count());
+        $this->assertSame(1, PaymentMethod::where('code', PaymentMethod::CASH)->count());
+        $this->assertSame(3, PaymentMethod::count());
+
+        $this->assertSame(1, DeliveryMethod::where('code', DeliveryMethod::NOVA_POSHTA)->count());
+        $this->assertSame(1, DeliveryMethod::where('code', DeliveryMethod::PICKUP)->count());
+        $this->assertSame(1, DeliveryMethod::where('code', DeliveryMethod::COURIER)->count());
+        $this->assertSame(3, DeliveryMethod::count());
     }
 
     public function test_product_in_simple_mode_has_one_default_price_and_stock_balance(): void

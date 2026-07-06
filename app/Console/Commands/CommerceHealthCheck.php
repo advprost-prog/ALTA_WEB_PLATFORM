@@ -2,10 +2,15 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\DeliveryStatus;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Models\CommerceSetting;
 use App\Models\Currency;
+use App\Models\DeliveryMethod;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductPrice;
 use App\Models\StockBalance;
@@ -244,6 +249,8 @@ class CommerceHealthCheck extends Command
             $this->sampleList($stockMovementDrift->take(10)->all()),
         );
 
+        $criticalIssues = array_merge($criticalIssues, $this->lifecycleIssues());
+
         $criticalIssues = array_values(array_filter($criticalIssues));
 
         return [
@@ -359,6 +366,187 @@ class CommerceHealthCheck extends Command
     }
 
     /**
+     * @return array<int, array{code: string, message: string, count: int, examples: array<int, string>}|null>
+     */
+    private function lifecycleIssues(): array
+    {
+        $orderStatusValues = $this->enumValues(OrderStatus::cases());
+        $paymentStatusValues = $this->enumValues(PaymentStatus::cases());
+        $deliveryStatusValues = $this->enumValues(DeliveryStatus::cases());
+
+        $ordersMissingStatus = Order::query()
+            ->where(fn ($query) => $query->whereNull('status')->orWhere('status', ''))
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $ordersWithUnknownStatus = Order::query()
+            ->whereNotNull('status')
+            ->where('status', '!=', '')
+            ->whereNotIn('status', $orderStatusValues)
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $ordersMissingPaymentStatus = Order::query()
+            ->where(fn ($query) => $query->whereNull('payment_status')->orWhere('payment_status', ''))
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $ordersWithUnknownPaymentStatus = Order::query()
+            ->whereNotNull('payment_status')
+            ->where('payment_status', '!=', '')
+            ->whereNotIn('payment_status', $paymentStatusValues)
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $ordersMissingDeliveryStatus = Order::query()
+            ->where(fn ($query) => $query->whereNull('delivery_status')->orWhere('delivery_status', ''))
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $ordersWithUnknownDeliveryStatus = Order::query()
+            ->whereNotNull('delivery_status')
+            ->where('delivery_status', '!=', '')
+            ->whereNotIn('delivery_status', $deliveryStatusValues)
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $ordersMissingPaymentMethodSnapshot = Order::query()
+            ->whereNotNull('payment_method_id')
+            ->where(fn ($query) => $query->whereNull('payment_method_name')->orWhere('payment_method_name', ''))
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $ordersMissingDeliveryMethodSnapshot = Order::query()
+            ->whereNotNull('delivery_method_id')
+            ->where(fn ($query) => $query->whereNull('delivery_method_name')->orWhere('delivery_method_name', ''))
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $cancelledOrdersMissingTimestamp = Order::query()
+            ->where('status', OrderStatus::Cancelled->value)
+            ->whereNull('cancelled_at')
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $paidOrdersMissingTimestamp = Order::query()
+            ->where('payment_status', PaymentStatus::Paid->value)
+            ->whereNull('paid_at')
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $shippedOrdersMissingTimestamp = Order::query()
+            ->where(fn ($query) => $query
+                ->where('status', OrderStatus::Shipped->value)
+                ->orWhere('delivery_status', DeliveryStatus::Shipped->value))
+            ->whereNull('shipped_at')
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $completedOrdersMissingTimestamp = Order::query()
+            ->where('status', OrderStatus::Completed->value)
+            ->whereNull('completed_at')
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        return [
+            $this->issue(
+                $ordersMissingStatus->isNotEmpty(),
+                'orders_missing_status',
+                'Є замовлення без статусу.',
+                $this->sampleList($this->ordersList($ordersMissingStatus)),
+            ),
+            $this->issue(
+                $ordersWithUnknownStatus->isNotEmpty(),
+                'orders_unknown_status',
+                'Є замовлення з невідомим статусом.',
+                $this->sampleList($this->ordersList($ordersWithUnknownStatus, 'status')),
+            ),
+            $this->issue(
+                $ordersMissingPaymentStatus->isNotEmpty(),
+                'orders_missing_payment_status',
+                'Є замовлення без статусу оплати.',
+                $this->sampleList($this->ordersList($ordersMissingPaymentStatus)),
+            ),
+            $this->issue(
+                $ordersWithUnknownPaymentStatus->isNotEmpty(),
+                'orders_unknown_payment_status',
+                'Є замовлення з невідомим статусом оплати.',
+                $this->sampleList($this->ordersList($ordersWithUnknownPaymentStatus, 'payment_status')),
+            ),
+            $this->issue(
+                $ordersMissingDeliveryStatus->isNotEmpty(),
+                'orders_missing_delivery_status',
+                'Є замовлення без статусу доставки.',
+                $this->sampleList($this->ordersList($ordersMissingDeliveryStatus)),
+            ),
+            $this->issue(
+                $ordersWithUnknownDeliveryStatus->isNotEmpty(),
+                'orders_unknown_delivery_status',
+                'Є замовлення з невідомим статусом доставки.',
+                $this->sampleList($this->ordersList($ordersWithUnknownDeliveryStatus, 'delivery_status')),
+            ),
+            $this->issue(
+                $ordersMissingPaymentMethodSnapshot->isNotEmpty(),
+                'orders_missing_payment_method_snapshot',
+                'Є замовлення з payment_method_id, але без payment_method_name snapshot.',
+                $this->sampleList($this->ordersList($ordersMissingPaymentMethodSnapshot)),
+            ),
+            $this->issue(
+                $ordersMissingDeliveryMethodSnapshot->isNotEmpty(),
+                'orders_missing_delivery_method_snapshot',
+                'Є замовлення з delivery_method_id, але без delivery_method_name snapshot.',
+                $this->sampleList($this->ordersList($ordersMissingDeliveryMethodSnapshot)),
+            ),
+            $this->issue(
+                PaymentMethod::query()->active()->count() === 0,
+                'active_payment_methods_missing',
+                'Немає жодного активного способу оплати для checkout.',
+            ),
+            $this->issue(
+                DeliveryMethod::query()->active()->count() === 0,
+                'active_delivery_methods_missing',
+                'Немає жодного активного способу доставки для checkout.',
+            ),
+            $this->issue(
+                $cancelledOrdersMissingTimestamp->isNotEmpty(),
+                'cancelled_orders_missing_cancelled_at',
+                'Є скасовані замовлення без cancelled_at.',
+                $this->sampleList($this->ordersList($cancelledOrdersMissingTimestamp)),
+            ),
+            $this->issue(
+                $paidOrdersMissingTimestamp->isNotEmpty(),
+                'paid_orders_missing_paid_at',
+                'Є оплачені замовлення без paid_at.',
+                $this->sampleList($this->ordersList($paidOrdersMissingTimestamp)),
+            ),
+            $this->issue(
+                $shippedOrdersMissingTimestamp->isNotEmpty(),
+                'shipped_orders_missing_shipped_at',
+                'Є відправлені замовлення без shipped_at.',
+                $this->sampleList($this->ordersList($shippedOrdersMissingTimestamp)),
+            ),
+            $this->issue(
+                $completedOrdersMissingTimestamp->isNotEmpty(),
+                'completed_orders_missing_completed_at',
+                'Є завершені замовлення без completed_at.',
+                $this->sampleList($this->ordersList($completedOrdersMissingTimestamp)),
+            ),
+        ];
+    }
+
+    /**
      * @template T of object
      *
      * @param  Collection<int, T>  $items
@@ -376,6 +564,34 @@ class CommerceHealthCheck extends Command
     private function productsList(Collection $items): array
     {
         return $items->map(fn (object $item): string => 'product#'.$item->getKey().' '.$item->name)->all();
+    }
+
+    /**
+     * @param  Collection<int, Order>  $items
+     * @return array<int, string>
+     */
+    private function ordersList(Collection $items, ?string $field = null): array
+    {
+        return $items
+            ->map(function (Order $order) use ($field): string {
+                $label = 'order#'.$order->id.' '.$order->number;
+
+                if ($field) {
+                    $label .= ' '.$field.'='.(string) $order->{$field};
+                }
+
+                return $label;
+            })
+            ->all();
+    }
+
+    /**
+     * @param  array<int, \BackedEnum>  $cases
+     * @return array<int, string>
+     */
+    private function enumValues(array $cases): array
+    {
+        return array_map(fn (\BackedEnum $case): string => (string) $case->value, $cases);
     }
 
     /**

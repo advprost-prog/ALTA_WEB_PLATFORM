@@ -2,9 +2,15 @@
 
 namespace Tests\Feature;
 
+use App\Enums\DeliveryStatus;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Models\CommerceSetting;
 use App\Models\Currency;
+use App\Models\DeliveryMethod;
 use App\Models\Order;
+use App\Models\OrderStatusHistory;
+use App\Models\PaymentMethod;
 use App\Models\ProductPrice;
 use App\Models\StockBalance;
 use App\Models\StockMovement;
@@ -76,6 +82,64 @@ class CartCheckoutTest extends TestCase
             ->get(route('checkout'))
             ->assertOk()
             ->assertSee('Оформлення замовлення');
+    }
+
+    public function test_checkout_shows_only_active_payment_methods(): void
+    {
+        $product = $this->createProduct();
+
+        PaymentMethod::where('code', PaymentMethod::CASH_ON_DELIVERY)->update(['is_active' => false]);
+
+        $this->withSession(['cart' => [$product->id => 1]])
+            ->get(route('checkout'))
+            ->assertOk()
+            ->assertDontSee('Післяплата')
+            ->assertSee('Банківський переказ')
+            ->assertSee('Готівка');
+    }
+
+    public function test_checkout_shows_only_active_delivery_methods(): void
+    {
+        $product = $this->createProduct();
+
+        DeliveryMethod::where('code', DeliveryMethod::NOVA_POSHTA)->update(['is_active' => false]);
+
+        $this->withSession(['cart' => [$product->id => 1]])
+            ->get(route('checkout'))
+            ->assertOk()
+            ->assertDontSee('Нова пошта')
+            ->assertSee('Самовивіз')
+            ->assertSee('Кур’єрська доставка');
+    }
+
+    public function test_checkout_rejects_inactive_payment_method_from_request(): void
+    {
+        $product = $this->createProduct(['stock' => 2]);
+
+        PaymentMethod::where('code', PaymentMethod::CASH_ON_DELIVERY)->update(['is_active' => false]);
+
+        $this->withSession(['cart' => [$product->id => 1]])
+            ->post(route('checkout.place'), $this->checkoutData())
+            ->assertRedirect(route('cart'));
+
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, StockMovement::where('product_id', $product->id)->where('type', StockMovement::TYPE_SALE)->count());
+        $this->assertSame(2, $product->fresh()->stock);
+    }
+
+    public function test_checkout_rejects_inactive_delivery_method_from_request(): void
+    {
+        $product = $this->createProduct(['stock' => 2]);
+
+        DeliveryMethod::where('code', DeliveryMethod::NOVA_POSHTA)->update(['is_active' => false]);
+
+        $this->withSession(['cart' => [$product->id => 1]])
+            ->post(route('checkout.place'), $this->checkoutData())
+            ->assertRedirect(route('cart'));
+
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, StockMovement::where('product_id', $product->id)->where('type', StockMovement::TYPE_SALE)->count());
+        $this->assertSame(2, $product->fresh()->stock);
     }
 
     public function test_empty_checkout_redirects_to_cart(): void
@@ -218,6 +282,8 @@ class CartCheckoutTest extends TestCase
 
         $order = Order::firstOrFail();
         $item = $order->items()->firstOrFail();
+        $paymentMethod = PaymentMethod::where('code', PaymentMethod::CASH_ON_DELIVERY)->firstOrFail();
+        $deliveryMethod = DeliveryMethod::where('code', DeliveryMethod::NOVA_POSHTA)->firstOrFail();
 
         $response->assertRedirect(route('checkout.thank-you', $order));
         $this->assertDatabaseHas('orders', [
@@ -226,11 +292,25 @@ class CartCheckoutTest extends TestCase
             'currency_id' => $settings->default_currency_id,
             'currency_code' => 'UAH',
             'warehouse_id' => $settings->default_warehouse_id,
+            'status' => OrderStatus::New->value,
+            'payment_status' => PaymentStatus::Unpaid->value,
+            'delivery_status' => DeliveryStatus::Pending->value,
+            'payment_method_id' => $paymentMethod->id,
+            'payment_method_name' => 'Післяплата',
+            'delivery_method_id' => $deliveryMethod->id,
+            'delivery_method_name' => 'Нова пошта',
         ]);
         $this->assertSame($settings->default_warehouse_id, $item->warehouse_id);
         $this->assertSame('1000.00', $item->unit_price);
         $this->assertSame('1000.00', $item->price);
         $this->assertSame('2000.00', $item->total);
+        $this->assertSame(OrderStatus::New->value, $order->status);
+        $this->assertSame(PaymentStatus::Unpaid->value, $order->payment_status);
+        $this->assertSame(DeliveryStatus::Pending->value, $order->delivery_status);
+        $this->assertSame($paymentMethod->id, $order->payment_method_id);
+        $this->assertSame('Післяплата', $order->payment_method_name);
+        $this->assertSame($deliveryMethod->id, $order->delivery_method_id);
+        $this->assertSame('Нова пошта', $order->delivery_method_name);
         $this->assertSame(0, $product->fresh()->stock);
         $this->assertSame('out_of_stock', $product->fresh()->stock_status);
 
@@ -247,6 +327,30 @@ class CartCheckoutTest extends TestCase
 
         $this->assertSame('-2.000', $movement->quantity);
         $this->assertSame('0.000', $movement->balance_after);
+        $this->assertDatabaseHas('order_status_histories', [
+            'order_id' => $order->id,
+            'type' => OrderStatusHistory::TYPE_SYSTEM,
+            'comment' => 'Замовлення створено',
+        ]);
+    }
+
+    public function test_order_method_snapshots_remain_after_directory_rename(): void
+    {
+        $product = $this->createProduct(['stock' => 2]);
+
+        $this->withSession(['cart' => [$product->id => 1]])
+            ->post(route('checkout.place'), $this->checkoutData())
+            ->assertRedirect();
+
+        $order = Order::firstOrFail();
+
+        PaymentMethod::where('code', PaymentMethod::CASH_ON_DELIVERY)->update(['name' => 'Нова назва оплати']);
+        DeliveryMethod::where('code', DeliveryMethod::NOVA_POSHTA)->update(['name' => 'Нова назва доставки']);
+
+        $order->refresh();
+
+        $this->assertSame('Післяплата', $order->payment_method_name);
+        $this->assertSame('Нова пошта', $order->delivery_method_name);
     }
 
     public function test_order_item_price_snapshot_does_not_change_after_product_price_changes(): void

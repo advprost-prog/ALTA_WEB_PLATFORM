@@ -2,27 +2,36 @@
 
 namespace App\Filament\Resources\Orders;
 
+use App\Enums\DeliveryStatus;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Filament\Resources\Orders\Pages\CreateOrder;
 use App\Filament\Resources\Orders\Pages\ListOrders;
 use App\Filament\Resources\Orders\Pages\ViewOrder;
 use App\Models\CommerceSetting;
 use App\Models\Currency;
+use App\Models\DeliveryMethod;
 use App\Models\Order;
+use App\Models\OrderStatusHistory;
+use App\Models\PaymentMethod;
 use App\Models\Product;
+use App\Models\User;
 use App\Models\Warehouse;
+use App\Services\Commerce\OrderLifecycleService;
 use App\Services\Commerce\ProductPricingService;
 use BackedEnum;
 use Filament\Actions\Action;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -30,8 +39,11 @@ use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use RuntimeException;
 
 class OrderResource extends Resource
 {
@@ -84,15 +96,39 @@ class OrderResource extends Resource
                     ->schema([
                         Select::make('status')
                             ->label('Статус')
-                            ->options(Order::STATUSES)
-                            ->default('new')
+                            ->options(Order::statusOptions(includeLegacy: false))
+                            ->default(OrderStatus::New->value)
+                            ->disabled(fn (string $operation): bool => $operation !== 'create')
+                            ->dehydrated(fn (string $operation): bool => $operation === 'create')
                             ->required(),
-                        TextInput::make('delivery_method')
+                        Select::make('payment_status')
+                            ->label('Оплата')
+                            ->options(Order::paymentStatusOptions())
+                            ->default(PaymentStatus::Unpaid->value)
+                            ->disabled(fn (string $operation): bool => $operation !== 'create')
+                            ->dehydrated(fn (string $operation): bool => $operation === 'create')
+                            ->required(),
+                        Select::make('delivery_status')
+                            ->label('Доставка')
+                            ->options(Order::deliveryStatusOptions())
+                            ->default(DeliveryStatus::Pending->value)
+                            ->disabled(fn (string $operation): bool => $operation !== 'create')
+                            ->dehydrated(fn (string $operation): bool => $operation === 'create')
+                            ->required(),
+                        Select::make('delivery_method_id')
                             ->label('Спосіб доставки')
-                            ->maxLength(255),
-                        TextInput::make('payment_method')
+                            ->options(fn (): array => DeliveryMethod::query()->active()->ordered()->pluck('name', 'id')->all())
+                            ->searchable()
+                            ->preload()
+                            ->disabled(fn (string $operation): bool => $operation !== 'create')
+                            ->dehydrated(fn (string $operation): bool => $operation === 'create'),
+                        Select::make('payment_method_id')
                             ->label('Спосіб оплати')
-                            ->maxLength(255),
+                            ->options(fn (): array => PaymentMethod::query()->active()->ordered()->pluck('name', 'id')->all())
+                            ->searchable()
+                            ->preload()
+                            ->disabled(fn (string $operation): bool => $operation !== 'create')
+                            ->dehydrated(fn (string $operation): bool => $operation === 'create'),
                         Select::make('currency_id')
                             ->label('Валюта')
                             ->options(fn (): array => Currency::query()
@@ -243,14 +279,50 @@ class OrderResource extends Resource
                 TextEntry::make('status')
                     ->label('Статус')
                     ->badge()
-                    ->formatStateUsing(fn (string $state): string => Order::STATUSES[$state] ?? $state)
-                    ->color(fn (?string $state): string => self::statusColor($state)),
-                TextEntry::make('delivery_method')
-                    ->label('Доставка')
+                    ->formatStateUsing(fn (?string $state): string => OrderStatus::labelFor($state))
+                    ->color(fn (?string $state): string => OrderStatus::colorFor($state)),
+                TextEntry::make('payment_status')
+                    ->label('Статус оплати')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => PaymentStatus::labelFor($state))
+                    ->color(fn (?string $state): string => PaymentStatus::colorFor($state)),
+                TextEntry::make('delivery_status')
+                    ->label('Статус доставки')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => DeliveryStatus::labelFor($state))
+                    ->color(fn (?string $state): string => DeliveryStatus::colorFor($state)),
+                TextEntry::make('delivery_method_name')
+                    ->label('Спосіб доставки')
+                    ->state(fn (Order $record): ?string => $record->delivery_method_name ?: $record->deliveryMethod?->name ?: $record->delivery_method)
                     ->placeholder('-'),
-                TextEntry::make('payment_method')
-                    ->label('Оплата')
+                TextEntry::make('payment_method_name')
+                    ->label('Спосіб оплати')
+                    ->state(fn (Order $record): ?string => $record->payment_method_name ?: $record->paymentMethod?->name ?: $record->payment_method)
                     ->placeholder('-'),
+                TextEntry::make('confirmed_at')
+                    ->label('Підтверджено')
+                    ->dateTime()
+                    ->placeholder('-'),
+                TextEntry::make('paid_at')
+                    ->label('Оплачено')
+                    ->dateTime()
+                    ->placeholder('-'),
+                TextEntry::make('shipped_at')
+                    ->label('Відправлено')
+                    ->dateTime()
+                    ->placeholder('-'),
+                TextEntry::make('completed_at')
+                    ->label('Завершено')
+                    ->dateTime()
+                    ->placeholder('-'),
+                TextEntry::make('cancelled_at')
+                    ->label('Скасовано')
+                    ->dateTime()
+                    ->placeholder('-'),
+                TextEntry::make('cancel_reason')
+                    ->label('Причина скасування')
+                    ->placeholder('-')
+                    ->columnSpanFull(),
                 TextEntry::make('customer_comment')
                     ->label('Коментар клієнта')
                     ->placeholder('-')
@@ -265,6 +337,38 @@ class OrderResource extends Resource
                 TextEntry::make('updated_at')
                     ->dateTime()
                     ->placeholder('-'),
+                Section::make('Історія статусів')
+                    ->schema([
+                        RepeatableEntry::make('statusHistories')
+                            ->label('')
+                            ->schema([
+                                TextEntry::make('created_at')
+                                    ->label('Дата')
+                                    ->dateTime(),
+                                TextEntry::make('type')
+                                    ->label('Тип')
+                                    ->formatStateUsing(fn (?string $state): string => OrderStatusHistory::TYPES[$state] ?? (string) $state)
+                                    ->badge(),
+                                TextEntry::make('from_value')
+                                    ->label('Було')
+                                    ->formatStateUsing(fn (?string $state, OrderStatusHistory $record): string => self::formatHistoryValue($record->type, $state))
+                                    ->placeholder('-'),
+                                TextEntry::make('to_value')
+                                    ->label('Стало')
+                                    ->formatStateUsing(fn (?string $state, OrderStatusHistory $record): string => self::formatHistoryValue($record->type, $state))
+                                    ->placeholder('-'),
+                                TextEntry::make('comment')
+                                    ->label('Коментар')
+                                    ->placeholder('-')
+                                    ->columnSpan(2),
+                                TextEntry::make('creator.name')
+                                    ->label('Користувач')
+                                    ->placeholder('-'),
+                            ])
+                            ->columns(6)
+                            ->columnSpanFull(),
+                    ])
+                    ->columnSpanFull(),
             ]);
     }
 
@@ -272,15 +376,17 @@ class OrderResource extends Resource
     {
         return $table
             ->recordTitleAttribute('number')
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['customer', 'currency', 'warehouse', 'paymentMethod', 'deliveryMethod'])->latest())
             ->columns([
-                TextColumn::make('customer.name')
-                    ->label('Клієнт')
-                    ->searchable(),
+                TextColumn::make('created_at')
+                    ->label('Дата')
+                    ->dateTime()
+                    ->sortable(),
                 TextColumn::make('number')
                     ->label('Номер')
                     ->searchable(),
                 TextColumn::make('customer_name')
-                    ->label('Імʼя')
+                    ->label('Клієнт')
                     ->searchable(),
                 TextColumn::make('phone')
                     ->label('Телефон')
@@ -303,12 +409,27 @@ class OrderResource extends Resource
                 TextColumn::make('status')
                     ->label('Статус')
                     ->badge()
-                    ->formatStateUsing(fn (string $state): string => Order::STATUSES[$state] ?? $state)
-                    ->color(fn (?string $state): string => self::statusColor($state)),
-                TextColumn::make('created_at')
-                    ->label('Створено')
-                    ->dateTime()
-                    ->sortable()
+                    ->formatStateUsing(fn (?string $state): string => OrderStatus::labelFor($state))
+                    ->color(fn (?string $state): string => OrderStatus::colorFor($state)),
+                TextColumn::make('payment_status')
+                    ->label('Оплата')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => PaymentStatus::labelFor($state))
+                    ->color(fn (?string $state): string => PaymentStatus::colorFor($state)),
+                TextColumn::make('delivery_status')
+                    ->label('Доставка')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => DeliveryStatus::labelFor($state))
+                    ->color(fn (?string $state): string => DeliveryStatus::colorFor($state)),
+                TextColumn::make('payment_method_name')
+                    ->label('Спосіб оплати')
+                    ->state(fn (Order $record): ?string => $record->payment_method_name ?: $record->paymentMethod?->name ?: $record->payment_method)
+                    ->placeholder('-')
+                    ->toggleable(),
+                TextColumn::make('delivery_method_name')
+                    ->label('Спосіб доставки')
+                    ->state(fn (Order $record): ?string => $record->delivery_method_name ?: $record->deliveryMethod?->name ?: $record->delivery_method)
+                    ->placeholder('-')
                     ->toggleable(),
                 TextColumn::make('updated_at')
                     ->label('Оновлено')
@@ -319,27 +440,79 @@ class OrderResource extends Resource
             ->filters([
                 SelectFilter::make('status')
                     ->label('Статус')
-                    ->options(Order::STATUSES),
+                    ->options(Order::statusOptions()),
+                SelectFilter::make('payment_status')
+                    ->label('Статус оплати')
+                    ->options(Order::paymentStatusOptions()),
+                SelectFilter::make('delivery_status')
+                    ->label('Статус доставки')
+                    ->options(Order::deliveryStatusOptions()),
+                SelectFilter::make('payment_method_id')
+                    ->label('Спосіб оплати')
+                    ->options(fn (): array => PaymentMethod::query()->ordered()->pluck('name', 'id')->all())
+                    ->searchable(),
+                SelectFilter::make('delivery_method_id')
+                    ->label('Спосіб доставки')
+                    ->options(fn (): array => DeliveryMethod::query()->ordered()->pluck('name', 'id')->all())
+                    ->searchable(),
+                Filter::make('created_at')
+                    ->label('Дата')
+                    ->schema([
+                        DatePicker::make('created_from')->label('Від'),
+                        DatePicker::make('created_until')->label('До'),
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => $query
+                        ->when($data['created_from'] ?? null, fn (Builder $query, string $date): Builder => $query->whereDate('created_at', '>=', $date))
+                        ->when($data['created_until'] ?? null, fn (Builder $query, string $date): Builder => $query->whereDate('created_at', '<=', $date))),
             ])
             ->recordActions([
-                Action::make('quickStatus')
-                    ->label('Статус')
-                    ->icon(Heroicon::OutlinedArrowPath)
-                    ->fillForm(fn (Order $record): array => ['status' => $record->status])
+                Action::make('confirm')
+                    ->label('Підтвердити')
+                    ->icon(Heroicon::OutlinedCheckCircle)
+                    ->visible(fn (Order $record): bool => app(OrderLifecycleService::class)->canTransitionTo($record, OrderStatus::Confirmed))
+                    ->action(fn (Order $record): null => self::runLifecycleAction($record, 'confirm', 'Замовлення підтверджено')),
+                Action::make('processing')
+                    ->label('В обробці')
+                    ->icon(Heroicon::OutlinedCog6Tooth)
+                    ->visible(fn (Order $record): bool => app(OrderLifecycleService::class)->canTransitionTo($record, OrderStatus::Processing))
+                    ->action(fn (Order $record): null => self::runLifecycleAction($record, 'markProcessing', 'Замовлення взято в обробку')),
+                Action::make('readyToShip')
+                    ->label('Готове')
+                    ->icon(Heroicon::OutlinedArchiveBox)
+                    ->visible(fn (Order $record): bool => app(OrderLifecycleService::class)->canTransitionTo($record, OrderStatus::ReadyToShip))
+                    ->action(fn (Order $record): null => self::runLifecycleAction($record, 'markReadyToShip', 'Замовлення готове до відправки')),
+                Action::make('shipped')
+                    ->label('Відправити')
+                    ->icon(Heroicon::OutlinedTruck)
+                    ->visible(fn (Order $record): bool => app(OrderLifecycleService::class)->canTransitionTo($record, OrderStatus::Shipped))
+                    ->action(fn (Order $record): null => self::runLifecycleAction($record, 'markShipped', 'Замовлення позначено як відправлене')),
+                Action::make('completed')
+                    ->label('Завершити')
+                    ->icon(Heroicon::OutlinedClipboardDocumentCheck)
+                    ->visible(fn (Order $record): bool => app(OrderLifecycleService::class)->canTransitionTo($record, OrderStatus::Completed))
+                    ->requiresConfirmation()
+                    ->action(fn (Order $record): null => self::runLifecycleAction($record, 'markCompleted', 'Замовлення завершено')),
+                Action::make('paid')
+                    ->label('Оплачено')
+                    ->icon(Heroicon::OutlinedCreditCard)
+                    ->visible(fn (Order $record): bool => app(OrderLifecycleService::class)->canMarkPaid($record))
+                    ->action(fn (Order $record): null => self::runLifecycleAction($record, 'markPaid', 'Оплату зафіксовано')),
+                Action::make('cancel')
+                    ->label('Скасувати')
+                    ->icon(Heroicon::OutlinedXCircle)
+                    ->color('danger')
+                    ->visible(fn (Order $record): bool => app(OrderLifecycleService::class)->canCancel($record))
                     ->schema([
-                        Select::make('status')
-                            ->label('Новий статус')
-                            ->options(Order::STATUSES)
-                            ->required(),
+                        Textarea::make('reason')
+                            ->label('Причина')
+                            ->required()
+                            ->maxLength(2000)
+                            ->rows(3),
                     ])
-                    ->action(fn (Order $record, array $data): bool => $record->update(['status' => $data['status']])),
+                    ->modalSubmitActionLabel('Скасувати замовлення')
+                    ->action(fn (Order $record, array $data): null => self::runLifecycleAction($record, 'cancel', 'Замовлення скасовано', (string) ($data['reason'] ?? ''))),
                 ViewAction::make(),
                 EditAction::make(),
-            ])
-            ->toolbarActions([
-                BulkActionGroup::make([
-                    DeleteBulkAction::make(),
-                ]),
             ]);
     }
 
@@ -360,17 +533,31 @@ class OrderResource extends Resource
         ];
     }
 
-    private static function statusColor(?string $state): string
+    private static function runLifecycleAction(Order $record, string $method, string $successTitle, ?string $comment = null): null
     {
-        return match ($state) {
-            'new' => 'info',
-            'confirmed', 'processing' => 'warning',
-            'awaiting_payment' => 'gray',
-            'shipped' => 'primary',
-            'completed' => 'success',
-            'cancelled' => 'danger',
-            default => 'gray',
-        };
+        try {
+            app(OrderLifecycleService::class)->{$method}($record, self::currentUser(), $comment);
+
+            Notification::make()
+                ->title($successTitle)
+                ->success()
+                ->send();
+        } catch (RuntimeException $exception) {
+            Notification::make()
+                ->title('Дію відхилено')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+        }
+
+        return null;
+    }
+
+    private static function currentUser(): ?User
+    {
+        $user = auth()->user();
+
+        return $user instanceof User ? $user : null;
     }
 
     private static function multiCurrencyEnabled(): bool
@@ -389,5 +576,19 @@ class OrderResource extends Resource
             $state,
             $record?->currency ?: $record?->currency_code,
         );
+    }
+
+    private static function formatHistoryValue(?string $type, ?string $value): string
+    {
+        if ($value === null || $value === '') {
+            return '-';
+        }
+
+        return match ($type) {
+            OrderStatusHistory::TYPE_STATUS => OrderStatus::labelFor($value),
+            OrderStatusHistory::TYPE_PAYMENT_STATUS => PaymentStatus::labelFor($value),
+            OrderStatusHistory::TYPE_DELIVERY_STATUS => DeliveryStatus::labelFor($value),
+            default => $value,
+        };
     }
 }

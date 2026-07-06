@@ -2,6 +2,9 @@
 
 namespace App\Models;
 
+use App\Enums\DeliveryStatus;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -11,16 +14,6 @@ use Illuminate\Support\Facades\DB;
 class Order extends Model
 {
     use HasFactory;
-
-    public const STATUSES = [
-        'new' => 'Нове',
-        'confirmed' => 'Підтверджене',
-        'processing' => 'В роботі',
-        'awaiting_payment' => 'Очікує оплати',
-        'shipped' => 'Відправлено',
-        'completed' => 'Виконано',
-        'cancelled' => 'Скасовано',
-    ];
 
     protected $fillable = [
         'customer_id',
@@ -34,10 +27,22 @@ class Order extends Model
         'email',
         'total_amount',
         'status',
+        'payment_status',
+        'delivery_status',
         'delivery_method',
+        'delivery_method_id',
+        'delivery_method_name',
         'payment_method',
+        'payment_method_id',
+        'payment_method_name',
         'customer_comment',
         'manager_comment',
+        'confirmed_at',
+        'paid_at',
+        'shipped_at',
+        'completed_at',
+        'cancelled_at',
+        'cancel_reason',
     ];
 
     protected function casts(): array
@@ -45,6 +50,11 @@ class Order extends Model
         return [
             'total_amount' => 'decimal:2',
             'exchange_rate_to_base' => 'decimal:6',
+            'confirmed_at' => 'datetime',
+            'paid_at' => 'datetime',
+            'shipped_at' => 'datetime',
+            'completed_at' => 'datetime',
+            'cancelled_at' => 'datetime',
         ];
     }
 
@@ -70,9 +80,51 @@ class Order extends Model
 
             if (! $order->number) {
                 $nextId = DB::table($order->getTable())->max('id') + 1;
-                $order->number = 'AT-' . now()->format('ymd') . '-' . str_pad((string) $nextId, 5, '0', STR_PAD_LEFT);
+                $order->number = 'AT-'.now()->format('ymd').'-'.str_pad((string) $nextId, 5, '0', STR_PAD_LEFT);
+            }
+
+            $order->status ??= OrderStatus::New->value;
+            $order->payment_status ??= PaymentStatus::Unpaid->value;
+            $order->delivery_status ??= DeliveryStatus::Pending->value;
+
+            if ($order->payment_method_id && (! $order->payment_method || ! $order->payment_method_name)) {
+                $paymentMethod = PaymentMethod::query()->find($order->payment_method_id);
+
+                $order->payment_method ??= $paymentMethod?->code;
+                $order->payment_method_name ??= $paymentMethod?->name;
+            }
+
+            if ($order->delivery_method_id && (! $order->delivery_method || ! $order->delivery_method_name)) {
+                $deliveryMethod = DeliveryMethod::query()->find($order->delivery_method_id);
+
+                $order->delivery_method ??= $deliveryMethod?->code;
+                $order->delivery_method_name ??= $deliveryMethod?->name;
             }
         });
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function statusOptions(bool $includeLegacy = true): array
+    {
+        return OrderStatus::options($includeLegacy);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function paymentStatusOptions(): array
+    {
+        return PaymentStatus::options();
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function deliveryStatusOptions(): array
+    {
+        return DeliveryStatus::options();
     }
 
     public function customer(): BelongsTo
@@ -90,8 +142,23 @@ class Order extends Model
         return $this->belongsTo(Warehouse::class);
     }
 
+    public function paymentMethod(): BelongsTo
+    {
+        return $this->belongsTo(PaymentMethod::class);
+    }
+
+    public function deliveryMethod(): BelongsTo
+    {
+        return $this->belongsTo(DeliveryMethod::class);
+    }
+
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class);
+    }
+
+    public function statusHistories(): HasMany
+    {
+        return $this->hasMany(OrderStatusHistory::class)->latest();
     }
 }

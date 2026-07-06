@@ -2,6 +2,39 @@
 
 This release stabilizes the commerce module after the storefront move to multi-currency, multi-warehouse, cart, and checkout flows.
 
+## Order Lifecycle Update
+
+This update adds the first internal order lifecycle layer after the commerce foundation release.
+
+Added:
+
+- centralized order status enums for order, payment, and delivery states
+- `payment_methods` and `delivery_methods` directories with active/inactive flags
+- order method snapshots: payment/delivery method id and method name
+- lifecycle timestamps on orders
+- `order_status_histories` for status, payment, delivery, note, and system events
+- `App\Services\Commerce\OrderLifecycleService`
+- Filament order actions for confirm, processing, ready to ship, shipped, completed, paid, and cancel
+- cancellation stock compensation before shipment through `StockService`
+- lifecycle health-check diagnostics for broken statuses, snapshots, active methods, and timestamps
+- repeated cancel protection so stock is not returned twice
+
+Admin workflow:
+
+- new storefront orders start as `new`
+- managers confirm the order, move it through processing and shipping states, and mark payment manually
+- `completed` closes the order
+- `cancelled` closes the order and blocks routine lifecycle changes
+- cancel before shipping restores stock with a `return` movement and keeps the original `sale` movement as audit history
+- shipped and completed orders are not automatically cancelled in this phase
+
+Storefront workflow:
+
+- checkout shows only active payment and delivery methods
+- orders store snapshots of method names
+- the thank-you page shows the order number, total, selected payment/delivery methods, and a simple accepted status
+- no payment gateway, Nova Poshta API, or automatic notification channel is connected in this phase
+
 ## What Was Added
 
 - a read-only `commerce:health-check` artisan command
@@ -20,8 +53,11 @@ These tables and models are part of the release surface:
 - `product_prices` / `App\Models\ProductPrice`
 - `stock_balances` / `App\Models\StockBalance`
 - `stock_movements` / `App\Models\StockMovement`
+- `payment_methods` / `App\Models\PaymentMethod`
+- `delivery_methods` / `App\Models\DeliveryMethod`
 - `orders` / `App\Models\Order`
 - `order_items` / `App\Models\OrderItem`
+- `order_status_histories` / `App\Models\OrderStatusHistory`
 
 ## Core Services
 
@@ -30,6 +66,7 @@ These tables and models are part of the release surface:
 - `App\Services\Commerce\FulfillmentService` chooses a single warehouse for checkout
 - `App\Services\Commerce\StockService` updates stock balances and stock movements inside transactions
 - `App\Services\Commerce\CheckoutService` assembles the cart payload and creates orders
+- `App\Services\Commerce\OrderLifecycleService` validates order lifecycle transitions and writes order history
 
 ## Mode Summary
 
@@ -79,3 +116,7 @@ Do not use `php artisan migrate:fresh` on staging or production.
 - there is no auto-fix path in this phase
 - warehouse internals stay hidden from the customer
 - historical orders rely on snapshots and should not be edited as live product data
+- payment and delivery method names are snapshotted on each order
+- manual `paid` status does not imply a real payment gateway transaction
+- post-shipment returns remain out of scope and should not be modeled as a simple cancel
+- see `docs/order-lifecycle.md` for the current transition map and stabilization rules

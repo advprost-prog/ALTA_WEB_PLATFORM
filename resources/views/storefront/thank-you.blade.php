@@ -47,9 +47,9 @@
                     <span class="text-3xl font-black text-white">{{ $pricingService->formatAmount($order->total_amount, $orderCurrency ?: $order->currency_code) }}</span>
                 </div>
                 <div class="mt-5 grid gap-2 text-sm font-bold text-zinc-400">
-                    <div>Статус: <span class="text-amber-300">{{ \App\Models\Order::STATUSES[$order->status] ?? $order->status }}</span></div>
-                    <div>Доставка: <span class="text-white">{{ $order->delivery_method }}</span></div>
-                    <div>Оплата: <span class="text-white">{{ $order->payment_method }}</span></div>
+                    <div>Статус: <span class="text-amber-300">Замовлення прийнято</span></div>
+                    <div>Доставка: <span class="text-white">{{ $order->delivery_method_name ?: $order->deliveryMethod?->name ?: $order->delivery_method }}</span></div>
+                    <div>Оплата: <span class="text-white">{{ $order->payment_method_name ?: $order->paymentMethod?->name ?: $order->payment_method }}</span></div>
                 </div>
             </aside>
         </div>

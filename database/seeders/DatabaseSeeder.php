@@ -8,7 +8,9 @@ use App\Models\Category;
 use App\Models\CommerceSetting;
 use App\Models\Currency;
 use App\Models\Customer;
+use App\Models\DeliveryMethod;
 use App\Models\Order;
+use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductPrice;
 use App\Models\Promotion;
@@ -32,6 +34,12 @@ class DatabaseSeeder extends Seeder
 
         $currency = Currency::ensureDefault();
         $warehouse = Warehouse::ensureDefault();
+        PaymentMethod::ensureDefaults();
+        DeliveryMethod::ensureDefaults();
+
+        $cashOnDelivery = PaymentMethod::query()->where('code', PaymentMethod::CASH_ON_DELIVERY)->first();
+        $novaPoshta = DeliveryMethod::query()->where('code', DeliveryMethod::NOVA_POSHTA)->first();
+
         $commerceSettings = CommerceSetting::query()->first()
             ?? CommerceSetting::query()->create([
                 'multi_currency_enabled' => false,
@@ -65,8 +73,8 @@ class DatabaseSeeder extends Seeder
                     'image' => $category['image'],
                     'is_active' => true,
                     'sort_order' => $index + 1,
-                    'seo_title' => $category['name'] . ' | Alta-Trade',
-                    'seo_description' => 'Купити ' . mb_strtolower($category['name']) . ' в Alta-Trade з швидким оформленням замовлення.',
+                    'seo_title' => $category['name'].' | Alta-Trade',
+                    'seo_description' => 'Купити '.mb_strtolower($category['name']).' в Alta-Trade з швидким оформленням замовлення.',
                 ],
             ),
         ]);
@@ -569,8 +577,8 @@ class DatabaseSeeder extends Seeder
                 'is_new' => $data['is_new'] ?? false,
                 'is_hit' => $data['is_hit'] ?? false,
                 'is_sale' => $data['is_sale'] ?? false,
-                'seo_title' => $data['name'] . ' | Alta-Trade',
-                'seo_description' => 'Купити ' . $data['name'] . ' в інтернет-магазині Alta-Trade.',
+                'seo_title' => $data['name'].' | Alta-Trade',
+                'seo_description' => 'Купити '.$data['name'].' в інтернет-магазині Alta-Trade.',
             ]);
 
             if (! $product->exists || blank($product->main_image)) {
@@ -655,8 +663,14 @@ class DatabaseSeeder extends Seeder
                 'email' => $customer->email,
                 'total_amount' => $demoProduct?->price ?? 0,
                 'status' => 'new',
-                'delivery_method' => 'Нова пошта',
-                'payment_method' => 'Післяплата',
+                'payment_status' => 'unpaid',
+                'delivery_status' => 'pending',
+                'delivery_method' => $novaPoshta?->code ?? 'nova_poshta',
+                'delivery_method_id' => $novaPoshta?->id,
+                'delivery_method_name' => $novaPoshta?->name ?? 'Нова пошта',
+                'payment_method' => $cashOnDelivery?->code ?? 'cash_on_delivery',
+                'payment_method_id' => $cashOnDelivery?->id,
+                'payment_method_name' => $cashOnDelivery?->name ?? 'Післяплата',
                 'customer_comment' => 'Демо-замовлення для перевірки адмінки.',
             ],
         );

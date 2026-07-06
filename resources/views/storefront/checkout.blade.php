@@ -56,18 +56,18 @@
                         <div>
                             <label class="label" for="delivery_method">Доставка</label>
                             <select id="delivery_method" name="delivery_method" class="field mt-2" required>
-                                <option value="Нова пошта" @selected(old('delivery_method') === 'Нова пошта')>Нова пошта</option>
-                                <option value="Самовивіз" @selected(old('delivery_method') === 'Самовивіз')>Самовивіз</option>
-                                <option value="Курʼєр" @selected(old('delivery_method') === 'Курʼєр')>Курʼєр</option>
+                                @foreach ($deliveryMethods as $method)
+                                    <option value="{{ $method->code }}" @selected(in_array(old('delivery_method'), [$method->code, $method->name], true))>{{ $method->name }}</option>
+                                @endforeach
                             </select>
                             @error('delivery_method') <div class="mt-2 text-sm text-rose-300">{{ $message }}</div> @enderror
                         </div>
                         <div>
                             <label class="label" for="payment_method">Оплата</label>
                             <select id="payment_method" name="payment_method" class="field mt-2" required>
-                                <option value="Післяплата" @selected(old('payment_method') === 'Післяплата')>Післяплата</option>
-                                <option value="Оплата карткою" @selected(old('payment_method') === 'Оплата карткою')>Оплата карткою</option>
-                                <option value="Безготівковий рахунок" @selected(old('payment_method') === 'Безготівковий рахунок')>Безготівковий рахунок</option>
+                                @foreach ($paymentMethods as $method)
+                                    <option value="{{ $method->code }}" @selected(in_array(old('payment_method'), [$method->code, $method->name], true))>{{ $method->name }}</option>
+                                @endforeach
                             </select>
                             @error('payment_method') <div class="mt-2 text-sm text-rose-300">{{ $message }}</div> @enderror
                         </div>
