@@ -59,6 +59,10 @@ class NotificationOutboxResource extends Resource
                     ->label('Канал')
                     ->formatStateUsing(fn (?string $state): string => NotificationChannel::labelFor($state))
                     ->badge(),
+                TextEntry::make('mailer')
+                    ->label('Mailer')
+                    ->state(fn (): string => (string) config('mail.default'))
+                    ->badge(),
                 TextEntry::make('recipient')->label('Отримувач')->placeholder('-'),
                 TextEntry::make('status')
                     ->label('Статус')
@@ -95,6 +99,11 @@ class NotificationOutboxResource extends Resource
                     ->label('Канал')
                     ->formatStateUsing(fn (?string $state): string => NotificationChannel::labelFor($state))
                     ->badge(),
+                TextColumn::make('mailer')
+                    ->label('Mailer')
+                    ->state(fn (): string => (string) config('mail.default'))
+                    ->badge()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('recipient')
                     ->label('Отримувач')
                     ->searchable()

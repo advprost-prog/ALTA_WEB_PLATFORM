@@ -101,12 +101,16 @@ Multi-warehouse mode:
 7. Run `php artisan route:clear`
 8. Run `php artisan view:clear`
 9. Run `php artisan commerce:health-check`
-10. Run `php artisan test`
-11. Run `git diff --check`
-12. Verify the storefront
-13. Verify checkout end to end
-14. Verify Filament commerce settings
-15. Verify stock movements after a test order
+10. For email delivery, set `MAIL_*` in the environment; never commit SMTP credentials
+11. Run `php artisan config:clear`
+12. Run `php artisan notifications:test-email test@example.com`
+13. Run `php artisan notifications:send-pending --dry-run`
+14. Run `php artisan test`
+15. Run `git diff --check`
+16. Verify the storefront
+17. Verify checkout end to end
+18. Verify Filament commerce settings
+19. Verify stock movements after a test order
 
 Do not use `php artisan migrate:fresh` on staging or production.
 

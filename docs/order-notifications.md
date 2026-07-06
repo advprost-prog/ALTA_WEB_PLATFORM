@@ -133,12 +133,67 @@ Email uses Laravel Mail with `OrderNotificationMail`. SMTP credentials are not s
 
 If the project uses the default local `log` mailer, mail is treated as sent by Laravel and written to logs. If a real SMTP mailer is configured and sending fails, the outbox row is marked `failed`; the order status change remains committed.
 
+### SMTP Setup
+
+Production email delivery should be configured through environment variables only:
+
+- `MAIL_MAILER=smtp`
+- `MAIL_HOST`
+- `MAIL_PORT`
+- `MAIL_USERNAME`
+- `MAIL_PASSWORD`
+- `MAIL_ENCRYPTION`
+- `MAIL_FROM_ADDRESS`
+- `MAIL_FROM_NAME="${APP_NAME}"`
+
+Do not commit SMTP usernames, passwords, tokens, or `.env`. Local and staging environments may keep using `log`, `array`, or Mailpit-style SMTP settings when real delivery is not needed.
+
+`config/mail.php` supports both Laravel's `MAIL_SCHEME` key and the operator-facing `MAIL_ENCRYPTION` key for SMTP encryption.
+
+### Test Email Command
+
+Use this command to verify Laravel Mail transport without creating order data or notification outbox rows:
+
+```bash
+php artisan notifications:test-email test@example.com
+```
+
+The command validates the email address, prints the current mailer, sends a simple technical email, returns exit code `0` on success, and returns exit code `1` on failure. It redacts configured SMTP username/password values from failure output.
+
+### Send Pending Command
+
+Pending outbox rows can be processed manually or by a future cron using:
+
+```bash
+php artisan notifications:send-pending
+```
+
+Options:
+
+- `--limit=50`
+- `--dry-run`
+- `--order-id=`
+- `--event=`
+- `--channel=email`
+
+The command only selects `pending` rows. It does not touch `sent` history, order statuses, stock balances, or stock movements. It continues processing if one notification fails and prints a summary with `processed`, `sent`, `failed`, and `skipped`.
+
+`--dry-run` lists matching rows without sending mail or mutating the database.
+
+### Retry Policy
+
+- `pending` rows are processed by `notifications:send-pending`.
+- `failed` and `skipped` rows can be resent from the admin UI.
+- Resend creates a new outbox attempt.
+- `sent` rows are immutable for automatic processing.
+- Retry/resend does not create lifecycle duplicates, change order status, or create stock movements.
+
 ## Admin UI
 
 Filament resources:
 
-- `NotificationTemplateResource`: list/view/edit templates, filter by event/channel/activity, edit subject/body/is_active, show available variables.
-- `NotificationOutboxResource`: read-only list/view of notification attempts, filters by order/event/channel/status/date, resend action for `pending`, `failed`, and `skipped`.
+- `NotificationTemplateResource`: list/view/edit templates, filter by event/channel/activity, edit subject/body/is_active, show available variables, and warn that PHP/Blade/eval are not executed.
+- `NotificationOutboxResource`: read-only list/view of notification attempts, shows channel/status/current mailer/error message, filters by order/event/channel/status/date, resend action for `pending`, `failed`, and `skipped`.
 
 `OrderResource` view includes a read-only `Повідомлення` section with outbox rows for the order. It also exposes a resend action for resendable notifications on that order.
 
@@ -155,5 +210,16 @@ Filament resources:
 - pending notifications older than 24 hours: warning
 - failed notifications: warning
 - active email templates without subject: warning
+- missing production SMTP configuration: critical
+- incomplete local SMTP configuration when `MAIL_MAILER=smtp`: warning
+- invalid `MAIL_FROM_ADDRESS`: warning or critical depending on environment
 
 Warnings do not fail the command. Critical issues still make the command exit non-zero.
+
+## Security Notes
+
+- SMTP credentials live in environment variables, not in Git.
+- `.env` must not be committed.
+- Template content is rendered through a simple variable replacer, not PHP, Blade, or `eval`.
+- Rendered email body content is escaped by the mail view.
+- Transport failures are written to outbox as redacted `error_message` text where configured SMTP username/password values are known.

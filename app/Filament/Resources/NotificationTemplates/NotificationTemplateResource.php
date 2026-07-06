@@ -70,12 +70,12 @@ class NotificationTemplateResource extends Resource
                         TextInput::make('subject')
                             ->label('Тема')
                             ->maxLength(255)
-                            ->helperText(NotificationTemplate::variablesText()),
+                            ->helperText('Доступні змінні: '.NotificationTemplate::variablesText().'. PHP, Blade та eval не виконуються.'),
                         Textarea::make('body')
                             ->label('Текст')
                             ->required()
                             ->rows(10)
-                            ->helperText('Доступні змінні: '.NotificationTemplate::variablesText()),
+                            ->helperText('Доступні змінні: '.NotificationTemplate::variablesText().'. HTML з даних клієнта екранується у email view; PHP, Blade та eval не виконуються.'),
                         Toggle::make('is_active')
                             ->label('Активний'),
                         Toggle::make('is_system')

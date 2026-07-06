@@ -320,6 +320,28 @@ class OrderNotificationService
 
     private function cleanError(string $reason): string
     {
-        return mb_substr(trim($reason), 0, 2000);
+        $reason = trim($reason);
+
+        foreach ($this->mailSecrets() as $secret) {
+            $reason = str_replace($secret, '[redacted]', $reason);
+        }
+
+        return mb_substr($reason, 0, 2000);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function mailSecrets(): array
+    {
+        return collect([
+            config('mail.mailers.smtp.username'),
+            config('mail.mailers.smtp.password'),
+        ])
+            ->filter(fn (mixed $value): bool => is_string($value) && trim($value) !== '')
+            ->map(fn (string $value): string => trim($value))
+            ->unique()
+            ->values()
+            ->all();
     }
 }

@@ -274,6 +274,10 @@ class OrderNotificationsTest extends TestCase
 
         [$order] = $this->placeCheckoutOrder(email: null);
         $skipped = NotificationOutbox::where('order_id', $order->id)->firstOrFail();
+        $statusBefore = $order->status;
+        $stockMovementsBefore = StockMovement::where('related_type', Order::class)
+            ->where('related_id', $order->id)
+            ->count();
 
         $order->forceFill(['email' => 'buyer@example.test'])->save();
 
@@ -282,6 +286,10 @@ class OrderNotificationsTest extends TestCase
         $this->assertNotSame($skipped->id, $resent->id);
         $this->assertSame(NotificationStatus::Sent->value, $resent->status);
         $this->assertSame('buyer@example.test', $resent->recipient);
+        $this->assertSame($statusBefore, $order->fresh()->status);
+        $this->assertSame($stockMovementsBefore, StockMovement::where('related_type', Order::class)
+            ->where('related_id', $order->id)
+            ->count());
     }
 
     public function test_health_check_reports_notification_problems_and_warnings(): void

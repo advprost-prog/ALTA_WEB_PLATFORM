@@ -12,6 +12,7 @@ use App\Models\PaymentMethod;
 use App\Models\ProductPrice;
 use App\Models\StockBalance;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Config;
 use Tests\Feature\Concerns\CreatesCommerceData;
 use Tests\TestCase;
 
@@ -28,6 +29,50 @@ class CommerceHealthCheckTest extends TestCase
             ->expectsOutputToContain('status: ok')
             ->expectsOutputToContain('Критичних проблем не знайдено.')
             ->assertExitCode(0);
+    }
+
+    public function test_commerce_health_check_allows_local_array_mailer(): void
+    {
+        Config::set('app.env', 'local');
+        Config::set('mail.default', 'array');
+        Config::set('mail.from.address', 'hello@example.com');
+        CommerceSetting::current();
+
+        $this->artisan('commerce:health-check')
+            ->expectsOutputToContain('status: ok')
+            ->assertExitCode(0);
+    }
+
+    public function test_commerce_health_check_reports_missing_production_smtp_configuration(): void
+    {
+        Config::set('app.env', 'production');
+        Config::set('mail.default', 'smtp');
+        Config::set('mail.mailers.smtp.host', '');
+        Config::set('mail.mailers.smtp.port', '');
+        Config::set('mail.from.address', '');
+        CommerceSetting::current();
+
+        $this->artisan('commerce:health-check')
+            ->expectsOutputToContain('mail_smtp_host_missing')
+            ->expectsOutputToContain('mail_smtp_port_missing')
+            ->expectsOutputToContain('mail_from_address_missing')
+            ->assertExitCode(1);
+    }
+
+    public function test_commerce_health_check_reports_production_smtp_placeholders(): void
+    {
+        Config::set('app.env', 'production');
+        Config::set('mail.default', 'smtp');
+        Config::set('mail.mailers.smtp.host', '127.0.0.1');
+        Config::set('mail.mailers.smtp.port', 2525);
+        Config::set('mail.from.address', 'hello@example.com');
+        CommerceSetting::current();
+
+        $this->artisan('commerce:health-check')
+            ->expectsOutputToContain('mail_smtp_host_missing')
+            ->expectsOutputToContain('mail_smtp_port_missing')
+            ->expectsOutputToContain('mail_from_address_missing')
+            ->assertExitCode(1);
     }
 
     public function test_commerce_health_check_returns_failure_on_missing_default_product_price(): void

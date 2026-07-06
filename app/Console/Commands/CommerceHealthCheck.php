@@ -257,9 +257,11 @@ class CommerceHealthCheck extends Command
         $criticalIssues = array_merge($criticalIssues, $this->lifecycleIssues());
         [$notificationCriticalIssues, $notificationWarningIssues] = $this->notificationIssues();
         $criticalIssues = array_merge($criticalIssues, $notificationCriticalIssues);
+        [$mailCriticalIssues, $mailWarningIssues] = $this->mailIssues();
+        $criticalIssues = array_merge($criticalIssues, $mailCriticalIssues);
 
         $criticalIssues = array_values(array_filter($criticalIssues));
-        $warningIssues = array_values(array_filter($notificationWarningIssues));
+        $warningIssues = array_values(array_filter(array_merge($notificationWarningIssues, $mailWarningIssues)));
 
         return [
             'status' => $criticalIssues === [] ? 'ok' : 'failed',
@@ -751,6 +753,88 @@ class CommerceHealthCheck extends Command
                 ),
             ],
         ];
+    }
+
+    /**
+     * @return array{0: array<int, array{code: string, message: string, count: int, examples: array<int, string>}|null>, 1: array<int, array{code: string, message: string, count: int, examples: array<int, string>}|null>}
+     */
+    private function mailIssues(): array
+    {
+        $environment = (string) config('app.env', app()->environment());
+        $isProduction = $environment === 'production';
+        $mailer = trim((string) config('mail.default', ''));
+        $smtp = (array) config('mail.mailers.smtp', []);
+        $smtpHost = trim((string) ($smtp['host'] ?? ''));
+        $smtpPort = trim((string) ($smtp['port'] ?? ''));
+        $fromAddress = trim((string) config('mail.from.address', ''));
+        $smtpHostLooksLikePlaceholder = in_array(strtolower($smtpHost), ['127.0.0.1', 'localhost', '0.0.0.0'], true);
+        $smtpPortLooksLikePlaceholder = $smtpPort === '2525';
+        $fromLooksLikePlaceholder = $fromAddress === 'hello@example.com';
+        $smtpHostMissing = $smtpHost === '' || ($isProduction && $smtpHostLooksLikePlaceholder);
+        $smtpPortMissing = $smtpPort === '' || ($isProduction && $smtpPortLooksLikePlaceholder);
+        $fromMissing = $fromAddress === '' || ($isProduction && $fromLooksLikePlaceholder);
+        $fromInvalid = $fromAddress !== '' && ! filter_var($fromAddress, FILTER_VALIDATE_EMAIL);
+
+        $critical = [
+            $this->issue(
+                $mailer === '',
+                'mail_mailer_missing',
+                'MAIL_MAILER не налаштований.',
+            ),
+            $this->issue(
+                $isProduction && $mailer !== '' && $mailer !== 'smtp',
+                'mail_smtp_required_in_production',
+                'Production середовище має використовувати SMTP mailer для реальної доставки email.',
+                ['current_mailer='.$mailer],
+            ),
+            $this->issue(
+                $isProduction && $mailer === 'smtp' && $smtpHostMissing,
+                'mail_smtp_host_missing',
+                'SMTP mailer увімкнений, але MAIL_HOST порожній або має dev-placeholder.',
+            ),
+            $this->issue(
+                $isProduction && $mailer === 'smtp' && $smtpPortMissing,
+                'mail_smtp_port_missing',
+                'SMTP mailer увімкнений, але MAIL_PORT порожній або має dev-placeholder.',
+            ),
+            $this->issue(
+                $isProduction && $fromMissing,
+                'mail_from_address_missing',
+                'Production MAIL_FROM_ADDRESS має бути заданий реальним email.',
+            ),
+            $this->issue(
+                $isProduction && $fromInvalid,
+                'mail_from_address_invalid',
+                'MAIL_FROM_ADDRESS не є валідним email.',
+                ['from='.$fromAddress],
+            ),
+        ];
+
+        $warnings = [
+            $this->issue(
+                ! $isProduction && $mailer === 'smtp' && $smtpHost === '',
+                'mail_smtp_host_missing',
+                'SMTP mailer увімкнений, але MAIL_HOST порожній.',
+            ),
+            $this->issue(
+                ! $isProduction && $mailer === 'smtp' && $smtpPort === '',
+                'mail_smtp_port_missing',
+                'SMTP mailer увімкнений, але MAIL_PORT порожній.',
+            ),
+            $this->issue(
+                ! $isProduction && $mailer === 'smtp' && $fromAddress === '',
+                'mail_from_address_missing',
+                'SMTP mailer увімкнений, але MAIL_FROM_ADDRESS порожній.',
+            ),
+            $this->issue(
+                ! $isProduction && $fromInvalid,
+                'mail_from_address_invalid',
+                'MAIL_FROM_ADDRESS не є валідним email.',
+                ['from='.$fromAddress],
+            ),
+        ];
+
+        return [$critical, $warnings];
     }
 
     /**
