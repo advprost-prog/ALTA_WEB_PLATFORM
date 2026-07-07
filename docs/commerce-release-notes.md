@@ -2,6 +2,18 @@
 
 This release stabilizes the commerce module after the storefront move to multi-currency, multi-warehouse, cart, and checkout flows.
 
+## Banner Design System Update
+
+Added:
+
+- managed banner design fields for layout, style, color scheme, overlay, CTA style, media framing, and animation
+- `style_preset` values: `clean_light`, `dark_overlay`, `brand_gradient`, `glass_card`, `compact_promo`, `split_product`
+- responsive storefront banner component with desktop/mobile image fallback
+- whitelist-based CSS class mapping, safe CTA URL handling, and no empty CTA rendering
+- lightweight CSS animations with `prefers-reduced-motion`
+- banner admin tabs and validation for enum values, URLs, colors, opacity, and animation timing
+- `docs/banners.md` with field, preset, and image-preparation guidance
+
 ## Order Lifecycle Update
 
 This update adds the first internal order lifecycle layer after the commerce foundation release.

@@ -5,22 +5,14 @@
 @endphp
 
 @section('content')
-    <section class="relative border-b border-white/10 bg-neutral-950">
-        <img src="{{ $catalogBanner?->image_url ?? $bannerPlaceholder }}" alt="{{ $catalogBanner?->title ?? 'Каталог Alta-Trade' }}" class="absolute inset-0 h-full w-full object-cover opacity-35" onerror="this.onerror=null;this.src='{{ $bannerPlaceholder }}';">
-        <div class="absolute inset-0 bg-[linear-gradient(90deg,#101114_0%,rgba(16,17,20,.82)_62%,rgba(16,17,20,.28)_100%)]"></div>
-        <div class="section-shell relative py-14">
-            <nav class="text-sm font-bold text-zinc-400">
-                <a href="{{ route('home') }}" class="hover:text-amber-300">Головна</a>
-                <span class="mx-2 text-zinc-600">/</span>
-                <span class="text-white">Каталог</span>
-            </nav>
-            <div class="mt-8 max-w-3xl">
-                <div class="eyebrow">Каталог Alta-Trade</div>
-                <h1 class="mt-3 text-4xl font-black text-white sm:text-6xl">{{ $catalogBanner?->title ?? 'Каталог запчастин і автотоварів' }}</h1>
-                <p class="mt-4 max-w-2xl text-lg leading-8 text-zinc-300">{{ $catalogBanner?->subtitle ?? 'Фільтруйте за категорією, брендом, наявністю, акціями та популярністю.' }}</p>
-            </div>
-        </div>
-    </section>
+    @include('storefront.components.banner', [
+        'banner' => $catalogBanner,
+        'context' => 'catalog',
+        'placeholder' => $bannerPlaceholder,
+        'fallbackEyebrow' => 'Каталог Alta-Trade',
+        'fallbackTitle' => 'Каталог запчастин і автотоварів',
+        'fallbackSubtitle' => 'Фільтруйте за категорією, брендом, наявністю, акціями та популярністю.',
+    ])
 
     <section class="section-shell">
         <div class="grid gap-8 lg:grid-cols-[300px_1fr]">

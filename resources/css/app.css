@@ -143,6 +143,468 @@
         box-shadow: var(--shadow-card);
     }
 
+    .storefront-design-banner {
+        --banner-min-h: 24rem;
+        --banner-overlay-opacity: 0.34;
+        position: relative;
+        isolation: isolate;
+        overflow: hidden;
+        border: 1px solid var(--color-border);
+        background: var(--banner-bg, color-mix(in srgb, var(--color-surface) 82%, black 18%));
+        color: var(--banner-text, var(--color-text));
+    }
+
+    .storefront-design-banner--context-hero,
+    .storefront-design-banner--context-catalog {
+        border-right: 0;
+        border-left: 0;
+    }
+
+    .storefront-design-banner--context-hero {
+        border-top: 0;
+    }
+
+    .storefront-design-banner--context-promo {
+        min-height: 18rem;
+    }
+
+    .storefront-design-banner__inner {
+        position: relative;
+        z-index: 2;
+        display: grid;
+        min-height: var(--banner-min-h);
+        align-items: center;
+        gap: 2rem;
+    }
+
+    .storefront-design-banner__content {
+        width: min(100%, 44rem);
+        padding-block: 2.5rem;
+    }
+
+    .storefront-design-banner--context-promo .storefront-design-banner__content {
+        padding: 1.5rem;
+    }
+
+    .storefront-design-banner__media {
+        overflow: hidden;
+    }
+
+    .storefront-design-banner__media--background {
+        position: absolute;
+        inset: 0;
+        z-index: -2;
+    }
+
+    .storefront-design-banner__media--inline {
+        position: relative;
+        min-height: min(28rem, var(--banner-min-h));
+        border-radius: inherit;
+        background: color-mix(in srgb, var(--color-surface-alt) 82%, black 18%);
+    }
+
+    .storefront-design-banner__media picture,
+    .storefront-design-banner__media img {
+        display: block;
+        height: 100%;
+        width: 100%;
+    }
+
+    .storefront-design-banner__image {
+        opacity: 0.9;
+    }
+
+    .storefront-design-banner__image--fit-cover {
+        object-fit: cover;
+    }
+
+    .storefront-design-banner__image--fit-contain {
+        object-fit: contain;
+        padding: 1rem;
+    }
+
+    .storefront-design-banner__image--position-center {
+        object-position: center;
+    }
+
+    .storefront-design-banner__image--position-left {
+        object-position: left center;
+    }
+
+    .storefront-design-banner__image--position-right {
+        object-position: right center;
+    }
+
+    .storefront-design-banner__image--position-top {
+        object-position: center top;
+    }
+
+    .storefront-design-banner__image--position-bottom {
+        object-position: center bottom;
+    }
+
+    .storefront-design-banner__overlay {
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        opacity: var(--banner-overlay-opacity);
+    }
+
+    .storefront-design-banner__media--inline .storefront-design-banner__overlay {
+        z-index: 1;
+    }
+
+    .storefront-design-banner__overlay--dark {
+        background: linear-gradient(90deg, #090a0d 0%, rgba(9, 10, 13, 0.78) 54%, rgba(9, 10, 13, 0.22) 100%);
+    }
+
+    .storefront-design-banner__overlay--light {
+        background: linear-gradient(90deg, #ffffff 0%, rgba(255, 255, 255, 0.86) 58%, rgba(255, 255, 255, 0.32) 100%);
+    }
+
+    .storefront-design-banner__overlay--brand {
+        background: linear-gradient(120deg, var(--banner-accent, var(--color-primary)) 0%, rgba(16, 17, 20, 0.92) 62%, rgba(16, 17, 20, 0.24) 100%);
+    }
+
+    .storefront-design-banner__overlay--gradient {
+        background:
+            linear-gradient(115deg, rgba(8, 9, 11, 0.92), rgba(8, 9, 11, 0.32)),
+            linear-gradient(135deg, var(--banner-accent, var(--color-primary)), var(--color-secondary));
+    }
+
+    .storefront-design-banner__eyebrow {
+        display: inline-flex;
+        width: fit-content;
+        max-width: 100%;
+        align-items: center;
+        gap: 0.4rem;
+        border: 1px solid color-mix(in srgb, var(--banner-accent, var(--color-primary)) 44%, transparent);
+        border-radius: var(--badge-radius);
+        background: color-mix(in srgb, var(--banner-accent, var(--color-primary)) 14%, transparent);
+        color: var(--banner-accent, var(--color-primary));
+        padding: 0.35rem 0.6rem;
+        font-size: 0.75rem;
+        font-weight: 900;
+        letter-spacing: 0;
+        text-transform: uppercase;
+    }
+
+    .storefront-design-banner__title {
+        margin-top: 1rem;
+        max-width: 100%;
+        color: inherit;
+        font-size: clamp(2.25rem, 8vw, 4.75rem);
+        font-weight: 900;
+        line-height: 0.98;
+        overflow-wrap: anywhere;
+    }
+
+    .storefront-design-banner--context-promo .storefront-design-banner__title {
+        font-size: clamp(1.65rem, 5vw, 2.5rem);
+        line-height: 1.05;
+    }
+
+    .storefront-design-banner--context-catalog .storefront-design-banner__title {
+        font-size: clamp(2.25rem, 6vw, 4rem);
+    }
+
+    .storefront-design-banner__subtitle {
+        margin-top: 1.1rem;
+        max-width: 42rem;
+        color: color-mix(in srgb, currentColor 78%, var(--color-muted-text));
+        font-size: 1.06rem;
+        font-weight: 600;
+        line-height: 1.7;
+    }
+
+    .storefront-design-banner--context-promo .storefront-design-banner__subtitle {
+        font-size: 0.95rem;
+        line-height: 1.6;
+    }
+
+    .storefront-design-banner__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-top: 1.6rem;
+    }
+
+    .storefront-design-banner__button {
+        display: inline-flex;
+        min-height: 2.75rem;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--button-radius);
+        padding: 0.8rem 1.15rem;
+        font-size: 0.82rem;
+        font-weight: var(--button-weight);
+        line-height: 1;
+        text-transform: uppercase;
+        transition:
+            transform 160ms ease,
+            border-color 160ms ease,
+            background 160ms ease,
+            color 160ms ease;
+    }
+
+    .storefront-design-banner__button:hover {
+        transform: translateY(-1px);
+    }
+
+    .storefront-design-banner__button--primary {
+        background: var(--banner-accent, var(--color-primary));
+        color: var(--color-primary-contrast);
+    }
+
+    .storefront-design-banner__button--secondary,
+    .storefront-design-banner__button--outline {
+        border: 1px solid color-mix(in srgb, currentColor 46%, transparent);
+        color: currentColor;
+    }
+
+    .storefront-design-banner__button--dark {
+        background: #101114;
+        color: #ffffff;
+    }
+
+    .storefront-design-banner__button--light {
+        background: #ffffff;
+        color: #101114;
+    }
+
+    .storefront-design-banner--layout-split .storefront-design-banner__inner,
+    .storefront-design-banner--layout-image-right .storefront-design-banner__inner,
+    .storefront-design-banner--layout-image-left .storefront-design-banner__inner {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .storefront-design-banner--layout-split,
+    .storefront-design-banner--layout-image-right,
+    .storefront-design-banner--layout-image-left {
+        background: var(--banner-bg, var(--color-surface));
+    }
+
+    .storefront-design-banner--layout-centered .storefront-design-banner__inner,
+    .storefront-design-banner--content-center .storefront-design-banner__inner {
+        justify-items: center;
+    }
+
+    .storefront-design-banner--content-right .storefront-design-banner__inner {
+        justify-items: end;
+    }
+
+    .storefront-design-banner--text-center {
+        text-align: center;
+    }
+
+    .storefront-design-banner--text-center .storefront-design-banner__actions {
+        justify-content: center;
+    }
+
+    .storefront-design-banner--text-right {
+        text-align: right;
+    }
+
+    .storefront-design-banner--text-right .storefront-design-banner__actions {
+        justify-content: flex-end;
+    }
+
+    .storefront-design-banner--vertical-top .storefront-design-banner__inner {
+        align-items: start;
+    }
+
+    .storefront-design-banner--vertical-bottom .storefront-design-banner__inner {
+        align-items: end;
+    }
+
+    .storefront-design-banner--height-sm {
+        --banner-min-h: 18rem;
+    }
+
+    .storefront-design-banner--height-md {
+        --banner-min-h: 24rem;
+    }
+
+    .storefront-design-banner--height-lg {
+        --banner-min-h: 31rem;
+    }
+
+    .storefront-design-banner--height-xl {
+        --banner-min-h: 38rem;
+    }
+
+    .storefront-design-banner--height-hero {
+        --banner-min-h: 34rem;
+    }
+
+    .storefront-design-banner--radius-none {
+        border-radius: 0;
+    }
+
+    .storefront-design-banner--radius-sm {
+        border-radius: var(--radius-sm);
+    }
+
+    .storefront-design-banner--radius-md {
+        border-radius: var(--radius-md);
+    }
+
+    .storefront-design-banner--radius-lg {
+        border-radius: var(--radius-lg);
+    }
+
+    .storefront-design-banner--radius-xl {
+        border-radius: var(--radius-xl);
+    }
+
+    .storefront-design-banner--radius-full {
+        border-radius: min(3rem, var(--radius-full));
+    }
+
+    .storefront-design-banner--context-hero,
+    .storefront-design-banner--context-catalog {
+        border-radius: 0;
+    }
+
+    .storefront-design-banner--shadow-none {
+        box-shadow: none;
+    }
+
+    .storefront-design-banner--shadow-sm {
+        box-shadow: 0 12px 30px rgb(0 0 0 / 0.16);
+    }
+
+    .storefront-design-banner--shadow-md {
+        box-shadow: var(--shadow-card);
+    }
+
+    .storefront-design-banner--shadow-lg {
+        box-shadow: var(--shadow-hero);
+    }
+
+    .storefront-design-banner--style-light {
+        background: var(--banner-bg, #f8fafc);
+        color: var(--banner-text, #101114);
+    }
+
+    .storefront-design-banner--style-dark {
+        background: var(--banner-bg, #101114);
+        color: var(--banner-text, #f8fafc);
+    }
+
+    .storefront-design-banner--style-accent {
+        background:
+            linear-gradient(135deg, color-mix(in srgb, var(--banner-accent, var(--color-primary)) 42%, #101114), #101114),
+            var(--banner-bg, #101114);
+        color: var(--banner-text, #ffffff);
+    }
+
+    .storefront-design-banner--style-gradient {
+        background:
+            linear-gradient(135deg, color-mix(in srgb, var(--banner-accent, var(--color-primary)) 48%, #101114), color-mix(in srgb, var(--color-secondary) 24%, #101114 76%)),
+            var(--banner-bg, #101114);
+        color: var(--banner-text, #ffffff);
+    }
+
+    .storefront-design-banner--style-glass .storefront-design-banner__content {
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: var(--radius-lg);
+        background: rgba(16, 17, 20, 0.56);
+        padding: clamp(1.25rem, 4vw, 2rem);
+        backdrop-filter: blur(16px);
+    }
+
+    .storefront-design-banner--style-outline {
+        border-color: color-mix(in srgb, var(--banner-accent, var(--color-primary)) 48%, var(--color-border));
+        background: var(--banner-bg, transparent);
+    }
+
+    .storefront-design-banner--scheme-brand {
+        --banner-accent: var(--color-primary);
+    }
+
+    .storefront-design-banner--scheme-warm {
+        --banner-accent: #ffb703;
+    }
+
+    .storefront-design-banner--scheme-cool {
+        --banner-accent: #18d7ff;
+    }
+
+    .storefront-design-banner--scheme-dark {
+        background: var(--banner-bg, #101114);
+        color: var(--banner-text, #f8fafc);
+    }
+
+    .storefront-design-banner--scheme-neutral {
+        background: var(--banner-bg, color-mix(in srgb, var(--color-surface) 88%, #ffffff 12%));
+    }
+
+    .storefront-design-banner--animated {
+        animation-delay: var(--banner-animation-delay, 0ms);
+        animation-duration: var(--banner-animation-duration, 500ms);
+        animation-fill-mode: both;
+        animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .storefront-design-banner--animation-fade {
+        animation-name: banner-fade;
+    }
+
+    .storefront-design-banner--animation-slide-up {
+        animation-name: banner-slide-up;
+    }
+
+    .storefront-design-banner--animation-slide-left {
+        animation-name: banner-slide-left;
+    }
+
+    .storefront-design-banner--animation-zoom-in {
+        animation-name: banner-zoom-in;
+    }
+
+    .storefront-design-banner--animation-soft-parallax .storefront-design-banner__image {
+        animation: banner-soft-parallax 9000ms ease-out both;
+    }
+
+    @media (min-width: 768px) {
+        .storefront-design-banner--layout-split .storefront-design-banner__inner,
+        .storefront-design-banner--layout-image-right .storefront-design-banner__inner,
+        .storefront-design-banner--layout-image-left .storefront-design-banner__inner {
+            grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.74fr);
+        }
+
+        .storefront-design-banner--layout-image-left .storefront-design-banner__inner {
+            grid-template-columns: minmax(18rem, 0.74fr) minmax(0, 1fr);
+        }
+    }
+
+    @media (max-width: 767px) {
+        .storefront-design-banner__content {
+            padding-block: 2rem;
+        }
+
+        .storefront-design-banner--height-hero {
+            --banner-min-h: 31rem;
+        }
+
+        .storefront-design-banner__button {
+            width: 100%;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .storefront-design-banner--animated,
+        .storefront-design-banner--animation-soft-parallax .storefront-design-banner__image {
+            animation: none !important;
+        }
+
+        .storefront-design-banner__button {
+            transition: none;
+        }
+    }
+
     .category-grid--tiles > * {
         border-radius: var(--radius-sm);
     }
@@ -508,6 +970,62 @@
     .storefront-body[data-theme-visual-mode="light"] .badge.bg-lime-300 {
         background: var(--color-primary) !important;
         color: var(--color-primary-contrast) !important;
+    }
+}
+
+@keyframes banner-fade {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes banner-slide-up {
+    from {
+        opacity: 0;
+        transform: translateY(1rem);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes banner-slide-left {
+    from {
+        opacity: 0;
+        transform: translateX(1rem);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes banner-zoom-in {
+    from {
+        opacity: 0;
+        transform: scale(0.985);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes banner-soft-parallax {
+    from {
+        transform: scale(1.045) translateY(0.35rem);
+    }
+
+    to {
+        transform: scale(1) translateY(0);
     }
 }
 

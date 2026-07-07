@@ -5,60 +5,22 @@
     $categoryPlaceholder = asset('images/placeholders/category-placeholder.svg');
     $bannerPlaceholder = asset('images/placeholders/banner-placeholder.svg');
     $pricingService = app(\App\Services\Commerce\ProductPricingService::class);
-    $heroVariant = ($themeLayoutConfig ?? [])['heroVariant'] ?? 'dark_promo';
     $categoryGridVariant = ($themeLayoutConfig ?? [])['categoryGridVariant'] ?? 'cards';
-    $heroOverlay = ($themeComponentConfig ?? [])['heroOverlay'] ?? true;
-    $heroIsCompact = in_array($heroVariant, ['none', 'low_dominance_section_header'], true);
 @endphp
 
 @section('content')
-    <section class="storefront-hero storefront-hero--{{ $heroVariant }} relative isolate overflow-hidden border-b border-white/10 {{ $heroIsCompact ? 'bg-white/5' : 'bg-neutral-950' }}">
-        <div class="absolute inset-0 -z-10">
-            <img src="{{ $heroBanner?->image_url ?? $bannerPlaceholder }}" alt="Alta-Trade" class="h-full w-full object-cover opacity-45" onerror="this.onerror=null;this.src='{{ $bannerPlaceholder }}';">
-            @if ($heroOverlay && ! $heroIsCompact)
-            <div class="storefront-hero__overlay absolute inset-0"></div>
-            @endif
-        </div>
-        <div class="section-shell grid min-h-[520px] items-center gap-10 py-12 lg:grid-cols-[1fr_380px]">
-            <div class="max-w-4xl">
-                <div class="eyebrow">Автотовари, запчастини, сервісні комплекти</div>
-                <h1 class="mt-5 max-w-4xl text-5xl font-black leading-none text-white sm:text-7xl">
-                    {{ $heroBanner?->title ?? 'Alta-Trade Commerce Engine' }}
-                </h1>
-                <p class="mt-6 max-w-2xl text-lg leading-8 text-zinc-300">
-                    {{ $heroBanner?->subtitle ?? 'Графітовий автомагазин з швидким каталогом, кошиком і менеджерською адмінкою для продажів.' }}
-                </p>
-                <div class="mt-8 flex flex-wrap gap-3">
-                    <a href="{{ $heroBanner?->button_url ?: route('catalog') }}" class="btn-primary">{{ $heroBanner?->button_text ?: 'До каталогу' }}</a>
-                    <a href="{{ route('contacts') }}" class="btn-secondary">Швидка консультація</a>
-                </div>
-                <div class="mt-8 grid max-w-2xl grid-cols-3 gap-3">
-                    <div class="at-panel p-4">
-                        <div class="text-2xl font-black text-amber-300">{{ $categories->count() }}+</div>
-                        <div class="mt-1 text-xs font-black uppercase text-zinc-500">категорій</div>
-                    </div>
-                    <div class="at-panel p-4">
-                        <div class="text-2xl font-black text-cyan-300">{{ $featuredProducts->count() }}+</div>
-                        <div class="mt-1 text-xs font-black uppercase text-zinc-500">вітрина</div>
-                    </div>
-                    <div class="at-panel p-4">
-                        <div class="text-2xl font-black text-lime-300">{{ $promotions->count() }}</div>
-                        <div class="mt-1 text-xs font-black uppercase text-zinc-500">акції</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="hidden lg:grid gap-4">
-                @foreach ($promotions as $promotion)
-                    <a href="{{ route('catalog', ['sale' => 1]) }}" class="storefront-hero-promo-card at-card p-5 transition hover:border-amber-300/60">
-                        <span class="badge bg-amber-300 text-neutral-950">{{ $promotion->badge_label ?: 'Акція' }}</span>
-                        <h2 class="mt-4 text-2xl font-black text-white">{{ $promotion->title }}</h2>
-                        <p class="mt-2 text-sm leading-6 text-zinc-400">{{ $promotion->description }}</p>
-                    </a>
-                @endforeach
-            </div>
-        </div>
-    </section>
+    @include('storefront.components.banner', [
+        'banner' => $heroBanner,
+        'context' => 'hero',
+        'placeholder' => $bannerPlaceholder,
+        'fallbackEyebrow' => 'Автотовари, запчастини, сервісні комплекти',
+        'fallbackTitle' => 'Alta-Trade Commerce Engine',
+        'fallbackSubtitle' => 'Графітовий автомагазин з швидким каталогом, кошиком і менеджерською адмінкою для продажів.',
+        'fallbackButtonText' => 'До каталогу',
+        'fallbackButtonUrl' => route('catalog'),
+        'fallbackSecondaryButtonText' => 'Швидка консультація',
+        'fallbackSecondaryButtonUrl' => route('contacts'),
+    ])
 
     <section class="section-shell">
         <div class="flex items-end justify-between gap-6">
@@ -90,16 +52,14 @@
         <section class="border-y border-white/10 bg-zinc-950">
             <div class="section-shell grid gap-4 md:grid-cols-2">
                 @foreach ($promoBanners as $banner)
-                    <a href="{{ $banner->button_url ?: route('catalog') }}" class="storefront-banner-card group relative min-h-72 overflow-hidden rounded-md border border-white/10 p-6 transition hover:border-amber-300/60">
-                        <img src="{{ $banner->image_url }}" alt="{{ $banner->title }}" class="absolute inset-0 h-full w-full object-cover opacity-45 transition duration-500 group-hover:scale-105" loading="lazy" onerror="this.onerror=null;this.src='{{ $bannerPlaceholder }}';">
-                        <div class="absolute inset-0 bg-[linear-gradient(90deg,#111315_0%,rgba(17,19,21,.72)_60%,rgba(17,19,21,.25)_100%)]"></div>
-                        <div class="relative max-w-md">
-                            <span class="badge bg-white text-neutral-950">Промо</span>
-                            <h3 class="mt-5 text-3xl font-black text-white">{{ $banner->title }}</h3>
-                            <p class="mt-3 text-sm leading-6 text-zinc-300">{{ $banner->subtitle }}</p>
-                            <span class="btn-primary mt-6 py-2">{{ $banner->button_text ?: 'Детальніше' }}</span>
-                        </div>
-                    </a>
+                    @include('storefront.components.banner', [
+                        'banner' => $banner,
+                        'context' => 'promo',
+                        'contained' => false,
+                        'placeholder' => $bannerPlaceholder,
+                        'fallbackEyebrow' => 'Промо',
+                        'class' => 'h-full',
+                    ])
                 @endforeach
             </div>
         </section>
