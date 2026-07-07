@@ -26,6 +26,7 @@ use App\Models\StockMovement;
 use App\Models\TaxProfile;
 use App\Models\Unit;
 use App\Models\Warehouse;
+use App\Support\Addons\AddonHealthCheck;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -270,12 +271,15 @@ class CommerceHealthCheck extends Command
         $criticalIssues = array_merge($criticalIssues, $mailCriticalIssues);
         [$customerCriticalIssues, $customerWarningIssues] = $this->customerIssues();
         $criticalIssues = array_merge($criticalIssues, $customerCriticalIssues);
+        $addonDiagnostics = app(AddonHealthCheck::class)->diagnostics();
+        $criticalIssues = array_merge($criticalIssues, $addonDiagnostics['issues']);
 
         $criticalIssues = array_values(array_filter($criticalIssues));
         $warningIssues = array_values(array_filter(array_merge(
             $notificationWarningIssues,
             $mailWarningIssues,
             $customerWarningIssues,
+            $addonDiagnostics['warnings'],
         )));
 
         return [

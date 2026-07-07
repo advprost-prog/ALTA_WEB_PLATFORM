@@ -1,0 +1,31 @@
+{
+    "code": "demo.admin-widget",
+    "type": "extension",
+    "name": "Demo Admin Widget Extension",
+    "description": "Safe local skeleton extension for Phase 1 hook registration tests.",
+    "version": "0.1.0",
+    "vendor": "Demo",
+    "author": "Alta Trade",
+    "enabled_by_default": false,
+    "service_provider": null,
+    "dependencies": [],
+    "hooks": [
+        {
+            "name": "admin.dashboard.widgets",
+            "handler": "Extensions\\Demo\\AdminWidget\\Hooks\\DemoDashboardWidget",
+            "priority": 10
+        },
+        {
+            "name": "admin.navigation.items",
+            "handler": "Extensions\\Demo\\AdminWidget\\Hooks\\DemoNavigationItem",
+            "priority": 5
+        }
+    ],
+    "settings_schema": [],
+    "compatibility": {
+        "app_min_version": null,
+        "app_max_version": null,
+        "laravel_version": ">=12.0",
+        "php_version": ">=8.3"
+    }
+}

@@ -1,0 +1,38 @@
+{
+    "code": "demo.hello-module",
+    "type": "module",
+    "name": "Demo Hello Module",
+    "description": "Safe local skeleton module for Phase 1 addon discovery and lifecycle tests.",
+    "version": "0.1.0",
+    "vendor": "Demo",
+    "author": "Alta Trade",
+    "enabled_by_default": false,
+    "service_provider": null,
+    "dependencies": [],
+    "permissions": [
+        {
+            "code": "demo.hello-module.view",
+            "label": "View demo hello module"
+        }
+    ],
+    "menu": [
+        {
+            "label": "Demo Hello",
+            "route": null,
+            "permission": "demo.hello-module.view"
+        }
+    ],
+    "settings_schema": [],
+    "migrations": [],
+    "seeders": [],
+    "routes": {
+        "web": "routes/web.php",
+        "admin": "routes/admin.php"
+    },
+    "compatibility": {
+        "app_min_version": null,
+        "app_max_version": null,
+        "laravel_version": ">=12.0",
+        "php_version": ">=8.3"
+    }
+}

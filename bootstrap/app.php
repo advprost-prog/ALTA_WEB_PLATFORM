@@ -1,5 +1,12 @@
 <?php
 
+use App\Console\Commands\Addons\DisableAddon;
+use App\Console\Commands\Addons\DiscoverAddons;
+use App\Console\Commands\Addons\DoctorAddons;
+use App\Console\Commands\Addons\EnableAddon;
+use App\Console\Commands\Addons\InstallAddon;
+use App\Console\Commands\Addons\ListAddons;
+use App\Console\Commands\Addons\UninstallAddon;
 use App\Console\Commands\AdminGovernanceCheck;
 use App\Console\Commands\AiHealth;
 use App\Console\Commands\BackfillCustomersFromOrders;
@@ -22,6 +29,13 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withCommands([
         AdminGovernanceCheck::class,
+        DisableAddon::class,
+        DiscoverAddons::class,
+        DoctorAddons::class,
+        EnableAddon::class,
+        InstallAddon::class,
+        ListAddons::class,
+        UninstallAddon::class,
         AiHealth::class,
         BackfillCustomersFromOrders::class,
         CommerceHealthCheck::class,

@@ -2,6 +2,18 @@
 
 This release stabilizes the commerce module after the storefront move to multi-currency, multi-warehouse, cart, and checkout flows.
 
+## Addon Foundation Update
+
+Added:
+
+- local `modules/` and `extensions/` manifest discovery
+- addon registry tables for lifecycle state, settings, and events
+- manifest validation, duplicate-code diagnostics, dependency and compatibility checks
+- soft lifecycle commands: discover, list, install, enable, disable, uninstall, doctor
+- `AddonServiceProvider` for enabled local addons, with safe hooks/views/routes/provider loading
+- Filament resource `Система -> Модулі та розширення`
+- Phase 1 docs in `docs/addons.md`
+
 ## Banner Design System Update
 
 Added:
