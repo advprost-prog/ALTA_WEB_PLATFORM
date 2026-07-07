@@ -29,7 +29,7 @@ class CommerceOperationsTest extends TestCase
         $settings = CommerceSetting::current();
 
         $movement = app(StockService::class)->setQuantity(
-            product: $product,
+            subject: $product,
             warehouseId: $settings->default_warehouse_id,
             newQuantity: 9,
             note: 'Перерахунок полиці',
@@ -63,7 +63,7 @@ class CommerceOperationsTest extends TestCase
         $this->expectException(RuntimeException::class);
 
         app(StockService::class)->setQuantity(
-            product: $product,
+            subject: $product,
             warehouseId: $settings->default_warehouse_id,
             newQuantity: 1,
             note: 'Неможливе коригування',
@@ -164,7 +164,7 @@ class CommerceOperationsTest extends TestCase
         StockMovement::query()->delete();
 
         app(StockService::class)->transfer(
-            product: $product,
+            subject: $product,
             sourceWarehouseId: $settings->default_warehouse_id,
             targetWarehouseId: $target->id,
             quantity: 3,
@@ -205,7 +205,7 @@ class CommerceOperationsTest extends TestCase
 
         try {
             app(StockService::class)->transfer(
-                product: $product,
+                subject: $product,
                 sourceWarehouseId: $settings->default_warehouse_id,
                 targetWarehouseId: $target->id,
                 quantity: 5,

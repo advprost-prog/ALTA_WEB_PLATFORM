@@ -12,9 +12,13 @@ use App\Models\NotificationMailSetting;
 use App\Models\Order;
 use App\Models\PaymentMethod;
 use App\Models\ProductPrice;
+use App\Models\ProductVariant;
 use App\Models\StockBalance;
+use App\Models\TaxProfile;
+use App\Models\Unit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\Feature\Concerns\CreatesCommerceData;
 use Tests\TestCase;
@@ -304,5 +308,192 @@ class CommerceHealthCheckTest extends TestCase
         $this->artisan('commerce:health-check')
             ->expectsOutputToContain('orders_customer_contact_potential_duplicate')
             ->assertExitCode(0);
+    }
+
+    public function test_product_variant_excise_fields_are_normalized_on_save(): void
+    {
+        $product = $this->createProduct();
+        $unit = Unit::ensurePiece();
+        $taxProfile = TaxProfile::ensureDefault();
+
+        $variant = ProductVariant::create([
+            'product_id' => $product->id,
+            'sku' => 'AT-OIL-530-4L-EX',
+            'name' => 'Excise variant',
+            'base_unit_id' => $unit->id,
+            'sales_unit_id' => $unit->id,
+            'purchase_unit_id' => $unit->id,
+            'tax_profile_id' => $taxProfile->id,
+            'is_excise_applicable' => true,
+            'excise_rate' => null,
+            'requires_excise_stamp_entry' => true,
+            'is_default' => true,
+            'is_active' => true,
+            'sort_order' => 0,
+        ]);
+
+        $this->assertSame('5.00', $variant->fresh()->excise_rate);
+
+        $variant->forceFill([
+            'is_excise_applicable' => true,
+            'excise_rate' => 7.25,
+            'requires_excise_stamp_entry' => true,
+        ])->save();
+
+        $this->assertSame('7.25', $variant->fresh()->excise_rate);
+
+        $variant->forceFill([
+            'is_excise_applicable' => false,
+            'excise_rate' => 10,
+            'requires_excise_stamp_entry' => true,
+        ])->save();
+
+        $variant = $variant->fresh();
+
+        $this->assertNull($variant->excise_rate);
+        $this->assertFalse($variant->requires_excise_stamp_entry);
+    }
+
+    public function test_commerce_health_check_reports_catalog_variant_excise_inconsistency(): void
+    {
+        $product = $this->createProduct();
+        $unit = Unit::ensurePiece();
+        $taxProfile = TaxProfile::ensureDefault();
+        $now = now();
+
+        DB::table('product_variants')->insert([
+            'product_id' => $product->id,
+            'sku' => 'AT-OIL-530-4L-BROKEN-EXCISE',
+            'name' => 'Broken excise variant',
+            'base_unit_id' => $unit->id,
+            'sales_unit_id' => $unit->id,
+            'purchase_unit_id' => $unit->id,
+            'tax_profile_id' => $taxProfile->id,
+            'is_excise_applicable' => 1,
+            'excise_rate' => null,
+            'requires_excise_stamp_entry' => 1,
+            'is_default' => 0,
+            'is_active' => 1,
+            'sort_order' => 10,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $this->artisan('commerce:health-check')
+            ->expectsOutputToContain('variants_excise_inconsistent')
+            ->assertExitCode(1);
+    }
+
+    public function test_commerce_health_check_reports_missing_variant_snapshot_on_order_item(): void
+    {
+        $product = $this->createProduct();
+        $unit = Unit::ensurePiece();
+        $taxProfile = TaxProfile::ensureDefault();
+
+        $variant = ProductVariant::create([
+            'product_id' => $product->id,
+            'sku' => 'AT-OIL-530-4L-SNAPSHOT',
+            'name' => 'Snapshot variant',
+            'base_unit_id' => $unit->id,
+            'sales_unit_id' => $unit->id,
+            'purchase_unit_id' => $unit->id,
+            'tax_profile_id' => $taxProfile->id,
+            'is_default' => true,
+            'is_active' => true,
+            'sort_order' => 0,
+        ]);
+
+        $order = Order::create([
+            'customer_name' => 'Snapshot Risk',
+            'phone' => '+380501112244',
+            'total_amount' => 1000,
+            'status' => OrderStatus::New->value,
+            'payment_status' => PaymentStatus::Unpaid->value,
+            'delivery_status' => DeliveryStatus::Pending->value,
+        ]);
+
+        DB::table('order_items')->insert([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_variant_id' => $variant->id,
+            'warehouse_id' => null,
+            'product_name' => $product->name,
+            'sku' => $variant->sku,
+            'unit_name' => 'шт',
+            'unit_short_name' => 'шт',
+            'base_unit_id' => null,
+            'sales_unit_id' => null,
+            'quantity' => 1,
+            'quantity_in_base_unit' => 1,
+            'tax_profile_id' => null,
+            'tax_profile_name' => null,
+            'tax_profile_code' => null,
+            'vat_rate' => null,
+            'vat_amount' => null,
+            'is_excise_applicable' => 0,
+            'excise_rate' => null,
+            'excise_amount' => null,
+            'requires_excise_stamp_entry' => 0,
+            'unit_price' => 1000,
+            'price_excluding_tax' => 1000,
+            'price_including_tax' => 1000,
+            'price' => 1000,
+            'total' => 1000,
+            'line_total_excluding_tax' => 1000,
+            'line_total_tax_amount' => 0,
+            'line_total_including_tax' => 1000,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->artisan('commerce:health-check')
+            ->expectsOutputToContain('order_items_variant_snapshot_missing')
+            ->assertExitCode(1);
+    }
+
+    public function test_commerce_health_check_reports_active_product_without_active_default_variant(): void
+    {
+        $product = $this->createProduct();
+
+        ProductVariant::query()
+            ->where('product_id', $product->id)
+            ->update([
+                'is_default' => false,
+                'is_active' => false,
+            ]);
+
+        $this->artisan('commerce:health-check')
+            ->expectsOutputToContain('products_without_active_default_variant')
+            ->assertExitCode(1);
+    }
+
+    public function test_commerce_health_check_reports_multiple_default_variants_per_product(): void
+    {
+        $product = $this->createProduct();
+        $unit = Unit::ensurePiece();
+        $taxProfile = TaxProfile::ensureDefault();
+
+        DB::table('product_variants')->insert([
+            'product_id' => $product->id,
+            'sku' => 'AT-OIL-530-4L-DEFAULT-2',
+            'name' => 'Second default',
+            'barcode' => null,
+            'base_unit_id' => $unit->id,
+            'sales_unit_id' => $unit->id,
+            'purchase_unit_id' => $unit->id,
+            'tax_profile_id' => $taxProfile->id,
+            'is_excise_applicable' => false,
+            'excise_rate' => null,
+            'requires_excise_stamp_entry' => false,
+            'is_default' => true,
+            'is_active' => true,
+            'sort_order' => 10,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->artisan('commerce:health-check')
+            ->expectsOutputToContain('variants_multiple_defaults_per_product')
+            ->assertExitCode(1);
     }
 }

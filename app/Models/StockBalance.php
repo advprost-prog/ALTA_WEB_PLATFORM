@@ -11,6 +11,7 @@ class StockBalance extends Model
 {
     protected $fillable = [
         'product_id',
+        'product_variant_id',
         'warehouse_id',
         'quantity',
         'reserved_quantity',
@@ -43,7 +44,9 @@ class StockBalance extends Model
         static::saved(function (self $balance): void {
             $settings = CommerceSetting::query()->first();
 
-            if ($settings && (int) $settings->default_warehouse_id === (int) $balance->warehouse_id) {
+            if ($settings
+                && (int) $settings->default_warehouse_id === (int) $balance->warehouse_id
+                && ($balance->variant === null || $balance->variant->is_default)) {
                 $balance->product?->forceFill([
                     'stock' => max(0, (int) floor((float) $balance->quantity)),
                 ])->saveQuietly();
@@ -65,6 +68,7 @@ class StockBalance extends Model
 
             StockMovement::query()->create([
                 'product_id' => $balance->product_id,
+                'product_variant_id' => $balance->product_variant_id,
                 'warehouse_id' => $balance->warehouse_id,
                 'type' => $type,
                 'quantity' => $quantityDelta,
@@ -83,6 +87,11 @@ class StockBalance extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function variant(): BelongsTo
+    {
+        return $this->belongsTo(ProductVariant::class, 'product_variant_id');
     }
 
     public function warehouse(): BelongsTo

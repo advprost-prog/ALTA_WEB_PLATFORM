@@ -39,7 +39,10 @@
                             <div>
                                 <a href="{{ route('product.show', $item['product']) }}" class="text-lg font-black text-white hover:text-amber-300">{{ $item['product']->name }}</a>
                                 <div class="mt-2 flex flex-wrap gap-2 text-xs font-bold uppercase text-zinc-500">
-                                    <span>{{ $item['product']->sku }}</span>
+                                    <span>{{ $item['variant']->sku ?: $item['product']->sku }}</span>
+                                    @if ($item['variant']->name)
+                                        <span>{{ $item['variant']->name }}</span>
+                                    @endif
                                     <span>{{ $item['product']->brand?->name }}</span>
                                 </div>
                             </div>
@@ -51,8 +54,8 @@
                                 @endif
                             </div>
                             <div>
-                                <label class="sr-only" for="quantity-{{ $item['product']->id }}">Кількість</label>
-                                <input id="quantity-{{ $item['product']->id }}" class="field" type="number" min="0" max="{{ $item['max_quantity'] }}" name="quantities[{{ $item['product']->id }}]" value="{{ $item['quantity'] }}">
+                                <label class="sr-only" for="quantity-{{ str_replace(':', '-', $item['cart_key']) }}">Кількість</label>
+                                <input id="quantity-{{ str_replace(':', '-', $item['cart_key']) }}" class="field" type="number" min="0" max="{{ $item['max_quantity'] }}" name="quantities[{{ $item['cart_key'] }}]" value="{{ $item['quantity'] }}">
                                 <div class="mt-1 text-xs font-bold text-zinc-500">0 = прибрати</div>
                             </div>
                             <div>

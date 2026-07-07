@@ -135,7 +135,7 @@ class WarehouseTransferPage extends Page
 
         try {
             app(StockService::class)->transfer(
-                product: $product,
+                subject: $product,
                 sourceWarehouseId: (int) $data['source_warehouse_id'],
                 targetWarehouseId: (int) $data['target_warehouse_id'],
                 quantity: (float) $data['quantity'],

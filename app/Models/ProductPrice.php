@@ -9,6 +9,7 @@ class ProductPrice extends Model
 {
     protected $fillable = [
         'product_id',
+        'product_variant_id',
         'currency_id',
         'price',
         'compare_at_price',
@@ -33,6 +34,10 @@ class ProductPrice extends Model
                 return;
             }
 
+             if ($price->variant && ! $price->variant->is_default) {
+                return;
+            }
+
             $price->product?->forceFill([
                 'price' => $price->price,
                 'old_price' => $price->compare_at_price,
@@ -43,6 +48,11 @@ class ProductPrice extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function variant(): BelongsTo
+    {
+        return $this->belongsTo(ProductVariant::class, 'product_variant_id');
     }
 
     public function currency(): BelongsTo

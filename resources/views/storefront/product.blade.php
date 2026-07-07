@@ -105,6 +105,9 @@
 
                 <form method="POST" action="{{ route('cart.add', $product) }}" class="mt-8 grid max-w-xl gap-3 sm:grid-cols-[120px_1fr]">
                     @csrf
+                    @if ($product->defaultVariant)
+                        <input type="hidden" name="variant_id" value="{{ $product->defaultVariant->id }}">
+                    @endif
                     <input type="number" min="1" max="{{ max(1, $availabilityView['max_quantity']) }}" name="quantity" value="1" class="field" @disabled(! $isPurchasable)>
                     <button class="btn-primary w-full" @disabled(! $isPurchasable)>{{ $isPurchasable ? 'Додати до кошика' : 'Товар недоступний' }}</button>
                 </form>

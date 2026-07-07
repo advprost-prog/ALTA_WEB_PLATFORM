@@ -6,6 +6,7 @@ use App\Models\CommerceSetting;
 use App\Models\Currency;
 use App\Models\Product;
 use App\Models\ProductPrice;
+use App\Models\ProductVariant;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 
@@ -100,40 +101,76 @@ class ProductPricingService
         return $currency;
     }
 
-    public function priceForCurrency(Product $product, Currency|int $currency): ?ProductPrice
+    public function priceForCurrency(Product|ProductVariant $subject, Currency|int $currency): ?ProductPrice
     {
         $currencyId = $currency instanceof Currency ? $currency->id : $currency;
+        $variant = $this->resolveVariant($subject);
+        $product = $subject instanceof Product ? $subject : $subject->product;
 
-        if ($product->relationLoaded('prices')) {
-            return $product->prices
+        if (! $product) {
+            return null;
+        }
+
+        if ($variant && $variant->relationLoaded('prices')) {
+            $resolved = $variant->prices
                 ->first(fn (ProductPrice $price): bool => (int) $price->currency_id === (int) $currencyId
                     && $price->is_active
                     && (float) $price->price > 0
                     && (bool) ($price->currency?->is_active ?? true));
+
+            if ($resolved) {
+                return $resolved;
+            }
         }
 
-        return ProductPrice::query()
+        if ($product->relationLoaded('prices')) {
+            $resolved = $product->prices
+                ->first(fn (ProductPrice $price): bool => (int) $price->currency_id === (int) $currencyId
+                    && ($variant === null || (int) $price->product_variant_id === (int) $variant->id || $price->product_variant_id === null)
+                    && $price->is_active
+                    && (float) $price->price > 0
+                    && (bool) ($price->currency?->is_active ?? true));
+
+            if ($resolved) {
+                return $resolved;
+            }
+        }
+
+        $query = ProductPrice::query()
             ->with('currency')
             ->where('product_id', $product->id)
             ->where('currency_id', $currencyId)
             ->where('is_active', true)
             ->where('price', '>', 0)
-            ->whereHas('currency', fn ($query) => $query->where('is_active', true))
+            ->whereHas('currency', fn ($query) => $query->where('is_active', true));
+
+        if ($variant) {
+            $specific = (clone $query)
+                ->where('product_variant_id', $variant->id)
+                ->first();
+
+            if ($specific) {
+                return $specific;
+            }
+        }
+
+        return $query
+            ->whereNull('product_variant_id')
             ->first();
     }
 
-    public function defaultPrice(Product $product): ?ProductPrice
+    public function defaultPrice(Product|ProductVariant $subject): ?ProductPrice
     {
-        return $this->priceForCurrency($product, $this->defaultCurrency());
+        return $this->priceForCurrency($subject, $this->defaultCurrency());
     }
 
     /**
      * @return array{price: ?float, compare_at_price: ?float, currency_code: ?string, currency_symbol: ?string, is_fallback_price: bool, is_available_for_selected_currency: bool, has_price: bool, formatted_price: string, formatted_compare_at_price: ?string, fallback_message: ?string, discount_percent: ?int}
      */
-    public function priceView(Product $product, ?Currency $currency = null, bool $allowFallback = true): array
+    public function priceView(Product|ProductVariant $subject, ?Currency $currency = null, bool $allowFallback = true): array
     {
         $currency ??= $this->currentCurrency();
-        $selectedPrice = $this->priceForCurrency($product, $currency);
+        $selectedPrice = $this->priceForCurrency($subject, $currency);
 
         if ($selectedPrice) {
             return $this->formatPriceView($selectedPrice, $currency, false, true);
@@ -142,7 +179,7 @@ class ProductPricingService
         $defaultCurrency = $this->defaultCurrency();
 
         if ($allowFallback && (int) $currency->id !== (int) $defaultCurrency->id) {
-            $defaultPrice = $this->defaultPrice($product);
+            $defaultPrice = $this->defaultPrice($subject);
 
             if ($defaultPrice) {
                 return $this->formatPriceView(
@@ -172,9 +209,18 @@ class ProductPricingService
         ];
     }
 
-    public function checkoutPrice(Product $product, Currency $currency): ?ProductPrice
+    public function checkoutPrice(Product|ProductVariant $subject, Currency $currency): ?ProductPrice
     {
-        return $this->priceForCurrency($product, $currency);
+        return $this->priceForCurrency($subject, $currency);
+    }
+
+    private function resolveVariant(Product|ProductVariant $subject): ?ProductVariant
+    {
+        if ($subject instanceof ProductVariant) {
+            return $subject;
+        }
+
+        return $subject->resolveDefaultVariant();
     }
 
     public function formatAmount(null|float|int|string $amount, null|Currency|string $currency = null): string

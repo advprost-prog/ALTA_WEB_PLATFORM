@@ -72,6 +72,21 @@ In simple mode, product price changes on `products.price` and `products.old_pric
 
 The storefront does not synthesize missing currency prices in this phase.
 
+## Product Catalog Core (SKU Layer)
+
+Catalog core introduces SKU-level accounting while keeping product-level storefront compatibility.
+
+Highlights:
+
+- `products` remain storefront cards
+- `product_variants` become sellable/accounting units
+- `product_prices`, `stock_balances`, `stock_movements`, and `order_items` support `product_variant_id`
+- checkout, pricing, stock, and fulfillment services resolve variant-first with safe legacy fallback
+
+Fallback behavior is warehouse-aware. In mixed data states, resolver picks variant row if present for a warehouse and falls back to legacy row (`product_variant_id = null`) only for warehouses where variant row is missing.
+
+See `docs/product-catalog.md` for schema and operational details.
+
 ## Product Admin Modes
 
 In simple mode, the Filament product form shows only:

@@ -40,6 +40,26 @@ Not added:
 - loyalty/marketing automation
 - CRM/ERP or delivery provider integrations
 
+## Product Catalog Core Update
+
+Added:
+
+- SKU-first catalog architecture (`products` + `product_variants`)
+- unit and tax dictionaries (`units`, `tax_profiles`)
+- catalog attributes (`attributes`, `product_attribute_values`, `category_attributes`)
+- variant packages and barcodes (`variant_packages`, `product_barcodes`)
+- variant-aware checkout snapshots for tax/unit/excise fields
+- variant-aware stock/pricing/fulfillment resolution with legacy fallback
+- catalog-core checks in `commerce:health-check`
+- Filament resources for units, tax profiles, attributes, and variants
+- UX correction: SKU management moved under product workflow (`Каталог -> Товари`), while `ProductVariant` remains internal/technical
+
+Not added:
+
+- delivery/shipment provider integrations
+- Nova Poshta API integration
+- fiscal device integrations
+
 Admin workflow:
 
 - new storefront orders start as `new`

@@ -149,7 +149,7 @@ class StockAdjustmentPage extends Page
         try {
             if (($data['mode'] ?? 'absolute') === 'delta') {
                 app(StockService::class)->applyDelta(
-                    product: $product,
+                    subject: $product,
                     warehouseId: $warehouseId,
                     delta: $quantity,
                     type: StockMovement::TYPE_ADJUSTMENT,
@@ -158,7 +158,7 @@ class StockAdjustmentPage extends Page
                 );
             } else {
                 app(StockService::class)->setQuantity(
-                    product: $product,
+                    subject: $product,
                     warehouseId: $warehouseId,
                     newQuantity: $quantity,
                     note: $note,

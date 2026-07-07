@@ -10,13 +10,17 @@ use App\Filament\Resources\Products\Pages\ListProducts;
 use App\Filament\Resources\Products\Pages\ViewProduct;
 use App\Filament\Resources\Products\RelationManagers\ProductImageCandidatesRelationManager;
 use App\Filament\Resources\Products\RelationManagers\ProductImagesRelationManager;
+use App\Filament\Resources\Products\RelationManagers\ProductVariantsRelationManager;
 use App\Models\AiRun;
-use App\Models\AiSuggestion;
 use App\Models\AiSetting;
+use App\Models\AiSuggestion;
 use App\Models\CommerceSetting;
 use App\Models\Currency;
 use App\Models\Product;
 use App\Models\ProductImageCandidate;
+use App\Models\ProductVariant;
+use App\Models\TaxProfile;
+use App\Models\Unit;
 use App\Models\Warehouse;
 use App\Services\Ai\AiSettingsService;
 use App\Services\Ai\ProductEnrichmentService;
@@ -37,8 +41,8 @@ use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\ImageEntry;
@@ -49,7 +53,6 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
-use Filament\Support\Enums\Alignment;
 use Filament\Support\Enums\Size;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\ImageColumn;
@@ -64,6 +67,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
+use Livewire\Component;
 
 class ProductResource extends Resource
 {
@@ -85,267 +89,505 @@ class ProductResource extends Resource
     {
         return $schema
             ->components([
-                Section::make('Основне')
-                    ->description('Назва, URL, артикул і привʼязка до каталогу.')
-                    ->schema([
-                        TextInput::make('name')
-                            ->label('Назва')
-                            ->required()
-                            ->maxLength(255)
-                            ->live(onBlur: true)
-                            ->afterStateUpdated(fn (string $operation, ?string $state, callable $set) => $operation === 'create'
-                                ? $set('slug', Str::slug((string) $state))
-                                : null),
-                        TextInput::make('slug')
-                            ->label('Slug')
-                            ->required()
-                            ->unique(ignoreRecord: true)
-                            ->maxLength(255)
-                            ->helperText('Використовується у публічному URL товару.'),
-                        TextInput::make('sku')
-                            ->label('Артикул')
-                            ->required()
-                            ->unique(ignoreRecord: true)
-                            ->maxLength(255)
-                            ->helperText('Унікальний код для пошуку, складу та замовлень.'),
-                        Select::make('brand_id')
-                            ->label('Бренд')
-                            ->relationship('brand', 'name')
-                            ->searchable()
-                            ->preload()
-                            ->required(),
-                        Select::make('category_id')
-                            ->label('Категорія')
-                            ->relationship('category', 'name')
-                            ->searchable()
-                            ->preload()
-                            ->required(),
-                        Select::make('stock_status')
-                            ->label('Статус наявності')
-                            ->options(Product::STOCK_STATUSES)
-                            ->default('in_stock')
-                            ->required(),
+                Tabs::make('Товар')
+                    ->tabs([
+                        Tab::make('Основне')
+                            ->schema([
+                                Section::make('Основне')
+                                    ->description('Назва, URL і привʼязка до каталогу.')
+                                    ->schema([
+                                        TextInput::make('name')
+                                            ->label('Назва товару')
+                                            ->required()
+                                            ->maxLength(255)
+                                            ->live(onBlur: true)
+                                            ->afterStateUpdated(fn (string $operation, ?string $state, callable $set) => $operation === 'create'
+                                                ? $set('slug', Str::slug((string) $state))
+                                                : null),
+                                        TextInput::make('slug')
+                                            ->label('Slug')
+                                            ->required()
+                                            ->unique(ignoreRecord: true)
+                                            ->maxLength(255),
+                                        Select::make('brand_id')
+                                            ->label('Бренд')
+                                            ->relationship('brand', 'name')
+                                            ->searchable()
+                                            ->preload()
+                                            ->required(),
+                                        Select::make('category_id')
+                                            ->label('Категорія')
+                                            ->relationship('category', 'name')
+                                            ->searchable()
+                                            ->preload()
+                                            ->required(),
+                                        Select::make('status')
+                                            ->label('Статус')
+                                            ->options([
+                                                'draft' => 'Чернетка',
+                                                'active' => 'Активний',
+                                                'archived' => 'Архів',
+                                            ])
+                                            ->default('draft')
+                                            ->required(),
+                                        Toggle::make('is_active')
+                                            ->label('Активний')
+                                            ->default(true)
+                                            ->required(),
+                                        Toggle::make('is_featured')
+                                            ->label('Рекомендований')
+                                            ->default(false),
+                                        Toggle::make('is_new')
+                                            ->label('Новинка')
+                                            ->required(),
+                                        Toggle::make('is_hit')
+                                            ->label('Хіт')
+                                            ->required(),
+                                        Toggle::make('is_sale')
+                                            ->label('Акція')
+                                            ->required(),
+                                        TextInput::make('sort_order')
+                                            ->label('Порядок')
+                                            ->numeric()
+                                            ->default(0)
+                                            ->required(),
+                                    ])
+                                    ->columns(2),
+                                Section::make('Опис')
+                                    ->schema([
+                                        Textarea::make('short_description')
+                                            ->label('Короткий опис')
+                                            ->rows(3),
+                                        Textarea::make('description')
+                                            ->label('Повний опис')
+                                            ->rows(7),
+                                    ]),
+                            ]),
+                        Tab::make('Продаж / SKU')
+                            ->schema([
+                                Section::make('Основний SKU')
+                                    ->description('Для простого товару поля нижче керують default SKU цього товару.')
+                                    ->schema([
+                                        TextInput::make('sku')
+                                            ->label('SKU / Артикул')
+                                            ->required()
+                                            ->unique(ignoreRecord: true)
+                                            ->maxLength(255),
+                                        TextInput::make('default_variant_name')
+                                            ->label('Назва варіанту')
+                                            ->maxLength(255),
+                                        TextInput::make('default_variant_barcode')
+                                            ->label('Штрихкод')
+                                            ->maxLength(255),
+                                        Toggle::make('default_variant_is_active')
+                                            ->label('Активний SKU')
+                                            ->default(true),
+                                        Toggle::make('default_variant_is_default')
+                                            ->label('Основний SKU')
+                                            ->default(true)
+                                            ->disabled()
+                                            ->dehydrated(false),
+                                    ])
+                                    ->columns(2),
+                                Section::make('Ціни та склад')
+                                    ->schema([
+                                        TextInput::make('price')
+                                            ->label('Ціна')
+                                            ->required()
+                                            ->numeric()
+                                            ->minValue(0)
+                                            ->default(0)
+                                            ->prefix('₴')
+                                            ->visible(fn (): bool => ! self::multiCurrencyEnabled()),
+                                        TextInput::make('old_price')
+                                            ->label('Стара ціна')
+                                            ->numeric()
+                                            ->minValue(0)
+                                            ->prefix('₴')
+                                            ->visible(fn (): bool => ! self::multiCurrencyEnabled()),
+                                        Repeater::make('prices')
+                                            ->label('Ціни за валютами')
+                                            ->relationship()
+                                            ->schema([
+                                                Select::make('currency_id')
+                                                    ->label('Валюта')
+                                                    ->options(fn (): array => self::currencyOptions())
+                                                    ->searchable()
+                                                    ->distinct()
+                                                    ->disableOptionsWhenSelectedInSiblingRepeaterItems()
+                                                    ->required(),
+                                                TextInput::make('price')
+                                                    ->label('Ціна')
+                                                    ->numeric()
+                                                    ->minValue(0)
+                                                    ->required(),
+                                                TextInput::make('compare_at_price')
+                                                    ->label('Стара ціна')
+                                                    ->numeric()
+                                                    ->minValue(0),
+                                                Toggle::make('is_active')
+                                                    ->label('Активна')
+                                                    ->default(true),
+                                            ])
+                                            ->columns(4)
+                                            ->defaultItems(0)
+                                            ->columnSpanFull()
+                                            ->visible(fn (): bool => self::multiCurrencyEnabled()),
+                                        TextInput::make('purchase_price')
+                                            ->label('Закупівельна ціна')
+                                            ->numeric()
+                                            ->minValue(0)
+                                            ->prefix('₴'),
+                                        Select::make('stock_status')
+                                            ->label('Статус наявності')
+                                            ->options(Product::STOCK_STATUSES)
+                                            ->default('in_stock')
+                                            ->required(),
+                                        TextInput::make('stock')
+                                            ->label('Залишок')
+                                            ->required()
+                                            ->numeric()
+                                            ->minValue(0)
+                                            ->default(0)
+                                            ->visible(fn (): bool => ! self::multiWarehouseEnabled()),
+                                        Repeater::make('stockBalances')
+                                            ->label('Залишки за складами')
+                                            ->relationship()
+                                            ->schema([
+                                                Select::make('warehouse_id')
+                                                    ->label('Склад')
+                                                    ->options(fn (): array => self::warehouseOptions())
+                                                    ->searchable()
+                                                    ->distinct()
+                                                    ->disableOptionsWhenSelectedInSiblingRepeaterItems()
+                                                    ->required(),
+                                                TextInput::make('quantity')
+                                                    ->label('Кількість')
+                                                    ->numeric()
+                                                    ->minValue(0)
+                                                    ->default(0)
+                                                    ->required(),
+                                                TextInput::make('reserved_quantity')
+                                                    ->label('Зарезервовано')
+                                                    ->numeric()
+                                                    ->minValue(0)
+                                                    ->default(0)
+                                                    ->disabled()
+                                                    ->dehydrated(false),
+                                                Placeholder::make('available_quantity')
+                                                    ->label('Доступно')
+                                                    ->content(fn (callable $get): string => number_format(
+                                                        max(0, (float) ($get('quantity') ?? 0) - (float) ($get('reserved_quantity') ?? 0)),
+                                                        3,
+                                                        ',',
+                                                        ' ',
+                                                    )),
+                                            ])
+                                            ->columns(4)
+                                            ->defaultItems(0)
+                                            ->columnSpanFull()
+                                            ->visible(fn (): bool => self::multiWarehouseEnabled()),
+                                    ])
+                                    ->columns(4),
+                            ]),
+                        Tab::make('Податки / Акциз')
+                            ->schema([
+                                Section::make('Оподаткування та акциз для основного SKU')
+                                    ->schema([
+                                        Select::make('default_variant_base_unit_id')
+                                            ->label('Базова одиниця')
+                                            ->options(fn (): array => Unit::query()->orderBy('sort_order')->pluck('name', 'id')->all())
+                                            ->default(fn (): ?int => Unit::ensurePiece()->id)
+                                            ->searchable()
+                                            ->required(),
+                                        Select::make('default_variant_sales_unit_id')
+                                            ->label('Одиниця продажу')
+                                            ->options(fn (): array => Unit::query()->orderBy('sort_order')->pluck('name', 'id')->all())
+                                            ->searchable(),
+                                        Select::make('default_variant_purchase_unit_id')
+                                            ->label('Одиниця закупівлі')
+                                            ->options(fn (): array => Unit::query()->orderBy('sort_order')->pluck('name', 'id')->all())
+                                            ->searchable(),
+                                        Select::make('default_variant_tax_profile_id')
+                                            ->label('Оподаткування')
+                                            ->options(fn (): array => TaxProfile::query()->orderBy('sort_order')->pluck('name', 'id')->all())
+                                            ->default(fn (): ?int => TaxProfile::ensureDefault()->id)
+                                            ->searchable()
+                                            ->required(),
+                                        Toggle::make('default_variant_is_excise_applicable')
+                                            ->label('Акцизний товар')
+                                            ->live()
+                                            ->afterStateUpdated(function (bool $state, callable $get, callable $set): void {
+                                                if (! $state) {
+                                                    $set('default_variant_excise_rate', null);
+                                                    $set('default_variant_requires_excise_stamp_entry', false);
+
+                                                    return;
+                                                }
+
+                                                if (blank($get('default_variant_excise_rate'))) {
+                                                    $set('default_variant_excise_rate', '5.00');
+                                                }
+                                            }),
+                                        TextInput::make('default_variant_excise_rate')
+                                            ->label('Ставка акцизу, %')
+                                            ->numeric()
+                                            ->visible(fn (callable $get): bool => (bool) $get('default_variant_is_excise_applicable')),
+                                        Toggle::make('default_variant_requires_excise_stamp_entry')
+                                            ->label('Потребує введення акцизної марки')
+                                            ->visible(fn (callable $get): bool => (bool) $get('default_variant_is_excise_applicable')),
+                                    ])
+                                    ->columns(2),
+                            ]),
+                        Tab::make('Пакування')
+                            ->schema([
+                                Section::make('Пакування основного SKU')
+                                    ->description('Редагуйте пакування у блоці "Варіанти" нижче через дію "Відкрити" для основного SKU.')
+                                    ->schema([
+                                        Placeholder::make('default_variant_packages_hint')
+                                            ->label('Пояснення')
+                                            ->content('Пакування привʼязане до SKU. Для простого товару відкрийте основний SKU з таблиці варіантів та змініть пакування там.'),
+                                    ]),
+                            ]),
+                        Tab::make('Штрихкоди')
+                            ->schema([
+                                Section::make('Штрихкоди основного SKU')
+                                    ->description('Редагуйте штрихкоди у блоці "Варіанти" нижче через дію "Відкрити" для основного SKU.')
+                                    ->schema([
+                                        Placeholder::make('default_variant_barcodes_hint')
+                                            ->label('Пояснення')
+                                            ->content('Штрихкоди привʼязані до SKU. Для multi-variant товарів редагуйте штрихкоди у відповідному варіанті.'),
+                                    ]),
+                            ]),
+                        Tab::make('Фото / SEO')
+                            ->schema([
+                                Section::make('Фото')
+                                    ->schema([
+                                        FileUpload::make('main_image')
+                                            ->label('Основне фото')
+                                            ->image()
+                                            ->disk('public')
+                                            ->directory('products')
+                                            ->visibility('public')
+                                            ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
+                                            ->maxSize(2048)
+                                            ->imagePreviewHeight('180')
+                                            ->openable()
+                                            ->downloadable()
+                                            ->preserveFilenames(false),
+                                        TextInput::make('image_alt_text')
+                                            ->label('Alt-текст основного фото')
+                                            ->maxLength(500),
+                                        Repeater::make('images')
+                                            ->label('Галерея фото')
+                                            ->relationship()
+                                            ->schema([
+                                                FileUpload::make('image')
+                                                    ->label('Фото')
+                                                    ->image()
+                                                    ->disk('public')
+                                                    ->directory('products/gallery')
+                                                    ->visibility('public')
+                                                    ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
+                                                    ->maxSize(2048)
+                                                    ->imagePreviewHeight('120')
+                                                    ->openable()
+                                                    ->downloadable()
+                                                    ->preserveFilenames(false)
+                                                    ->required(),
+                                                TextInput::make('alt')
+                                                    ->label('Alt-текст')
+                                                    ->maxLength(255),
+                                                TextInput::make('sort_order')
+                                                    ->label('Порядок')
+                                                    ->numeric()
+                                                    ->minValue(0)
+                                                    ->default(0),
+                                                Toggle::make('is_main')
+                                                    ->label('Головне')
+                                                    ->disabled()
+                                                    ->dehydrated(false),
+                                                TextInput::make('source_domain')
+                                                    ->label('Джерело')
+                                                    ->disabled()
+                                                    ->dehydrated(false),
+                                            ])
+                                            ->columns(5)
+                                            ->defaultItems(0),
+                                    ]),
+                                Section::make('SEO')
+                                    ->schema([
+                                        TextInput::make('seo_title')
+                                            ->label('SEO title')
+                                            ->maxLength(255),
+                                        Textarea::make('seo_description')
+                                            ->label('SEO description')
+                                            ->rows(3),
+                                    ]),
+                            ]),
+                        Tab::make('Характеристики')
+                            ->schema([
+                                Section::make('Характеристики товару')
+                                    ->schema([
+                                        Repeater::make('specifications')
+                                            ->label('Характеристики товару')
+                                            ->relationship()
+                                            ->schema([
+                                                TextInput::make('name')
+                                                    ->label('Назва')
+                                                    ->required()
+                                                    ->maxLength(255),
+                                                TextInput::make('value')
+                                                    ->label('Значення')
+                                                    ->required()
+                                                    ->maxLength(255),
+                                                TextInput::make('unit')
+                                                    ->label('Одиниця')
+                                                    ->maxLength(255),
+                                                TextInput::make('sort_order')
+                                                    ->label('Порядок')
+                                                    ->numeric()
+                                                    ->minValue(0)
+                                                    ->default(0),
+                                            ])
+                                            ->columns(4)
+                                            ->defaultItems(0),
+                                    ]),
+                            ]),
+                        Tab::make('Варіанти')
+                            ->schema([
+                                Section::make('Варіанти SKU')
+                                    ->description('У нижній частині сторінки доступна таблиця "Варіанти / SKU" для multi-variant товарів.')
+                                    ->schema([
+                                        Placeholder::make('variants_hint')
+                                            ->label('Пояснення')
+                                            ->content('Для більшості товарів достатньо основного SKU у вкладках "Продаж / SKU" та "Податки / Акциз". Для складного товару використовуйте таблицю варіантів нижче.'),
+                                    ]),
+                            ]),
                     ])
-                    ->columns(2),
-                Section::make('Опис')
-                    ->description('Короткий опис показується у картках, повний - на сторінці товару.')
-                    ->schema([
-                        Textarea::make('short_description')
-                            ->label('Короткий опис')
-                            ->rows(3),
-                        Textarea::make('description')
-                            ->label('Повний опис')
-                            ->rows(7),
-                    ]),
-                Section::make('Ціни та склад')
-                    ->description('Комерційні ціни, закупівля й залишок для кошика.')
-                    ->schema([
-                        TextInput::make('price')
-                            ->label('Ціна')
-                            ->required()
-                            ->numeric()
-                            ->minValue(0)
-                            ->default(0)
-                            ->prefix('₴')
-                            ->visible(fn (): bool => ! self::multiCurrencyEnabled()),
-                        TextInput::make('old_price')
-                            ->label('Стара ціна')
-                            ->numeric()
-                            ->minValue(0)
-                            ->prefix('₴')
-                            ->helperText('Якщо більше за поточну ціну, storefront покаже відсоток знижки.')
-                            ->visible(fn (): bool => ! self::multiCurrencyEnabled()),
-                        Repeater::make('prices')
-                            ->label('Ціни за валютами')
-                            ->relationship()
-                            ->schema([
-                                Select::make('currency_id')
-                                    ->label('Валюта')
-                                    ->options(fn (): array => self::currencyOptions())
-                                    ->searchable()
-                                    ->distinct()
-                                    ->disableOptionsWhenSelectedInSiblingRepeaterItems()
-                                    ->required(),
-                                TextInput::make('price')
-                                    ->label('Ціна')
-                                    ->numeric()
-                                    ->minValue(0)
-                                    ->required(),
-                                TextInput::make('compare_at_price')
-                                    ->label('Стара ціна')
-                                    ->numeric()
-                                    ->minValue(0),
-                                Toggle::make('is_active')
-                                    ->label('Активна')
-                                    ->default(true),
-                            ])
-                            ->columns(4)
-                            ->defaultItems(0)
-                            ->columnSpanFull()
-                            ->visible(fn (): bool => self::multiCurrencyEnabled()),
-                        TextInput::make('purchase_price')
-                            ->label('Закупівельна ціна')
-                            ->numeric()
-                            ->minValue(0)
-                            ->prefix('₴'),
-                        TextInput::make('stock')
-                            ->label('Залишок')
-                            ->required()
-                            ->numeric()
-                            ->minValue(0)
-                            ->default(0)
-                            ->helperText('Кошик не дозволяє замовити більше доступного залишку.')
-                            ->visible(fn (): bool => ! self::multiWarehouseEnabled()),
-                        Repeater::make('stockBalances')
-                            ->label('Залишки за складами')
-                            ->relationship()
-                            ->schema([
-                                Select::make('warehouse_id')
-                                    ->label('Склад')
-                                    ->options(fn (): array => self::warehouseOptions())
-                                    ->searchable()
-                                    ->distinct()
-                                    ->disableOptionsWhenSelectedInSiblingRepeaterItems()
-                                    ->required(),
-                                TextInput::make('quantity')
-                                    ->label('Кількість')
-                                    ->numeric()
-                                    ->minValue(0)
-                                    ->default(0)
-                                    ->required(),
-                                TextInput::make('reserved_quantity')
-                                    ->label('Зарезервовано')
-                                    ->numeric()
-                                    ->minValue(0)
-                                    ->default(0)
-                                    ->disabled()
-                                    ->dehydrated(false),
-                                Placeholder::make('available_quantity')
-                                    ->label('Доступно')
-                                    ->content(fn (callable $get): string => number_format(
-                                        max(0, (float) ($get('quantity') ?? 0) - (float) ($get('reserved_quantity') ?? 0)),
-                                        3,
-                                        ',',
-                                        ' ',
-                                    )),
-                            ])
-                            ->columns(4)
-                            ->defaultItems(0)
-                            ->columnSpanFull()
-                            ->visible(fn (): bool => self::multiWarehouseEnabled()),
-                    ])
-                    ->columns(4),
-                Section::make('Публікація та бейджі')
-                    ->description('Керує видимістю товару й промо-позначками на storefront.')
-                    ->schema([
-                        Toggle::make('is_active')
-                            ->label('Активний')
-                            ->default(true)
-                            ->required(),
-                        Toggle::make('is_new')
-                            ->label('Новинка')
-                            ->required(),
-                        Toggle::make('is_hit')
-                            ->label('Хіт')
-                            ->required(),
-                        Toggle::make('is_sale')
-                            ->label('Акція')
-                            ->required(),
-                    ])
-                    ->columns(4),
-                Section::make('Фото')
-                    ->description('Основне фото використовується в каталозі, галерея - на сторінці товару.')
-                    ->schema([
-                        FileUpload::make('main_image')
-                            ->label('Основне фото')
-                            ->image()
-                            ->disk('public')
-                            ->directory('products')
-                            ->visibility('public')
-                            ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
-                            ->maxSize(2048)
-                            ->imagePreviewHeight('180')
-                            ->openable()
-                            ->downloadable()
-                            ->preserveFilenames(false),
-                        TextInput::make('image_alt_text')
-                            ->label('Alt-текст основного фото')
-                            ->maxLength(500),
-                        Repeater::make('images')
-                            ->label('Галерея фото')
-                            ->relationship()
-                            ->schema([
-                                FileUpload::make('image')
-                                    ->label('Фото')
-                                    ->image()
-                                    ->disk('public')
-                                    ->directory('products/gallery')
-                                    ->visibility('public')
-                                    ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
-                                    ->maxSize(2048)
-                                    ->imagePreviewHeight('120')
-                                    ->openable()
-                                    ->downloadable()
-                                    ->preserveFilenames(false)
-                                    ->required(),
-                                TextInput::make('alt')
-                                    ->label('Alt-текст')
-                                    ->maxLength(255),
-                                TextInput::make('sort_order')
-                                    ->label('Порядок')
-                                    ->numeric()
-                                    ->minValue(0)
-                                    ->default(0),
-                                Toggle::make('is_main')
-                                    ->label('Головне')
-                                    ->disabled()
-                                    ->dehydrated(false),
-                                TextInput::make('source_domain')
-                                    ->label('Джерело')
-                                    ->disabled()
-                                    ->dehydrated(false),
-                            ])
-                            ->columns(5)
-                            ->defaultItems(0),
-                    ]),
-                Section::make('Характеристики')
-                    ->description('Короткі характеристики показуються у картці й повний список на сторінці товару.')
-                    ->schema([
-                        Repeater::make('specifications')
-                            ->label('Характеристики товару')
-                            ->relationship()
-                            ->schema([
-                                TextInput::make('name')
-                                    ->label('Назва')
-                                    ->required()
-                                    ->maxLength(255),
-                                TextInput::make('value')
-                                    ->label('Значення')
-                                    ->required()
-                                    ->maxLength(255),
-                                TextInput::make('unit')
-                                    ->label('Одиниця')
-                                    ->maxLength(255),
-                                TextInput::make('sort_order')
-                                    ->label('Порядок')
-                                    ->numeric()
-                                    ->minValue(0)
-                                    ->default(0),
-                            ])
-                            ->columns(4)
-                            ->defaultItems(0),
-                    ]),
-                Section::make('SEO')
-                    ->description('Мета-поля для сторінки товару.')
-                    ->schema([
-                        TextInput::make('seo_title')
-                            ->label('SEO title')
-                            ->maxLength(255),
-                        Textarea::make('seo_description')
-                            ->label('SEO description')
-                            ->rows(3),
-                    ]),
+                    ->columnSpanFull(),
             ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function fillDefaultVariantFormState(array $data, ?Product $product): array
+    {
+        if (! $product) {
+            return $data;
+        }
+
+        $variant = $product->resolveDefaultVariant();
+
+        if (! $variant) {
+            return $data;
+        }
+
+        $data['default_variant_name'] = $variant->name;
+        $data['default_variant_barcode'] = $variant->barcode;
+        $data['default_variant_is_active'] = (bool) $variant->is_active;
+        $data['default_variant_is_default'] = true;
+        $data['default_variant_base_unit_id'] = $variant->base_unit_id;
+        $data['default_variant_sales_unit_id'] = $variant->sales_unit_id;
+        $data['default_variant_purchase_unit_id'] = $variant->purchase_unit_id;
+        $data['default_variant_tax_profile_id'] = $variant->tax_profile_id;
+        $data['default_variant_is_excise_applicable'] = (bool) $variant->is_excise_applicable;
+        $data['default_variant_excise_rate'] = $variant->excise_rate;
+        $data['default_variant_requires_excise_stamp_entry'] = (bool) $variant->requires_excise_stamp_entry;
+
+        return $data;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array{0: array<string, mixed>, 1: array<string, mixed>}
+     */
+    public static function extractDefaultVariantPayload(array $data): array
+    {
+        $variantPayload = [];
+        $keys = [
+            'default_variant_name',
+            'default_variant_barcode',
+            'default_variant_is_active',
+            'default_variant_base_unit_id',
+            'default_variant_sales_unit_id',
+            'default_variant_purchase_unit_id',
+            'default_variant_tax_profile_id',
+            'default_variant_is_excise_applicable',
+            'default_variant_excise_rate',
+            'default_variant_requires_excise_stamp_entry',
+        ];
+
+        foreach ($keys as $key) {
+            $variantPayload[$key] = $data[$key] ?? null;
+            unset($data[$key]);
+        }
+
+        return [$data, $variantPayload];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    public static function syncDefaultVariantFromPayload(Product $product, array $payload): void
+    {
+        $product->refresh();
+        $variant = $product->resolveDefaultVariant();
+
+        if (! $variant) {
+            $pieceUnit = Unit::ensurePiece();
+            $defaultTaxProfile = TaxProfile::ensureDefault();
+
+            $variant = ProductVariant::query()->create([
+                'product_id' => $product->id,
+                'sku' => $product->sku,
+                'base_unit_id' => $pieceUnit->id,
+                'sales_unit_id' => $pieceUnit->id,
+                'purchase_unit_id' => $pieceUnit->id,
+                'tax_profile_id' => $defaultTaxProfile->id,
+                'is_default' => true,
+                'is_active' => (bool) $product->is_active,
+                'sort_order' => 0,
+            ]);
+        }
+
+        if (! $variant) {
+            return;
+        }
+
+        $pieceUnit = Unit::ensurePiece();
+        $defaultTaxProfile = TaxProfile::ensureDefault();
+
+        $isExcise = (bool) ($payload['default_variant_is_excise_applicable'] ?? false);
+        $exciseRate = $payload['default_variant_excise_rate'] ?? null;
+
+        if ($isExcise && blank($exciseRate)) {
+            $exciseRate = 5.00;
+        }
+
+        if (! $isExcise) {
+            $exciseRate = null;
+        }
+
+        $variant->forceFill([
+            'sku' => $product->sku,
+            'name' => $payload['default_variant_name'] ?: null,
+            'barcode' => $payload['default_variant_barcode'] ?: null,
+            'base_unit_id' => $payload['default_variant_base_unit_id'] ?: $pieceUnit->id,
+            'sales_unit_id' => $payload['default_variant_sales_unit_id'] ?: ($payload['default_variant_base_unit_id'] ?: $pieceUnit->id),
+            'purchase_unit_id' => $payload['default_variant_purchase_unit_id'] ?: ($payload['default_variant_base_unit_id'] ?: $pieceUnit->id),
+            'tax_profile_id' => $payload['default_variant_tax_profile_id'] ?: $defaultTaxProfile->id,
+            'is_excise_applicable' => $isExcise,
+            'excise_rate' => $exciseRate,
+            'requires_excise_stamp_entry' => $isExcise ? (bool) ($payload['default_variant_requires_excise_stamp_entry'] ?? false) : false,
+            'is_active' => (bool) ($payload['default_variant_is_active'] ?? $product->is_active),
+            'is_default' => true,
+            'sort_order' => 0,
+        ]);
+
+        $variant->save();
     }
 
     public static function infolist(Schema $schema): Schema
@@ -590,6 +832,7 @@ class ProductResource extends Resource
     public static function getRelations(): array
     {
         return [
+            ProductVariantsRelationManager::class,
             ProductImageCandidatesRelationManager::class,
             ProductImagesRelationManager::class,
         ];
@@ -755,7 +998,7 @@ class ProductResource extends Resource
                             ]),
                     ]),
             ])
-            ->action(function (Product $record, array $data, \Livewire\Component $livewire): void {
+            ->action(function (Product $record, array $data, Component $livewire): void {
                 try {
                     $candidates = app(ProductImageSearchService::class)
                         ->search($record, auth()->user(), $data + ['provider' => $data['mode'] ?? 'direct_image_url']);

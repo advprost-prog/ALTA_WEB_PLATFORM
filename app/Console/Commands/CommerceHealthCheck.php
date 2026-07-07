@@ -20,8 +20,11 @@ use App\Models\OrderItem;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductPrice;
+use App\Models\ProductVariant;
 use App\Models\StockBalance;
 use App\Models\StockMovement;
+use App\Models\TaxProfile;
+use App\Models\Unit;
 use App\Models\Warehouse;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
@@ -258,6 +261,8 @@ class CommerceHealthCheck extends Command
             $this->sampleList($stockMovementDrift->take(10)->all()),
         );
 
+        $criticalIssues = array_merge($criticalIssues, $this->catalogCoreIssues());
+
         $criticalIssues = array_merge($criticalIssues, $this->lifecycleIssues());
         [$notificationCriticalIssues, $notificationWarningIssues] = $this->notificationIssues();
         $criticalIssues = array_merge($criticalIssues, $notificationCriticalIssues);
@@ -367,7 +372,11 @@ class CommerceHealthCheck extends Command
     {
         $balances = StockBalance::query()
             ->get()
-            ->keyBy(fn (StockBalance $balance): string => $balance->product_id.'|'.$balance->warehouse_id);
+            ->keyBy(fn (StockBalance $balance): string => implode('|', [
+                $balance->product_id,
+                $balance->warehouse_id,
+                $balance->product_variant_id ?? 'null',
+            ]));
 
         return StockMovement::query()
             ->whereNotNull('product_id')
@@ -375,11 +384,19 @@ class CommerceHealthCheck extends Command
             ->with(['product:id,name,sku', 'warehouse:id,name'])
             ->orderByDesc('id')
             ->get()
-            ->groupBy(fn (StockMovement $movement): string => $movement->product_id.'|'.$movement->warehouse_id)
+            ->groupBy(fn (StockMovement $movement): string => implode('|', [
+                $movement->product_id,
+                $movement->warehouse_id,
+                $movement->product_variant_id ?? 'null',
+            ]))
             ->map(function (Collection $movements) use ($balances): ?string {
                 /** @var StockMovement $latest */
                 $latest = $movements->first();
-                $key = $latest->product_id.'|'.$latest->warehouse_id;
+                $key = implode('|', [
+                    $latest->product_id,
+                    $latest->warehouse_id,
+                    $latest->product_variant_id ?? 'null',
+                ]);
                 $balance = $balances->get($key);
 
                 if (! $balance) {
@@ -403,6 +420,153 @@ class CommerceHealthCheck extends Command
             })
             ->filter()
             ->values();
+    }
+
+    /**
+     * @return array<int, array{code: string, message: string, count: int, examples: array<int, string>}|null>
+     */
+    private function catalogCoreIssues(): array
+    {
+        $defaultUnits = Unit::query()->where('is_active', true)->whereIn('code', ['piece', 'kg'])->get();
+        $defaultTaxProfiles = TaxProfile::query()->where('is_active', true)->whereIn('code', ['no_vat', 'vat_20'])->get();
+
+        $inactiveProductDefaultVariant = Product::query()
+            ->where('is_active', true)
+            ->whereHas('defaultVariant', fn ($query) => $query->where('is_active', false))
+            ->limit(20)
+            ->get();
+
+        $productsWithoutActiveDefaultVariant = Product::query()
+            ->where('is_active', true)
+            ->whereDoesntHave('variants', fn ($query) => $query->where('is_default', true)->where('is_active', true))
+            ->limit(20)
+            ->get();
+
+        $productsWithMultipleDefaultVariants = DB::table('product_variants')
+            ->select('product_id', DB::raw('COUNT(*) as defaults_count'))
+            ->where('is_default', true)
+            ->groupBy('product_id')
+            ->having('defaults_count', '>', 1)
+            ->limit(20)
+            ->get();
+
+        $variantsWithoutMandatoryRefs = ProductVariant::query()
+            ->where(function ($query): void {
+                $query->whereNull('base_unit_id')->orWhereNull('tax_profile_id');
+            })
+            ->limit(20)
+            ->get();
+
+        $variantExciseInconsistent = ProductVariant::query()
+            ->where(function ($query): void {
+                $query
+                    ->where(function ($inner): void {
+                        $inner->where('is_excise_applicable', true)
+                            ->where(function ($q): void {
+                                $q->whereNull('excise_rate')->orWhere('excise_rate', '<=', 0);
+                            });
+                    })
+                    ->orWhere(function ($inner): void {
+                        $inner->where('is_excise_applicable', false)
+                            ->where(function ($q): void {
+                                $q->whereNotNull('excise_rate')->orWhere('requires_excise_stamp_entry', true);
+                            });
+                    });
+            })
+            ->limit(20)
+            ->get();
+
+        $orderItemsMissingVariantSnapshot = OrderItem::query()
+            ->whereNotNull('product_variant_id')
+            ->where(function ($query): void {
+                $query->whereNull('tax_profile_id')
+                    ->orWhereNull('vat_rate')
+                    ->orWhereNull('base_unit_id')
+                    ->orWhereNull('sales_unit_id');
+            })
+            ->limit(20)
+            ->get();
+
+        $inactiveAttributesOnActiveProducts = DB::table('product_attribute_values')
+            ->join('attributes', 'attributes.id', '=', 'product_attribute_values.attribute_id')
+            ->join('products', 'products.id', '=', 'product_attribute_values.product_id')
+            ->where('products.is_active', true)
+            ->where('attributes.is_active', false)
+            ->limit(20)
+            ->get([
+                'product_attribute_values.id',
+                'products.id as product_id',
+                'products.name as product_name',
+                'attributes.id as attribute_id',
+                'attributes.name as attribute_name',
+            ]);
+
+        return [
+            $this->issue(
+                $defaultUnits->count() < 2,
+                'catalog_units_defaults_missing',
+                'Немає активних базових одиниць виміру (piece, kg).',
+                $this->sampleList($defaultUnits->map(fn (Unit $unit): string => $this->entityLabel($unit, ['code' => $unit->code]))),
+            ),
+            $this->issue(
+                $defaultTaxProfiles->count() < 2,
+                'catalog_tax_profiles_defaults_missing',
+                'Немає активних базових податкових профілів (no_vat, vat_20).',
+                $this->sampleList($defaultTaxProfiles->map(fn (TaxProfile $profile): string => $this->entityLabel($profile, ['code' => $profile->code]))),
+            ),
+            $this->issue(
+                $inactiveProductDefaultVariant->isNotEmpty(),
+                'products_default_variant_inactive',
+                'Активні товари мають default SKU, що неактивний.',
+                $this->sampleList($this->productsList($inactiveProductDefaultVariant)),
+            ),
+            $this->issue(
+                $productsWithoutActiveDefaultVariant->isNotEmpty(),
+                'products_without_active_default_variant',
+                'Є активні товари без активного основного SKU.',
+                $this->sampleList($this->productsList($productsWithoutActiveDefaultVariant)),
+            ),
+            $this->issue(
+                $productsWithMultipleDefaultVariants->isNotEmpty(),
+                'variants_multiple_defaults_per_product',
+                'Є товари з кількома основними SKU.',
+                $this->sampleList($productsWithMultipleDefaultVariants->map(fn (object $row): string => 'product#'.$row->product_id.' defaults='.$row->defaults_count)),
+            ),
+            $this->issue(
+                $variantsWithoutMandatoryRefs->isNotEmpty(),
+                'variants_missing_base_unit_or_tax_profile',
+                'Є SKU без base unit або tax profile.',
+                $this->sampleList($variantsWithoutMandatoryRefs->map(fn (ProductVariant $variant): string => $this->entityLabel($variant, [
+                    'sku' => $variant->sku,
+                    'product_id' => (string) $variant->product_id,
+                    'base_unit_id' => (string) $variant->base_unit_id,
+                    'tax_profile_id' => (string) $variant->tax_profile_id,
+                ]))),
+            ),
+            $this->issue(
+                $variantExciseInconsistent->isNotEmpty(),
+                'variants_excise_inconsistent',
+                'Є SKU з неузгодженими акцизними полями.',
+                $this->sampleList($variantExciseInconsistent->map(fn (ProductVariant $variant): string => $this->entityLabel($variant, [
+                    'sku' => $variant->sku,
+                    'is_excise_applicable' => $variant->is_excise_applicable ? '1' : '0',
+                    'excise_rate' => (string) $variant->excise_rate,
+                    'requires_excise_stamp_entry' => $variant->requires_excise_stamp_entry ? '1' : '0',
+                ]))),
+            ),
+            $this->issue(
+                $orderItemsMissingVariantSnapshot->isNotEmpty(),
+                'order_items_variant_snapshot_missing',
+                'Є позиції замовлень зі SKU без unit/tax snapshot.',
+                $this->sampleList($orderItemsMissingVariantSnapshot->map(fn (OrderItem $item): string => 'order_item#'.$item->id.' variant#'.$item->product_variant_id)),
+            ),
+            $this->issue(
+                $inactiveAttributesOnActiveProducts->isNotEmpty(),
+                'product_attributes_inactive_linked_to_active_products',
+                'Активні товари мають значення неактивних атрибутів.',
+                $this->sampleList($inactiveAttributesOnActiveProducts->map(fn (object $row): string => 'value#'.$row->id.' product#'.$row->product_id.' attribute#'.$row->attribute_id)),
+            ),
+        ];
     }
 
     /**

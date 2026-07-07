@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 
@@ -21,7 +22,11 @@ class Category extends Model
         'slug',
         'description',
         'image',
+        'banner_image',
+        'icon',
         'is_active',
+        'is_visible_in_menu',
+        'default_tax_profile_id',
         'sort_order',
         'seo_title',
         'seo_description',
@@ -31,6 +36,7 @@ class Category extends Model
     {
         return [
             'is_active' => 'boolean',
+            'is_visible_in_menu' => 'boolean',
             'sort_order' => 'integer',
         ];
     }
@@ -45,6 +51,11 @@ class Category extends Model
         return $this->belongsTo(self::class, 'parent_id');
     }
 
+    public function defaultTaxProfile(): BelongsTo
+    {
+        return $this->belongsTo(TaxProfile::class, 'default_tax_profile_id');
+    }
+
     public function children(): HasMany
     {
         return $this->hasMany(self::class, 'parent_id');
@@ -53,6 +64,17 @@ class Category extends Model
     public function products(): HasMany
     {
         return $this->hasMany(Product::class);
+    }
+
+    public function relatedProducts(): BelongsToMany
+    {
+        return $this->belongsToMany(Product::class, 'product_category')
+            ->withPivot(['is_primary', 'sort_order']);
+    }
+
+    public function attributeLinks(): HasMany
+    {
+        return $this->hasMany(CategoryAttribute::class)->orderBy('sort_order')->orderBy('id');
     }
 
     public function getImageUrlAttribute(): string

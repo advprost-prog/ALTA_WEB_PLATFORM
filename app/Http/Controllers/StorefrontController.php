@@ -120,6 +120,7 @@ class StorefrontController extends Controller
             $product,
             (int) $request->integer('quantity', 1),
             session('cart', []),
+            $request->filled('variant_id') ? (int) $request->integer('variant_id') : null,
         );
 
         session(['cart' => $result['cart']]);
@@ -130,7 +131,7 @@ class StorefrontController extends Controller
     public function updateCart(Request $request): RedirectResponse
     {
         $requestedCart = collect($request->input('quantities', []))
-            ->mapWithKeys(fn ($quantity, $productId): array => [(int) $productId => (int) $quantity])
+            ->mapWithKeys(fn ($quantity, $cartKey): array => [(string) $cartKey => (int) $quantity])
             ->filter()
             ->all();
 
@@ -141,8 +142,7 @@ class StorefrontController extends Controller
 
     public function removeFromCart(Product $product): RedirectResponse
     {
-        $cart = session('cart', []);
-        unset($cart[$product->id]);
+        $cart = $this->checkoutService->removeProductEntries(session('cart', []), $product);
         session(['cart' => $cart]);
 
         return back()->with('status', 'Товар прибрано з кошика.');

@@ -140,7 +140,7 @@ class OrderLifecycleService
                 }
 
                 $this->stockService->applyDelta(
-                    product: $item->product,
+                    subject: $item->variant ?? $item->product,
                     warehouseId: (int) $item->warehouse_id,
                     delta: (float) $item->quantity,
                     type: StockMovement::TYPE_RETURN,
