@@ -19,6 +19,27 @@ Added:
 - lifecycle health-check diagnostics for broken statuses, snapshots, active methods, and timestamps
 - repeated cancel protection so stock is not returned twice
 
+## Customer Core Update
+
+Added:
+
+- expanded `customers` master-data fields for individual/company buyers
+- `customer_addresses`
+- `App\Services\Commerce\CustomerService`
+- checkout customer resolving by normalized phone first and normalized email second
+- order customer snapshots for city/address in addition to name/phone/email
+- `customers:backfill-from-orders` with `--dry-run` and `--limit`
+- Customer Filament resource with addresses and related orders
+- customer diagnostics in `commerce:health-check`, including duplicate normalized contacts and linked-order contact conflicts
+
+Not added:
+
+- customer login/account
+- registration/password flows
+- customer merge
+- loyalty/marketing automation
+- CRM/ERP or delivery provider integrations
+
 Admin workflow:
 
 - new storefront orders start as `new`
@@ -58,6 +79,8 @@ These tables and models are part of the release surface:
 - `orders` / `App\Models\Order`
 - `order_items` / `App\Models\OrderItem`
 - `order_status_histories` / `App\Models\OrderStatusHistory`
+- `customers` / `App\Models\Customer`
+- `customer_addresses` / `App\Models\CustomerAddress`
 
 ## Core Services
 
@@ -66,6 +89,7 @@ These tables and models are part of the release surface:
 - `App\Services\Commerce\FulfillmentService` chooses a single warehouse for checkout
 - `App\Services\Commerce\StockService` updates stock balances and stock movements inside transactions
 - `App\Services\Commerce\CheckoutService` assembles the cart payload and creates orders
+- `App\Services\Commerce\CustomerService` resolves/creates customer master data without aggressive merge
 - `App\Services\Commerce\OrderLifecycleService` validates order lifecycle transitions and writes order history
 
 ## Mode Summary
@@ -101,16 +125,17 @@ Multi-warehouse mode:
 7. Run `php artisan route:clear`
 8. Run `php artisan view:clear`
 9. Run `php artisan commerce:health-check`
-10. For email delivery, set `MAIL_*` in the environment or configure `Сервер повідомлень` in admin; never commit SMTP credentials
-11. Run `php artisan config:clear`
-12. Run `php artisan notifications:test-email test@example.com`
-13. Run `php artisan notifications:send-pending --dry-run`
-14. Run `php artisan test`
-15. Run `git diff --check`
-16. Verify the storefront
-17. Verify checkout end to end
-18. Verify Filament commerce settings
-19. Verify stock movements after a test order
+10. Run `php artisan customers:backfill-from-orders --dry-run` before any controlled customer backfill
+11. For email delivery, set `MAIL_*` in the environment or configure `Сервер повідомлень` in admin; never commit SMTP credentials
+12. Run `php artisan config:clear`
+13. Run `php artisan notifications:test-email test@example.com`
+14. Run `php artisan notifications:send-pending --dry-run`
+15. Run `php artisan test`
+16. Run `git diff --check`
+17. Verify the storefront
+18. Verify checkout end to end
+19. Verify Filament commerce settings
+20. Verify stock movements after a test order
 
 Do not use `php artisan migrate:fresh` on staging or production.
 
@@ -120,6 +145,9 @@ Do not use `php artisan migrate:fresh` on staging or production.
 - there is no auto-fix path in this phase
 - warehouse internals stay hidden from the customer
 - historical orders rely on snapshots and should not be edited as live product data
+- customers are buyer master data and are not internal `User` accounts
+- customer edits do not rewrite historical order snapshots
+- customer duplicate handling is diagnostic only; no aggressive merge is implemented
 - payment and delivery method names are snapshotted on each order
 - manual `paid` status does not imply a real payment gateway transaction
 - post-shipment returns remain out of scope and should not be modeled as a simple cancel

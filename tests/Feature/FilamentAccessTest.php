@@ -2,8 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OrderStatus;
 use App\Enums\UserRole;
 use App\Models\CommerceSetting;
+use App\Models\Customer;
+use App\Models\Order;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Concerns\CreatesCommerceData;
 use Tests\TestCase;
@@ -103,5 +106,36 @@ class FilamentAccessTest extends TestCase
             ->assertOk()
             ->assertSee('Ціни за валютами')
             ->assertSee('Залишки за складами');
+    }
+
+    public function test_admin_can_access_customer_resource_and_customer_view(): void
+    {
+        $customer = Customer::create([
+            'full_name' => 'Filament Buyer',
+            'phone' => '+380501112233',
+            'email' => 'filament@example.test',
+        ]);
+
+        $order = Order::create([
+            'customer_id' => $customer->id,
+            'customer_name' => 'Filament Buyer',
+            'phone' => '+380501112233',
+            'email' => 'filament@example.test',
+            'total_amount' => 100,
+            'status' => OrderStatus::New->value,
+        ]);
+
+        $admin = $this->createUserWithRole(UserRole::Admin);
+
+        $this->actingAs($admin)
+            ->get('/admin/customers')
+            ->assertOk()
+            ->assertSee('Filament Buyer');
+
+        $this->actingAs($admin)
+            ->get('/admin/customers/'.$customer->id)
+            ->assertOk()
+            ->assertSee('Filament Buyer')
+            ->assertSee('Замовлення');
     }
 }

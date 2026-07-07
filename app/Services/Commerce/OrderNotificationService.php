@@ -137,7 +137,7 @@ class OrderNotificationService
         ?User $user = null,
         array $extraPayload = [],
     ): NotificationOutbox {
-        $order->loadMissing(['currency', 'paymentMethod', 'deliveryMethod']);
+        $order->loadMissing(['currency', 'paymentMethod', 'deliveryMethod', 'customer']);
         $recipient = $this->recipientFor($order, $channel);
 
         $template = NotificationTemplate::query()
@@ -255,7 +255,7 @@ class OrderNotificationService
     private function recipientFor(Order $order, NotificationChannel $channel): ?string
     {
         return match ($channel) {
-            NotificationChannel::Email => $order->email,
+            NotificationChannel::Email => $order->email ?: $order->customer?->email,
             NotificationChannel::AdminPanel, NotificationChannel::Log => null,
         };
     }

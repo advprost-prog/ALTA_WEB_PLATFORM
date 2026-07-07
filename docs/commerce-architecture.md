@@ -225,6 +225,12 @@ Orders and order items store commerce snapshots so historical orders do not depe
 
 `orders` stores:
 
+- `customer_id`
+- `customer_name`
+- `phone`
+- `email`
+- `city`
+- `address`
 - `currency_id`
 - `currency_code`
 - `exchange_rate_to_base`
@@ -247,6 +253,24 @@ Orders and order items store commerce snapshots so historical orders do not depe
 - `total`
 
 In simple mode, order creation automatically uses the default currency and default warehouse. Checkout runs in a database transaction and blocks stock changes that would make the default balance negative.
+
+## Customers
+
+Customer master data is documented in [`docs/customers.md`](customers.md).
+
+`Customer` is the storefront buyer. It is separate from `User`, which remains an internal admin/operator account. A customer is not an auth user in this phase.
+
+Checkout links each new order to a customer when possible, but the order snapshot remains the historical truth for that order. Customer address edits, phone/email changes, and name corrections do not rewrite existing order snapshots.
+
+When a checkout/order phone and email point to different customers, the system avoids auto-merge and reports the case as a potential duplicate through diagnostics.
+
+Existing orders can be linked with the read-controlled command:
+
+```bash
+php artisan customers:backfill-from-orders --dry-run
+```
+
+The command is not run from migrations and does not perform aggressive merge.
 
 ## Order Lifecycle
 
@@ -392,6 +416,8 @@ Inside one database transaction, checkout:
 - validates that every product has an active price in the selected order currency
 - resolves one fulfillment warehouse per order item
 - creates the customer/order/order items
+- links the order to customer master data when possible
+- stores customer name, phone, email, city, and address snapshots
 - stores order currency snapshots
 - stores payment and delivery method snapshots
 - stores order item price, total, product name, SKU, and warehouse snapshots
@@ -482,6 +508,8 @@ It checks:
 - missing base order notification templates
 - broken notification outbox records
 - pending or failed notification warnings
+- customer duplicate/contact warnings
+- broken customer/order/address references
 
 Use `--json` for machine-readable output in release tooling.
 

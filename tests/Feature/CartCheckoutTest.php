@@ -7,6 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\CommerceSetting;
 use App\Models\Currency;
+use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\Order;
 use App\Models\OrderStatusHistory;
@@ -301,6 +302,18 @@ class CartCheckoutTest extends TestCase
             'delivery_method_name' => 'Нова пошта',
         ]);
         $this->assertSame($settings->default_warehouse_id, $item->warehouse_id);
+        $this->assertNotNull($order->customer_id);
+        $this->assertTrue($order->customer instanceof Customer);
+        $this->assertSame('Test Buyer', $order->customer->full_name);
+        $this->assertSame('380501112233', $order->customer->normalized_phone);
+        $this->assertSame('Київ', $order->city);
+        $this->assertSame('Відділення 1', $order->address);
+        $this->assertDatabaseHas('customer_addresses', [
+            'customer_id' => $order->customer_id,
+            'city' => 'Київ',
+            'address' => 'Відділення 1',
+            'is_default' => true,
+        ]);
         $this->assertSame('1000.00', $item->unit_price);
         $this->assertSame('1000.00', $item->price);
         $this->assertSame('2000.00', $item->total);
@@ -351,6 +364,33 @@ class CartCheckoutTest extends TestCase
 
         $this->assertSame('Післяплата', $order->payment_method_name);
         $this->assertSame('Нова пошта', $order->delivery_method_name);
+    }
+
+    public function test_order_customer_snapshots_do_not_change_after_customer_is_edited(): void
+    {
+        $product = $this->createProduct(['stock' => 2]);
+
+        $this->withSession(['cart' => [$product->id => 1]])
+            ->post(route('checkout.place'), $this->checkoutData())
+            ->assertRedirect();
+
+        $order = Order::firstOrFail();
+
+        $order->customer->forceFill([
+            'full_name' => 'Changed Customer',
+            'phone' => '+380671112233',
+            'email' => 'changed@example.test',
+            'city' => 'Львів',
+            'address' => 'Нова адреса',
+        ])->save();
+
+        $order->refresh();
+
+        $this->assertSame('Test Buyer', $order->customer_name);
+        $this->assertSame('+380501112233', $order->phone);
+        $this->assertSame('buyer@example.test', $order->email);
+        $this->assertSame('Київ', $order->city);
+        $this->assertSame('Відділення 1', $order->address);
     }
 
     public function test_order_item_price_snapshot_does_not_change_after_product_price_changes(): void

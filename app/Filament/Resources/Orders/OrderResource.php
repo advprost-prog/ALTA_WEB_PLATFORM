@@ -8,11 +8,13 @@ use App\Enums\NotificationStatus;
 use App\Enums\OrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Resources\Orders\Pages\CreateOrder;
 use App\Filament\Resources\Orders\Pages\ListOrders;
 use App\Filament\Resources\Orders\Pages\ViewOrder;
 use App\Models\CommerceSetting;
 use App\Models\Currency;
+use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\NotificationOutbox;
 use App\Models\Order;
@@ -76,6 +78,7 @@ class OrderResource extends Resource
                         Select::make('customer_id')
                             ->label('Клієнт з бази')
                             ->relationship('customer', 'name')
+                            ->getOptionLabelFromRecordUsing(fn (Customer $record): string => $record->display_name)
                             ->searchable()
                             ->preload(),
                         TextInput::make('number')
@@ -94,6 +97,13 @@ class OrderResource extends Resource
                             ->label('Email')
                             ->email()
                             ->maxLength(255),
+                        TextInput::make('city')
+                            ->label('Місто snapshot')
+                            ->maxLength(255),
+                        Textarea::make('address')
+                            ->label('Адреса snapshot')
+                            ->rows(3)
+                            ->columnSpanFull(),
                     ])
                     ->columns(2),
                 Section::make('Оплата і доставка')
@@ -262,7 +272,10 @@ class OrderResource extends Resource
             ->components([
                 TextEntry::make('customer.name')
                     ->label('Клієнт')
-                    ->placeholder('-'),
+                    ->placeholder('-')
+                    ->url(fn (Order $record): ?string => $record->customer
+                        ? CustomerResource::getUrl('view', ['record' => $record->customer])
+                        : null),
                 TextEntry::make('number')
                     ->label('Номер'),
                 TextEntry::make('customer_name')
@@ -272,6 +285,13 @@ class OrderResource extends Resource
                 TextEntry::make('email')
                     ->label('Email')
                     ->placeholder('-'),
+                TextEntry::make('city')
+                    ->label('Місто snapshot')
+                    ->placeholder('-'),
+                TextEntry::make('address')
+                    ->label('Адреса snapshot')
+                    ->placeholder('-')
+                    ->columnSpanFull(),
                 TextEntry::make('total_amount')
                     ->label('Сума')
                     ->formatStateUsing(fn (mixed $state, Order $record): string => self::formatOrderMoney($state, $record)),

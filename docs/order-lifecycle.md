@@ -63,6 +63,8 @@ Checkout shows only active methods and rejects inactive methods even if a reques
 
 The snapshot name is the historical display value for the order. Renaming a method later must not rewrite older orders.
 
+Customer data follows the same snapshot rule. `orders.customer_id` links to customer master data, while `customer_name`, `phone`, `email`, `city`, and `address` remain the order-specific historical values. Editing a customer must not rewrite old orders.
+
 ## Checkout Defaults
 
 Checkout creates:
@@ -158,6 +160,8 @@ Orders that are already `shipped` or `completed` are not automatically cancelled
 - missing or unknown payment status
 - missing or unknown delivery status
 - missing method snapshots when method ids are set
+- orders without customer links as warnings
+- linked orders missing customer snapshot fields as warnings
 - zero active payment methods
 - zero active delivery methods
 - cancelled orders without `cancelled_at`

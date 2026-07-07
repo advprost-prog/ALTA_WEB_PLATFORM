@@ -7,7 +7,6 @@ use App\Models\Brand;
 use App\Models\Category;
 use App\Models\CommerceSetting;
 use App\Models\Currency;
-use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\NotificationTemplate;
 use App\Models\Order;
@@ -19,6 +18,7 @@ use App\Models\SiteSetting;
 use App\Models\StockBalance;
 use App\Models\Warehouse;
 use App\Services\Admin\AdminUserProvisioner;
+use App\Services\Commerce\CustomerService;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
@@ -641,15 +641,14 @@ class DatabaseSeeder extends Seeder
 
         $this->call(StorefrontThemeSeeder::class);
 
-        $customer = Customer::updateOrCreate(
-            ['phone' => '+380501234567'],
-            [
-                'name' => 'Демо Покупець',
-                'email' => 'customer@example.test',
-                'city' => 'Київ',
-                'address' => 'Відділення Нової пошти 12',
-            ],
-        );
+        $customer = app(CustomerService::class)->resolveFromCheckout([
+            'name' => 'Демо Покупець',
+            'phone' => '+380501234567',
+            'email' => 'customer@example.test',
+            'city' => 'Київ',
+            'address' => 'Відділення Нової пошти 12',
+            'delivery_method_id' => $novaPoshta?->id,
+        ]);
 
         $demoProduct = Product::where('slug', 'castrol-edge-5w-30-ll-4l')->first();
         $order = Order::updateOrCreate(
@@ -663,6 +662,8 @@ class DatabaseSeeder extends Seeder
                 'customer_name' => $customer->name,
                 'phone' => $customer->phone,
                 'email' => $customer->email,
+                'city' => $customer->city,
+                'address' => $customer->address,
                 'total_amount' => $demoProduct?->price ?? 0,
                 'status' => 'new',
                 'payment_status' => 'unpaid',

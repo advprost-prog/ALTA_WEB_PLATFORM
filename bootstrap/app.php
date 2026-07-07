@@ -2,6 +2,7 @@
 
 use App\Console\Commands\AdminGovernanceCheck;
 use App\Console\Commands\AiHealth;
+use App\Console\Commands\BackfillCustomersFromOrders;
 use App\Console\Commands\CommerceHealthCheck;
 use App\Console\Commands\DiagnoseProductImages;
 use App\Console\Commands\ResetAdminAccess;
@@ -22,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withCommands([
         AdminGovernanceCheck::class,
         AiHealth::class,
+        BackfillCustomersFromOrders::class,
         CommerceHealthCheck::class,
         DiagnoseProductImages::class,
         ResetAdminAccess::class,

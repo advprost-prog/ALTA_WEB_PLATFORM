@@ -6,6 +6,7 @@ use App\Enums\DeliveryStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\CommerceSetting;
+use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\NotificationMailSetting;
 use App\Models\Order;
@@ -14,6 +15,7 @@ use App\Models\ProductPrice;
 use App\Models\StockBalance;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Schema;
 use Tests\Feature\Concerns\CreatesCommerceData;
 use Tests\TestCase;
 
@@ -228,5 +230,79 @@ class CommerceHealthCheckTest extends TestCase
             ->expectsOutputToContain('shipped_orders_missing_shipped_at')
             ->expectsOutputToContain('completed_orders_missing_completed_at')
             ->assertExitCode(1);
+    }
+
+    public function test_commerce_health_check_reports_customer_warnings(): void
+    {
+        CommerceSetting::current();
+
+        Customer::create([
+            'full_name' => 'Duplicate A',
+            'phone' => '+380501112233',
+            'email' => 'not-valid-email',
+        ]);
+        Customer::create([
+            'full_name' => 'Duplicate B',
+            'phone' => '0501112233',
+        ]);
+        Customer::create([
+            'full_name' => 'No Contact',
+        ]);
+        Order::create([
+            'customer_name' => 'Legacy Buyer',
+            'phone' => '+380671112233',
+            'total_amount' => 100,
+            'status' => OrderStatus::New->value,
+            'payment_status' => PaymentStatus::Unpaid->value,
+            'delivery_status' => DeliveryStatus::Pending->value,
+        ]);
+
+        $this->artisan('commerce:health-check')
+            ->expectsOutputToContain('orders_without_customer_id')
+            ->expectsOutputToContain('customers_without_phone_or_email')
+            ->expectsOutputToContain('customers_duplicate_normalized_phone')
+            ->expectsOutputToContain('customers_invalid_email')
+            ->assertExitCode(0);
+    }
+
+    public function test_commerce_health_check_reports_missing_customer_addresses_table_as_critical(): void
+    {
+        CommerceSetting::current();
+
+        Schema::drop('customer_addresses');
+
+        $this->artisan('commerce:health-check')
+            ->expectsOutputToContain('customer_addresses_table_missing')
+            ->assertExitCode(1);
+    }
+
+    public function test_commerce_health_check_reports_linked_order_contact_conflicts_as_potential_duplicates(): void
+    {
+        CommerceSetting::current();
+
+        $phoneCustomer = Customer::create([
+            'full_name' => 'Phone Owner',
+            'phone' => '+380501112233',
+        ]);
+
+        Customer::create([
+            'full_name' => 'Email Owner',
+            'email' => 'owner@example.test',
+        ]);
+
+        Order::create([
+            'customer_id' => $phoneCustomer->id,
+            'customer_name' => 'Conflict Buyer',
+            'phone' => '+380501112233',
+            'email' => 'owner@example.test',
+            'total_amount' => 100,
+            'status' => OrderStatus::New->value,
+            'payment_status' => PaymentStatus::Unpaid->value,
+            'delivery_status' => DeliveryStatus::Pending->value,
+        ]);
+
+        $this->artisan('commerce:health-check')
+            ->expectsOutputToContain('orders_customer_contact_potential_duplicate')
+            ->assertExitCode(0);
     }
 }

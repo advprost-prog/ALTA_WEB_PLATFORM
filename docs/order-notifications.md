@@ -131,6 +131,8 @@ Invalid transitions do not create notifications. Repeated cancel is blocked befo
 
 Email uses Laravel Mail with `OrderNotificationMail`. SMTP credentials are not stored in code and `.env` is not modified by this feature.
 
+Recipient selection keeps order history first: the order snapshot email is the primary recipient. `customer.email` is used only as a fallback when the order snapshot email is empty.
+
 Notification email delivery resolves settings in this order:
 
 1. Admin-configured notification mail settings from the database, when enabled and complete.

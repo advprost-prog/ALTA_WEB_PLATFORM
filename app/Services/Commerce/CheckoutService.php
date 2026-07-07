@@ -7,7 +7,6 @@ use App\Enums\OrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Currency;
-use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\Order;
 use App\Models\PaymentMethod;
@@ -47,6 +46,7 @@ class CheckoutService
         private readonly StockService $stockService,
         private readonly OrderLifecycleService $orderLifecycleService,
         private readonly OrderNotificationService $orderNotificationService,
+        private readonly CustomerService $customerService,
     ) {}
 
     /**
@@ -278,20 +278,13 @@ class CheckoutService
                 throw new RuntimeException('Кошик порожній.');
             }
 
-            $customer = Customer::updateOrCreate(
-                ['phone' => $validated['phone']],
-                [
-                    'name' => $validated['name'],
-                    'email' => $validated['email'] ?? null,
-                    'city' => $validated['city'] ?? null,
-                    'address' => $validated['address'] ?? null,
-                ],
-            );
-
             /** @var Warehouse $primaryWarehouse */
             $primaryWarehouse = $lines->first()['warehouse'];
             $paymentMethod = $this->resolvePaymentMethod((string) $validated['payment_method']);
             $deliveryMethod = $this->resolveDeliveryMethod((string) $validated['delivery_method']);
+            $customer = $this->customerService->resolveFromCheckout($validated + [
+                'delivery_method_id' => $deliveryMethod->id,
+            ]);
 
             $order = Order::create([
                 'customer_id' => $customer->id,
@@ -302,6 +295,8 @@ class CheckoutService
                 'customer_name' => $validated['name'],
                 'phone' => $validated['phone'],
                 'email' => $validated['email'] ?? null,
+                'city' => $validated['city'] ?? null,
+                'address' => $validated['address'] ?? null,
                 'total_amount' => $lines->sum('total'),
                 'status' => OrderStatus::New->value,
                 'payment_status' => $this->initialPaymentStatus($paymentMethod)->value,

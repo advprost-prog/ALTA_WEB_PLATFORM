@@ -10,6 +10,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\CommerceSetting;
 use App\Models\Currency;
+use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\NotificationMailSetting;
 use App\Models\NotificationOutbox;
@@ -24,6 +25,7 @@ use App\Models\StockMovement;
 use App\Models\Warehouse;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 class CommerceHealthCheck extends Command
@@ -261,9 +263,15 @@ class CommerceHealthCheck extends Command
         $criticalIssues = array_merge($criticalIssues, $notificationCriticalIssues);
         [$mailCriticalIssues, $mailWarningIssues] = $this->mailIssues();
         $criticalIssues = array_merge($criticalIssues, $mailCriticalIssues);
+        [$customerCriticalIssues, $customerWarningIssues] = $this->customerIssues();
+        $criticalIssues = array_merge($criticalIssues, $customerCriticalIssues);
 
         $criticalIssues = array_values(array_filter($criticalIssues));
-        $warningIssues = array_values(array_filter(array_merge($notificationWarningIssues, $mailWarningIssues)));
+        $warningIssues = array_values(array_filter(array_merge(
+            $notificationWarningIssues,
+            $mailWarningIssues,
+            $customerWarningIssues,
+        )));
 
         return [
             'status' => $criticalIssues === [] ? 'ok' : 'failed',
@@ -857,6 +865,263 @@ class CommerceHealthCheck extends Command
         );
 
         return [$critical, $warnings];
+    }
+
+    /**
+     * @return array{0: array<int, array{code: string, message: string, count: int, examples: array<int, string>}|null>, 1: array<int, array{code: string, message: string, count: int, examples: array<int, string>}|null>}
+     */
+    private function customerIssues(): array
+    {
+        if (! Schema::hasTable('customers')) {
+            return [
+                [
+                    $this->issue(
+                        true,
+                        'customers_table_missing',
+                        'Таблиця customers відсутня. Запустіть міграції.',
+                    ),
+                ],
+                [],
+            ];
+        }
+
+        $critical = [];
+        $warnings = [];
+
+        $ordersWithMissingCustomer = DB::table('orders')
+            ->leftJoin('customers', 'orders.customer_id', '=', 'customers.id')
+            ->whereNotNull('orders.customer_id')
+            ->whereNull('customers.id')
+            ->orderBy('orders.id')
+            ->limit(20)
+            ->get(['orders.id', 'orders.number', 'orders.customer_id']);
+
+        $critical[] = $this->issue(
+            $ordersWithMissingCustomer->isNotEmpty(),
+            'orders_invalid_customer_id',
+            'Є замовлення з customer_id на неіснуючого customer.',
+            $this->sampleList($ordersWithMissingCustomer->map(
+                fn (object $order): string => 'order#'.$order->id.' '.$order->number.' customer#'.$order->customer_id,
+            )),
+        );
+
+        if (! Schema::hasTable('customer_addresses')) {
+            $critical[] = $this->issue(
+                true,
+                'customer_addresses_table_missing',
+                'Таблиця customer_addresses відсутня. Запустіть міграції.',
+            );
+        } else {
+            $addressesWithMissingCustomer = DB::table('customer_addresses')
+                ->leftJoin('customers', 'customer_addresses.customer_id', '=', 'customers.id')
+                ->whereNull('customers.id')
+                ->orderBy('customer_addresses.id')
+                ->limit(20)
+                ->get(['customer_addresses.id', 'customer_addresses.customer_id']);
+
+            $critical[] = $this->issue(
+                $addressesWithMissingCustomer->isNotEmpty(),
+                'customer_addresses_missing_customer',
+                'Є адреси клієнтів без валідного customer_id.',
+                $this->sampleList($addressesWithMissingCustomer->map(
+                    fn (object $address): string => 'address#'.$address->id.' customer#'.$address->customer_id,
+                )),
+            );
+        }
+
+        $ordersWithoutCustomer = Order::query()
+            ->whereNull('customer_id')
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $warnings[] = $this->issue(
+            $ordersWithoutCustomer->isNotEmpty(),
+            'orders_without_customer_id',
+            'Є замовлення без customer_id. Старі замовлення валідні, але їх можна звʼязати через backfill.',
+            $this->sampleList($this->ordersList($ordersWithoutCustomer)),
+        );
+
+        $customersWithoutContact = Customer::query()
+            ->where(function ($query): void {
+                $query->where(fn ($query) => $query->whereNull('phone')->orWhere('phone', ''))
+                    ->where(fn ($query) => $query->whereNull('email')->orWhere('email', ''));
+            })
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $warnings[] = $this->issue(
+            $customersWithoutContact->isNotEmpty(),
+            'customers_without_phone_or_email',
+            'Є customers без телефону й email.',
+            $this->sampleList($customersWithoutContact->map(fn (Customer $customer): string => $this->entityLabel($customer, [
+                'name' => $customer->display_name,
+            ]))),
+        );
+
+        $duplicatePhones = Customer::query()
+            ->select('normalized_phone', DB::raw('COUNT(*) as aggregate'))
+            ->whereNotNull('normalized_phone')
+            ->where('normalized_phone', '!=', '')
+            ->groupBy('normalized_phone')
+            ->havingRaw('COUNT(*) > 1')
+            ->orderBy('normalized_phone')
+            ->limit(20)
+            ->get();
+
+        $warnings[] = $this->issue(
+            $duplicatePhones->isNotEmpty(),
+            'customers_duplicate_normalized_phone',
+            'Є potential duplicate customers за normalized_phone.',
+            $this->sampleList($duplicatePhones->map(fn (Customer $customer): string => 'phone='.$customer->normalized_phone.' count='.$customer->aggregate)),
+        );
+
+        $duplicateEmails = Customer::query()
+            ->select('normalized_email', DB::raw('COUNT(*) as aggregate'))
+            ->whereNotNull('normalized_email')
+            ->where('normalized_email', '!=', '')
+            ->groupBy('normalized_email')
+            ->havingRaw('COUNT(*) > 1')
+            ->orderBy('normalized_email')
+            ->limit(20)
+            ->get();
+
+        $warnings[] = $this->issue(
+            $duplicateEmails->isNotEmpty(),
+            'customers_duplicate_normalized_email',
+            'Є potential duplicate customers за normalized_email.',
+            $this->sampleList($duplicateEmails->map(fn (Customer $customer): string => 'email='.$customer->normalized_email.' count='.$customer->aggregate)),
+        );
+
+        $invalidEmails = Customer::query()
+            ->whereNotNull('email')
+            ->where('email', '!=', '')
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (Customer $customer): bool => ! filter_var($customer->email, FILTER_VALIDATE_EMAIL))
+            ->values()
+            ->take(20);
+
+        $warnings[] = $this->issue(
+            $invalidEmails->isNotEmpty(),
+            'customers_invalid_email',
+            'Є customers з невалідним email.',
+            $this->sampleList($invalidEmails->map(fn (Customer $customer): string => $this->entityLabel($customer, [
+                'email' => $customer->email,
+            ]))),
+        );
+
+        $linkedOrdersMissingSnapshots = Order::query()
+            ->whereNotNull('customer_id')
+            ->where(function ($query): void {
+                $query->whereNull('customer_name')
+                    ->orWhere('customer_name', '')
+                    ->orWhereNull('phone')
+                    ->orWhere('phone', '');
+            })
+            ->orderBy('id')
+            ->limit(20)
+            ->get();
+
+        $warnings[] = $this->issue(
+            $linkedOrdersMissingSnapshots->isNotEmpty(),
+            'orders_linked_customer_missing_contact_snapshot',
+            'Є замовлення з customer_id, але без базових customer snapshot полів.',
+            $this->sampleList($this->ordersList($linkedOrdersMissingSnapshots)),
+        );
+
+        $linkedOrdersWithContactConflicts = $this->linkedOrdersWithCustomerContactConflicts();
+
+        $warnings[] = $this->issue(
+            $linkedOrdersWithContactConflicts->isNotEmpty(),
+            'orders_customer_contact_potential_duplicate',
+            'Є замовлення, де snapshot контакт збігається з іншим customer. Це potential duplicate, не auto-merge.',
+            $this->sampleList($linkedOrdersWithContactConflicts),
+        );
+
+        return [$critical, $warnings];
+    }
+
+    /**
+     * @return Collection<int, string>
+     */
+    private function linkedOrdersWithCustomerContactConflicts(): Collection
+    {
+        $customersByEmail = Customer::query()
+            ->whereNotNull('normalized_email')
+            ->where('normalized_email', '!=', '')
+            ->get(['id', 'normalized_email'])
+            ->groupBy('normalized_email');
+
+        $customersByPhone = Customer::query()
+            ->whereNotNull('normalized_phone')
+            ->where('normalized_phone', '!=', '')
+            ->get(['id', 'normalized_phone'])
+            ->groupBy('normalized_phone');
+
+        return Order::query()
+            ->whereNotNull('customer_id')
+            ->with('customer:id,normalized_email,normalized_phone')
+            ->orderBy('id')
+            ->get()
+            ->map(function (Order $order) use ($customersByEmail, $customersByPhone): ?string {
+                $matches = [];
+                $normalizedEmail = $this->normalizeCustomerEmail($order->email);
+                $normalizedPhone = $this->normalizeCustomerPhone($order->phone);
+
+                $emailMatches = $normalizedEmail
+                    ? $customersByEmail->get($normalizedEmail, collect())->where('id', '!=', $order->customer_id)
+                    : collect();
+                $phoneMatches = $normalizedPhone
+                    ? $customersByPhone->get($normalizedPhone, collect())->where('id', '!=', $order->customer_id)
+                    : collect();
+
+                if ($emailMatches->isNotEmpty()) {
+                    $matches[] = 'email_matches_customer#'.$emailMatches->pluck('id')->join(',');
+                }
+
+                if ($phoneMatches->isNotEmpty()) {
+                    $matches[] = 'phone_matches_customer#'.$phoneMatches->pluck('id')->join(',');
+                }
+
+                if ($matches === []) {
+                    return null;
+                }
+
+                return 'order#'.$order->id.' '.$order->number.' linked_customer#'.$order->customer_id.' '.implode(' ', $matches);
+            })
+            ->filter()
+            ->values()
+            ->take(20);
+    }
+
+    private function normalizeCustomerEmail(?string $email): ?string
+    {
+        $email = trim((string) $email);
+
+        return $email === '' ? null : mb_strtolower($email);
+    }
+
+    private function normalizeCustomerPhone(?string $phone): ?string
+    {
+        $phone = trim((string) $phone);
+
+        if ($phone === '') {
+            return null;
+        }
+
+        $digits = preg_replace('/\D+/', '', $phone) ?: '';
+
+        if (str_starts_with($digits, '00')) {
+            $digits = substr($digits, 2);
+        }
+
+        if (strlen($digits) === 10 && str_starts_with($digits, '0')) {
+            $digits = '38'.$digits;
+        }
+
+        return $digits === '' ? null : $digits;
     }
 
     /**
