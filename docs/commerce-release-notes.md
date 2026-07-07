@@ -14,6 +14,13 @@ Added:
 - Filament resource `Система -> Модулі та розширення`
 - Phase 1 docs in `docs/addons.md`
 
+Hardening:
+
+- runtime addon boot/provider failures now isolate per addon and do not crash app boot;
+- failed runtime addons receive `status=failed`, `is_enabled=false`, and an admin-readable `last_error`;
+- `addons:doctor` and `addons:list` surface failed/runtime diagnostics with clearer operator feedback;
+- demo content seeding moved behind explicit safety policy (`local/testing` or `ALLOW_DEMO_SEEDING=true`), while base infrastructure seeding remains safe by default.
+
 ## Banner Design System Update
 
 Added:

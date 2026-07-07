@@ -176,7 +176,7 @@ class AddonFoundationTest extends TestCase
         $this->assertSame([], app(AddonHookRegistry::class)->run('admin.dashboard.widgets', 'payload'));
     }
 
-    public function test_missing_service_provider_is_diagnostic_not_application_crash(): void
+    public function test_missing_service_provider_fails_addon_with_last_error_without_application_crash(): void
     {
         $this->writeExtensionManifest('MissingProvider', $this->extensionManifestJson([
             'code' => 'tests.missing-provider',
@@ -190,13 +190,125 @@ class AddonFoundationTest extends TestCase
 
         $this->assertDatabaseHas('system_addons', [
             'code' => 'tests.missing-provider',
-            'status' => 'enabled',
-            'is_enabled' => true,
+            'status' => 'failed',
+            'is_enabled' => false,
         ]);
+
+        $this->assertStringContainsString(
+            'Service provider class not found',
+            (string) app(AddonRegistry::class)->find('tests.missing-provider')?->last_error,
+        );
 
         $diagnostics = app(AddonHealthCheck::class)->diagnostics();
 
+        $this->assertContains('addon_failed_status', collect($diagnostics['issues'])->pluck('code')->all());
         $this->assertContains('addon_service_provider_missing', collect($diagnostics['issues'])->pluck('code')->all());
+    }
+
+    public function test_provider_exception_updates_last_error_and_does_not_break_application_boot(): void
+    {
+        $path = $this->testModulesPath.'/CrashingProvider';
+        File::ensureDirectoryExists($path.'/src');
+        File::put($path.'/src/CrashingProvider.php', <<<'PHP'
+<?php
+
+namespace Modules\TestSuite\CrashingProvider;
+
+use Illuminate\Support\ServiceProvider;
+
+class CrashingProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        throw new \RuntimeException('Provider exploded during register');
+    }
+}
+PHP);
+        File::put($path.'/module.json', $this->manifestJson([
+            'code' => 'tests.crashing-provider',
+            'name' => 'Crashing Provider',
+            'service_provider' => 'Modules\\TestSuite\\CrashingProvider\\CrashingProvider',
+            'routes' => [
+                'web' => 'routes/web.php',
+            ],
+        ]));
+        File::ensureDirectoryExists($path.'/routes');
+        File::put($path.'/routes/web.php', <<<'PHP'
+<?php
+
+use Illuminate\Support\Facades\Route;
+
+Route::get('/addons/test-suite/crashing-provider', fn (): string => 'ok');
+PHP);
+
+        app(AddonManager::class)->discover();
+        app(AddonManager::class)->install('tests.crashing-provider');
+        app(AddonManager::class)->enable('tests.crashing-provider');
+
+        $addon = app(AddonRegistry::class)->find('tests.crashing-provider');
+
+        $this->assertNotNull($addon);
+        $this->assertSame('failed', $addon->status);
+        $this->assertFalse($addon->is_enabled);
+        $this->assertStringContainsString('Addon boot failed', (string) $addon->last_error);
+        $this->assertStringNotContainsString(base_path(), (string) $addon->last_error);
+
+        $this->assertDatabaseMissing('system_addon_events', [
+            'addon_code' => 'tests.crashing-provider',
+            'event' => 'service_provider_registered',
+        ]);
+
+        $this->get('/addons/test-suite/crashing-provider')->assertNotFound();
+    }
+
+    public function test_enabled_addon_with_missing_manifest_is_marked_failed_with_last_error(): void
+    {
+        app(AddonManager::class)->discover();
+        app(AddonManager::class)->install('demo.hello-module');
+        app(AddonManager::class)->enable('demo.hello-module');
+
+        $manifestPath = base_path('modules/Demo/HelloModule/module.json');
+        $backupPath = $manifestPath.'.bak';
+        rename($manifestPath, $backupPath);
+
+        try {
+            app(AddonManager::class)->bootEnabledAddons();
+
+            $addon = app(AddonRegistry::class)->find('demo.hello-module');
+
+            $this->assertNotNull($addon);
+            $this->assertSame('failed', $addon->status);
+            $this->assertFalse($addon->is_enabled);
+            $this->assertSame('Manifest not found', $addon->last_error);
+
+            $diagnostics = app(AddonHealthCheck::class)->diagnostics();
+            $this->assertContains('addon_failed_status', collect($diagnostics['issues'])->pluck('code')->all());
+        } finally {
+            rename($backupPath, $manifestPath);
+        }
+    }
+
+    public function test_failed_addon_can_be_disabled_cleanly(): void
+    {
+        $this->writeExtensionManifest('MissingProviderToDisable', $this->extensionManifestJson([
+            'code' => 'tests.missing-provider-disable',
+            'name' => 'Missing Provider Disable',
+            'service_provider' => 'Extensions\\TestSuite\\MissingProviderToDisable\\MissingProvider',
+        ]));
+
+        app(AddonManager::class)->discover();
+        app(AddonManager::class)->install('tests.missing-provider-disable');
+        app(AddonManager::class)->enable('tests.missing-provider-disable');
+
+        $this->artisan('addons:disable tests.missing-provider-disable')
+            ->assertExitCode(0);
+
+        $this->assertDatabaseHas('system_addons', [
+            'code' => 'tests.missing-provider-disable',
+            'status' => 'disabled',
+            'is_enabled' => false,
+            'last_error' => null,
+        ]);
     }
 
     public function test_addon_settings_and_enabled_permissions_are_available(): void

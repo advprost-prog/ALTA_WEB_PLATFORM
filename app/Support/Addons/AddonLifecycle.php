@@ -127,6 +127,26 @@ class AddonLifecycle
         });
     }
 
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    public function markRuntimeFailure(SystemAddon $addon, string $message, string $event = 'runtime_failed', array $context = []): SystemAddon
+    {
+        $safeMessage = $this->sanitizeRuntimeError($message);
+
+        $addon->forceFill([
+            'status' => SystemAddon::STATUS_FAILED,
+            'is_enabled' => false,
+            'enabled_at' => null,
+            'disabled_at' => now(),
+            'last_error' => $safeMessage,
+        ])->save();
+
+        $this->events->error($addon->code, $event, $safeMessage, $this->sanitizeRuntimeContext($context));
+
+        return $addon->refresh();
+    }
+
     public function serviceProviderIsAllowed(SystemAddon $addon): bool
     {
         if (! $addon->service_provider) {
@@ -297,6 +317,38 @@ class AddonLifecycle
         $this->events->error($addon->code, 'lifecycle_failed', $message);
 
         throw new RuntimeException($message);
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     * @return array<string, mixed>
+     */
+    private function sanitizeRuntimeContext(array $context): array
+    {
+        $sanitized = [];
+
+        foreach ($context as $key => $value) {
+            if (is_string($value)) {
+                $sanitized[$key] = $this->sanitizeRuntimeError($value, 500);
+
+                continue;
+            }
+
+            if (is_scalar($value) || $value === null) {
+                $sanitized[$key] = $value;
+            }
+        }
+
+        return $sanitized;
+    }
+
+    private function sanitizeRuntimeError(string $message, int $limit = 180): string
+    {
+        $sanitized = str_replace([base_path(), '\\'], ['[base_path]', '/'], $message);
+        $sanitized = preg_replace('/[\x00-\x1F\x7F]+/', ' ', $sanitized) ?? $sanitized;
+        $sanitized = preg_replace('/\s+/', ' ', trim($sanitized)) ?? trim($sanitized);
+
+        return mb_strimwidth($sanitized, 0, $limit, '...');
     }
 
     private function expectedNamespacePrefix(string $directory, string $rootNamespace): string

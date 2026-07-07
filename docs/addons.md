@@ -131,6 +131,8 @@ Statuses:
 
 `uninstall` and `remove` are soft operations in Phase 1. They do not delete physical files.
 
+`last_error` keeps a short admin-readable reason for runtime/lifecycle failures. Full diagnostic details remain in `system_addon_events.context`.
+
 ## Core Services
 
 - `App\Support\Addons\AddonDiscovery`
@@ -142,6 +144,14 @@ Statuses:
 - `App\Support\Addons\AddonManager`
 
 `App\Providers\AddonServiceProvider` boots enabled addons only. Disabled or failed addons do not register routes, views, service providers, or hooks.
+
+Runtime safe-failure policy:
+
+- invalid manifest during discovery is reported, but does not crash the app;
+- missing manifest for an enabled addon marks the addon as `failed`, updates `last_error`, and keeps app boot alive;
+- missing service provider class marks the addon as `failed`, updates `last_error`, and keeps app boot alive;
+- service provider exceptions mark the addon as `failed`, update `last_error`, and keep app boot alive;
+- failed addons are automatically deactivated for boot (`is_enabled=false`) and do not register routes/hooks/providers.
 
 ## CLI
 
@@ -156,6 +166,8 @@ php artisan addons:doctor
 ```
 
 `addons:doctor` reports invalid manifests, duplicate codes, missing service providers, dependency issues, compatibility issues, enabled addons with missing manifests, and failed statuses.
+
+`addons:list` includes the current status and a shortened `last_error` summary for quick operator triage.
 
 ## Admin UI
 
@@ -200,8 +212,23 @@ Module manifests may declare `permissions`. Phase 1 stores and exposes enabled a
 - No `eval` is used.
 - Service providers must match the addon namespace/path whitelist.
 - Missing service provider classes are reported, not allowed to crash the app.
+- Runtime boot failures are isolated per addon; they do not crash the application kernel.
 - Disabled addons do not register routes, hooks, menu entries, widgets, or providers.
 - Phase 2 should add checksums/signatures and a separate reviewed marketplace install process.
+
+## Demo Seeding Safety
+
+- Demo content seeding is separated into `DemoContentSeeder`.
+- `DatabaseSeeder` always provisions core infrastructure and the primary admin user.
+- Demo content is seeded automatically only in `local`/`testing`, or when `ALLOW_DEMO_SEEDING=true`.
+- Outside those conditions demo seeding is skipped with an explicit console warning.
+- Demo skeleton addon files in `modules/Demo/...` and `extensions/Demo/...` stay in repository for discovery/tests.
+
+Operational note:
+
+- Marketplace and remote package install are not implemented in Phase 1.
+- Phase 2 marketplace flow must include package checksum/signature validation.
+- Demo content seed is not intended for production-like data refreshes.
 
 ## Roadmap
 

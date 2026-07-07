@@ -22,7 +22,7 @@ class ListAddons extends Command
         }
 
         $this->table(
-            ['Code', 'Type', 'Version', 'Status', 'Enabled', 'Source'],
+            ['Code', 'Type', 'Version', 'Status', 'Enabled', 'Source', 'Last error'],
             $addons->map(fn ($addon): array => [
                 $addon->code,
                 $addon->type,
@@ -30,6 +30,7 @@ class ListAddons extends Command
                 $addon->status,
                 $addon->is_enabled ? 'yes' : 'no',
                 $addon->source,
+                $addon->last_error ? mb_strimwidth($addon->last_error, 0, 72, '...') : '-',
             ])->all(),
         );
 

@@ -12,9 +12,43 @@ class AdminUserProvisioner
     public const PRIMARY_ADMIN_EMAIL = 'o.lykhobaba@alta-trade.com.ua';
 
     /**
+     * @var array<string, array{name: string, role: UserRole, force_password: bool}>
+     */
+    private const DEMO_USERS = [
+        'office@alta-trade.com.ua' => [
+            'name' => 'Alta Office',
+            'role' => UserRole::Admin,
+            'force_password' => false,
+        ],
+        'admin@alta-trade.test' => [
+            'name' => 'Alta Admin',
+            'role' => UserRole::Admin,
+            'force_password' => true,
+        ],
+        'manager@alta-trade.test' => [
+            'name' => 'Sales Manager',
+            'role' => UserRole::Manager,
+            'force_password' => true,
+        ],
+        'content@alta-trade.test' => [
+            'name' => 'Content Manager',
+            'role' => UserRole::ContentManager,
+            'force_password' => true,
+        ],
+    ];
+
+    /**
      * @return array<string, array<string, mixed>>
      */
     public function provision(): array
+    {
+        return $this->provisionPrimaryAdmin() + $this->provisionDemoUsers();
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    public function provisionPrimaryAdmin(): array
     {
         return [
             self::PRIMARY_ADMIN_EMAIL => $this->ensureUser(
@@ -23,31 +57,26 @@ class AdminUserProvisioner
                 role: UserRole::Admin,
                 forcePassword: false,
             ),
-            'office@alta-trade.com.ua' => $this->ensureUser(
-                email: 'office@alta-trade.com.ua',
-                name: 'Alta Office',
-                role: UserRole::Admin,
-                forcePassword: false,
-            ),
-            'admin@alta-trade.test' => $this->ensureUser(
-                email: 'admin@alta-trade.test',
-                name: 'Alta Admin',
-                role: UserRole::Admin,
-                forcePassword: true,
-            ),
-            'manager@alta-trade.test' => $this->ensureUser(
-                email: 'manager@alta-trade.test',
-                name: 'Sales Manager',
-                role: UserRole::Manager,
-                forcePassword: true,
-            ),
-            'content@alta-trade.test' => $this->ensureUser(
-                email: 'content@alta-trade.test',
-                name: 'Content Manager',
-                role: UserRole::ContentManager,
-                forcePassword: true,
-            ),
         ];
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    public function provisionDemoUsers(): array
+    {
+        $provisioned = [];
+
+        foreach (self::DEMO_USERS as $email => $user) {
+            $provisioned[$email] = $this->ensureUser(
+                email: $email,
+                name: $user['name'],
+                role: $user['role'],
+                forcePassword: $user['force_password'],
+            );
+        }
+
+        return $provisioned;
     }
 
     /**

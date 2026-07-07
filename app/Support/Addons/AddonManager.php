@@ -69,7 +69,8 @@ class AddonManager
             try {
                 $this->bootAddon($addon);
             } catch (Throwable $exception) {
-                $this->events->error($addon->code, 'boot_failed', 'Addon failed during boot.', [
+                $this->markRuntimeFailure($addon, 'Addon boot failed: '.$exception->getMessage(), 'boot_failed', [
+                    'exception' => $exception::class,
                     'error' => $exception->getMessage(),
                 ]);
             }
@@ -82,19 +83,33 @@ class AddonManager
             return;
         }
 
+        if (! $addon->manifest_path || ! is_file(base_path($addon->manifest_path))) {
+            $this->markRuntimeFailure($addon, 'Manifest not found', 'manifest_missing', [
+                'manifest_path' => $addon->manifest_path,
+            ]);
+
+            return;
+        }
+
         $manifest = $addon->metadata['manifest'] ?? [];
 
         if (! is_array($manifest)) {
-            $this->events->error($addon->code, 'boot_failed', 'Enabled addon has no manifest metadata.');
+            $this->markRuntimeFailure($addon, 'Manifest metadata is invalid', 'manifest_invalid', [
+                'manifest_path' => $addon->manifest_path,
+            ]);
 
             return;
         }
 
         $this->hooks->flushAddon($addon->code);
-        $this->registerManifestHooks($addon, $manifest);
+
+        if (! $this->registerServiceProvider($addon)) {
+            return;
+        }
+
         $this->registerViews($addon);
         $this->registerRoutes($addon, $manifest);
-        $this->registerServiceProvider($addon);
+        $this->registerManifestHooks($addon, $manifest);
     }
 
     /**
@@ -170,24 +185,26 @@ class AddonManager
         }
     }
 
-    private function registerServiceProvider(SystemAddon $addon): void
+    private function registerServiceProvider(SystemAddon $addon): bool
     {
         if (! $addon->service_provider) {
-            return;
+            return true;
         }
 
         if (! $this->lifecycle->serviceProviderIsAllowed($addon)) {
-            $this->events->error($addon->code, 'service_provider_blocked', 'Service provider is outside the allowed local addon namespace/path.');
-
-            return;
-        }
-
-        if (! $this->lifecycle->serviceProviderClassExists($addon)) {
-            $this->events->error($addon->code, 'service_provider_missing', 'Service provider class does not exist.', [
+            $this->markRuntimeFailure($addon, 'Service provider is outside the allowed local addon namespace/path.', 'service_provider_blocked', [
                 'service_provider' => $addon->service_provider,
             ]);
 
-            return;
+            return false;
+        }
+
+        if (! $this->lifecycle->serviceProviderClassExists($addon)) {
+            $this->markRuntimeFailure($addon, 'Service provider class not found: '.$addon->service_provider, 'service_provider_missing', [
+                'service_provider' => $addon->service_provider,
+            ]);
+
+            return false;
         }
 
         try {
@@ -196,11 +213,16 @@ class AddonManager
                 'service_provider' => $addon->service_provider,
             ]);
         } catch (Throwable $exception) {
-            $this->events->error($addon->code, 'service_provider_failed', 'Addon service provider failed to register.', [
+            $this->markRuntimeFailure($addon, 'Addon boot failed: '.$exception->getMessage(), 'service_provider_failed', [
                 'service_provider' => $addon->service_provider,
+                'exception' => $exception::class,
                 'error' => $exception->getMessage(),
             ]);
+
+            return false;
         }
+
+        return true;
     }
 
     private function isLocalAddonFile(string $path): bool
@@ -227,5 +249,14 @@ class AddonManager
 
         return ($addon->type === SystemAddon::TYPE_MODULE ? 'Modules' : 'Extensions')
             .'\\'.implode('\\', $parts).'\\';
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function markRuntimeFailure(SystemAddon $addon, string $message, string $event, array $context = []): void
+    {
+        $this->hooks->flushAddon($addon->code);
+        $this->lifecycle->markRuntimeFailure($addon, $message, $event, $context);
     }
 }

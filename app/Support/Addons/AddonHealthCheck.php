@@ -41,31 +41,33 @@ class AddonHealthCheck
         }
 
         foreach ($this->registry->all() as $addon) {
+            $activeForRuntimeDiagnostics = $addon->is_enabled || $addon->status === SystemAddon::STATUS_FAILED;
+
             if ($addon->status === SystemAddon::STATUS_FAILED) {
                 $issues[] = $this->diagnostic('addon_failed_status', 'Addon is in failed status.', [
                     $addon->code.($addon->last_error ? ': '.$addon->last_error : ''),
                 ]);
             }
 
-            if ($addon->is_enabled && $addon->manifest_path && ! is_file(base_path($addon->manifest_path))) {
+            if ($activeForRuntimeDiagnostics && $addon->manifest_path && ! is_file(base_path($addon->manifest_path))) {
                 $issues[] = $this->diagnostic('addon_enabled_missing_manifest', 'Enabled addon manifest file is missing.', [
                     $addon->code.' -> '.$addon->manifest_path,
                 ]);
             }
 
-            if ($addon->is_enabled && ! $addon->manifest_path) {
+            if ($activeForRuntimeDiagnostics && ! $addon->manifest_path) {
                 $issues[] = $this->diagnostic('addon_enabled_without_manifest', 'Enabled addon has no manifest path.', [
                     $addon->code,
                 ]);
             }
 
-            if ($addon->is_enabled && $addon->service_provider && ! $this->lifecycle->serviceProviderIsAllowed($addon)) {
+            if ($activeForRuntimeDiagnostics && $addon->service_provider && ! $this->lifecycle->serviceProviderIsAllowed($addon)) {
                 $issues[] = $this->diagnostic('addon_service_provider_blocked', 'Enabled addon service provider is outside allowed namespace/path.', [
                     $addon->code.' -> '.$addon->service_provider,
                 ]);
             }
 
-            if ($addon->is_enabled && $addon->service_provider && $this->lifecycle->serviceProviderIsAllowed($addon) && ! $this->lifecycle->serviceProviderClassExists($addon)) {
+            if ($activeForRuntimeDiagnostics && $addon->service_provider && $this->lifecycle->serviceProviderIsAllowed($addon) && ! $this->lifecycle->serviceProviderClassExists($addon)) {
                 $issues[] = $this->diagnostic('addon_service_provider_missing', 'Enabled addon service provider class is missing.', [
                     $addon->code.' -> '.$addon->service_provider,
                 ]);
