@@ -6,6 +6,8 @@ use App\Enums\UserRole;
 use App\Filament\Resources\ProductAttributes\ProductAttributeResource;
 use App\Filament\Resources\Products\ProductResource;
 use App\Filament\Resources\Products\RelationManagers\ProductVariantsRelationManager;
+use App\Filament\Resources\ProductVariants\Pages\CreateProductVariant;
+use App\Filament\Resources\ProductVariants\Pages\EditProductVariant;
 use App\Filament\Resources\ProductVariants\ProductVariantResource;
 use App\Filament\Resources\TaxProfiles\TaxProfileResource;
 use App\Filament\Resources\Units\UnitResource;
@@ -14,6 +16,7 @@ use App\Models\ProductVariant;
 use App\Models\TaxProfile;
 use App\Models\Unit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Livewire;
 use ReflectionClass;
 use Tests\Feature\Concerns\CreatesCommerceData;
 use Tests\TestCase;
@@ -121,6 +124,173 @@ class FilamentCatalogResourcesTest extends TestCase
         $this->assertSame('4820001112223', $variant->barcode);
         $this->assertSame('7.50', $variant->excise_rate);
         $this->assertTrue($variant->requires_excise_stamp_entry);
+    }
+
+    public function test_direct_variant_list_hides_simple_product_service_variants(): void
+    {
+        $admin = $this->createUserWithRole(UserRole::Admin);
+        $simpleProduct = $this->createProduct([
+            'name' => 'Simple Direct Product',
+            'slug' => 'simple-direct-product',
+            'sku' => 'AT-SIMPLE-DIRECT',
+        ]);
+        $multiProduct = $this->createProduct([
+            'category' => $simpleProduct->category,
+            'brand' => $simpleProduct->brand,
+            'name' => 'Multi Direct Product',
+            'slug' => 'multi-direct-product',
+            'sku' => 'AT-MULTI-DIRECT',
+            'has_variants' => true,
+        ]);
+
+        $simpleVariant = $simpleProduct->fresh()->resolveDefaultVariant();
+        $multiVariant = $multiProduct->fresh()->resolveDefaultVariant();
+
+        $this->actingAs($admin)
+            ->get('/admin/product-variants')
+            ->assertOk()
+            ->assertSee($multiVariant->sku)
+            ->assertDontSee($simpleVariant->sku);
+    }
+
+    public function test_direct_variant_create_blocks_simple_products(): void
+    {
+        $admin = $this->createUserWithRole(UserRole::Admin);
+        $simpleProduct = $this->createProduct([
+            'name' => 'Simple Create Guard Product',
+            'slug' => 'simple-create-guard-product',
+            'sku' => 'AT-SIMPLE-CREATE',
+        ]);
+        $unit = Unit::ensurePiece();
+        $taxProfile = TaxProfile::ensureDefault();
+
+        $this->actingAs($admin);
+
+        Livewire::test(CreateProductVariant::class)
+            ->fillForm([
+                'product_id' => $simpleProduct->id,
+                'sku' => 'AT-SIMPLE-CREATE-FORBIDDEN',
+                'name' => 'Forbidden simple SKU',
+                'base_unit_id' => $unit->id,
+                'sales_unit_id' => $unit->id,
+                'purchase_unit_id' => $unit->id,
+                'tax_profile_id' => $taxProfile->id,
+                'is_default' => false,
+                'is_active' => true,
+                'sort_order' => 10,
+            ])
+            ->call('create')
+            ->assertHasFormErrors(['product_id']);
+
+        $this->assertDatabaseMissing('product_variants', [
+            'product_id' => $simpleProduct->id,
+            'sku' => 'AT-SIMPLE-CREATE-FORBIDDEN',
+        ]);
+    }
+
+    public function test_direct_variant_create_allows_multi_variant_products(): void
+    {
+        $admin = $this->createUserWithRole(UserRole::Admin);
+        $multiProduct = $this->createProduct([
+            'name' => 'Multi Create Product',
+            'slug' => 'multi-create-product',
+            'sku' => 'AT-MULTI-CREATE',
+            'has_variants' => true,
+        ]);
+        $unit = Unit::ensurePiece();
+        $taxProfile = TaxProfile::ensureDefault();
+
+        $this->actingAs($admin);
+
+        Livewire::test(CreateProductVariant::class)
+            ->fillForm([
+                'product_id' => $multiProduct->id,
+                'sku' => 'AT-MULTI-CREATE-B',
+                'name' => 'Другий SKU',
+                'base_unit_id' => $unit->id,
+                'sales_unit_id' => $unit->id,
+                'purchase_unit_id' => $unit->id,
+                'tax_profile_id' => $taxProfile->id,
+                'is_default' => false,
+                'is_active' => true,
+                'sort_order' => 10,
+            ])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $this->assertDatabaseHas('product_variants', [
+            'product_id' => $multiProduct->id,
+            'sku' => 'AT-MULTI-CREATE-B',
+            'is_default' => false,
+        ]);
+    }
+
+    public function test_direct_variant_edit_blocks_simple_product_service_variant(): void
+    {
+        $admin = $this->createUserWithRole(UserRole::Admin);
+        $simpleProduct = $this->createProduct([
+            'name' => 'Simple Edit Guard Product',
+            'slug' => 'simple-edit-guard-product',
+            'sku' => 'AT-SIMPLE-EDIT',
+        ]);
+        $simpleVariant = $simpleProduct->fresh()->resolveDefaultVariant();
+
+        $this->assertFalse(ProductVariantResource::canEdit($simpleVariant));
+        $this->assertFalse(ProductVariantResource::canDelete($simpleVariant));
+
+        $this->actingAs($admin)
+            ->get('/admin/product-variants/'.$simpleVariant->id.'/edit')
+            ->assertForbidden();
+    }
+
+    public function test_direct_variant_edit_allows_multi_variant_product_variants(): void
+    {
+        $admin = $this->createUserWithRole(UserRole::Admin);
+        $multiProduct = $this->createProduct([
+            'name' => 'Multi Edit Product',
+            'slug' => 'multi-edit-product',
+            'sku' => 'AT-MULTI-EDIT',
+            'has_variants' => true,
+        ]);
+        $multiVariant = $multiProduct->fresh()->resolveDefaultVariant();
+
+        $this->assertTrue(ProductVariantResource::canEdit($multiVariant));
+        $this->assertTrue(ProductVariantResource::canDelete($multiVariant));
+
+        $this->actingAs($admin)
+            ->get('/admin/product-variants/'.$multiVariant->id.'/edit')
+            ->assertOk()
+            ->assertSee('AT-MULTI-EDIT');
+    }
+
+    public function test_direct_variant_edit_cannot_move_multi_variant_sku_to_simple_product(): void
+    {
+        $admin = $this->createUserWithRole(UserRole::Admin);
+        $simpleProduct = $this->createProduct([
+            'name' => 'Simple Move Guard Product',
+            'slug' => 'simple-move-guard-product',
+            'sku' => 'AT-SIMPLE-MOVE',
+        ]);
+        $multiProduct = $this->createProduct([
+            'category' => $simpleProduct->category,
+            'brand' => $simpleProduct->brand,
+            'name' => 'Multi Move Product',
+            'slug' => 'multi-move-product',
+            'sku' => 'AT-MULTI-MOVE',
+            'has_variants' => true,
+        ]);
+        $multiVariant = $multiProduct->fresh()->resolveDefaultVariant();
+
+        $this->actingAs($admin);
+
+        Livewire::test(EditProductVariant::class, ['record' => $multiVariant->getKey()])
+            ->fillForm([
+                'product_id' => $simpleProduct->id,
+            ])
+            ->call('save')
+            ->assertHasFormErrors(['product_id']);
+
+        $this->assertSame($multiProduct->id, $multiVariant->fresh()->product_id);
     }
 
     public function test_product_form_excise_defaults_rate_and_clears_stamp_when_disabled(): void

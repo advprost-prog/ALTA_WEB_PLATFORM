@@ -8,8 +8,10 @@ use App\Filament\Resources\ProductVariants\Pages\ListProductVariants;
 use App\Filament\Resources\ProductVariants\RelationManagers\ProductBarcodesRelationManager;
 use App\Filament\Resources\ProductVariants\RelationManagers\ProductVariantImagesRelationManager;
 use App\Filament\Resources\ProductVariants\RelationManagers\VariantPackagesRelationManager;
+use App\Models\Product;
 use App\Models\ProductVariant;
 use BackedEnum;
+use Closure;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -24,9 +26,14 @@ use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Validation\ValidationException;
 
 class ProductVariantResource extends Resource
 {
+    public const SIMPLE_PRODUCT_SKU_MESSAGE = 'Для простого товару SKU є службовим і редагується через картку товару.';
+
     protected static ?string $model = ProductVariant::class;
 
     protected static bool $shouldRegisterNavigation = false;
@@ -46,7 +53,19 @@ class ProductVariantResource extends Resource
         return $schema->components([
             Section::make('SKU / Варіант')
                 ->schema([
-                    Select::make('product_id')->label('Товар')->relationship('product', 'name')->searchable()->preload()->required(),
+                    Select::make('product_id')
+                        ->label('Товар')
+                        ->relationship('product', 'name', fn (Builder $query): Builder => $query->where('has_variants', true))
+                        ->searchable()
+                        ->preload()
+                        ->required()
+                        ->rules([
+                            fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
+                                if (! self::productAllowsDirectVariants($value)) {
+                                    $fail(self::SIMPLE_PRODUCT_SKU_MESSAGE);
+                                }
+                            },
+                        ]),
                     TextInput::make('sku')->label('SKU')->unique(ignoreRecord: true)->maxLength(255),
                     TextInput::make('name')->label('Назва варіанту')->maxLength(255),
                     TextInput::make('barcode')->label('Штрихкод')->maxLength(255),
@@ -94,6 +113,7 @@ class ProductVariantResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn (Builder $query): Builder => self::scopeToMultiVariantProducts($query)->with('product'))
             ->defaultSort('id', 'desc')
             ->columns([
                 TextColumn::make('product.name')->label('Товар')->searchable(),
@@ -136,5 +156,64 @@ class ProductVariantResource extends Resource
             'create' => CreateProductVariant::route('/create'),
             'edit' => EditProductVariant::route('/{record}/edit'),
         ];
+    }
+
+    public static function scopeToMultiVariantProducts(Builder $query): Builder
+    {
+        return $query->whereHas('product', fn (Builder $query): Builder => $query->where('has_variants', true));
+    }
+
+    public static function productAllowsDirectVariants(mixed $productId): bool
+    {
+        if (blank($productId)) {
+            return false;
+        }
+
+        return Product::query()
+            ->whereKey($productId)
+            ->where('has_variants', true)
+            ->exists();
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    public static function validateDirectVariantProduct(array $data): void
+    {
+        if (self::productAllowsDirectVariants($data['product_id'] ?? null)) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'product_id' => self::SIMPLE_PRODUCT_SKU_MESSAGE,
+        ]);
+    }
+
+    public static function canManageDirectly(Model $record): bool
+    {
+        if (! $record instanceof ProductVariant) {
+            return false;
+        }
+
+        $product = $record->relationLoaded('product')
+            ? $record->product
+            : $record->product()->first();
+
+        return (bool) $product?->hasVariants();
+    }
+
+    public static function canView(Model $record): bool
+    {
+        return parent::canView($record) && self::canManageDirectly($record);
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return parent::canEdit($record) && self::canManageDirectly($record);
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return parent::canDelete($record) && self::canManageDirectly($record);
     }
 }
