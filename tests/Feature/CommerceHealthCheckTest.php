@@ -152,6 +152,46 @@ class CommerceHealthCheckTest extends TestCase
             ->assertExitCode(1);
     }
 
+    public function test_commerce_health_check_reports_simple_product_with_multiple_active_variants(): void
+    {
+        $product = $this->createProduct([
+            'has_variants' => false,
+            'sku' => 'AT-SIMPLE-MULTI',
+            'slug' => 'at-simple-multi',
+        ]);
+
+        ProductVariant::create([
+            'product_id' => $product->id,
+            'sku' => 'AT-SIMPLE-MULTI-B',
+            'name' => 'Другий SKU',
+            'base_unit_id' => Unit::ensurePiece()->id,
+            'sales_unit_id' => Unit::ensurePiece()->id,
+            'purchase_unit_id' => Unit::ensurePiece()->id,
+            'tax_profile_id' => TaxProfile::ensureDefault()->id,
+            'is_default' => false,
+            'is_active' => true,
+            'sort_order' => 20,
+        ]);
+
+        $this->artisan('commerce:health-check')
+            ->expectsOutputToContain('simple_products_multiple_active_variants')
+            ->assertExitCode(1);
+    }
+
+    public function test_commerce_health_check_reports_product_without_default_variant(): void
+    {
+        $product = $this->createProduct([
+            'sku' => 'AT-NO-DEFAULT',
+            'slug' => 'at-no-default',
+        ]);
+
+        ProductVariant::where('product_id', $product->id)->delete();
+
+        $this->artisan('commerce:health-check')
+            ->expectsOutputToContain('simple_products_without_default_variant')
+            ->assertExitCode(1);
+    }
+
     public function test_commerce_health_check_reports_order_lifecycle_risks(): void
     {
         $paymentMethod = PaymentMethod::where('code', PaymentMethod::CASH_ON_DELIVERY)->firstOrFail();

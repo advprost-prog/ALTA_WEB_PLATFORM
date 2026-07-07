@@ -45,6 +45,7 @@ class Product extends Model
         'status',
         'is_featured',
         'sort_order',
+        'has_variants',
         'is_active',
         'is_new',
         'is_hit',
@@ -68,6 +69,7 @@ class Product extends Model
             'stock' => 'integer',
             'is_featured' => 'boolean',
             'sort_order' => 'integer',
+            'has_variants' => 'boolean',
             'is_active' => 'boolean',
             'is_new' => 'boolean',
             'is_hit' => 'boolean',
@@ -82,6 +84,7 @@ class Product extends Model
             $product->stock ??= 0;
             $product->stock_status ??= 'in_stock';
             $product->status ??= $product->is_active ? 'active' : 'draft';
+            $product->has_variants ??= false;
         });
 
         static::created(function (self $product): void {
@@ -355,6 +358,58 @@ class Product extends Model
         return $this->defaultVariant()->first()
             ?? $this->variants()->where('is_active', true)->first()
             ?? $this->variants()->first();
+    }
+
+    public function hasVariants(): bool
+    {
+        return (bool) $this->has_variants;
+    }
+
+    public function activeVariantsCount(): int
+    {
+        return $this->variants()->where('is_active', true)->count();
+    }
+
+    public function canDisableVariants(): bool
+    {
+        return $this->activeVariantsCount() <= 1;
+    }
+
+    public function ensureDefaultVariant(): ProductVariant
+    {
+        if (! $this->catalogTablesReady()) {
+            throw new RuntimeException('Product catalog tables are not ready.');
+        }
+
+        $variant = $this->resolveDefaultVariant();
+
+        if ($variant) {
+            $pieceUnit = Unit::ensurePiece();
+            $defaultTaxProfile = TaxProfile::ensureDefault();
+
+            $variant->forceFill([
+                'sku' => $variant->sku ?: $this->sku,
+                'base_unit_id' => $variant->base_unit_id ?: $pieceUnit->getKey(),
+                'sales_unit_id' => $variant->sales_unit_id ?: ($variant->base_unit_id ?: $pieceUnit->getKey()),
+                'purchase_unit_id' => $variant->purchase_unit_id ?: ($variant->base_unit_id ?: $pieceUnit->getKey()),
+                'tax_profile_id' => $variant->tax_profile_id ?: $defaultTaxProfile->getKey(),
+                'is_default' => true,
+                'is_active' => $variant->is_active ?? true,
+                'sort_order' => $variant->sort_order ?? 0,
+            ])->saveQuietly();
+
+            return $variant->refresh();
+        }
+
+        $this->syncDefaultVariantRecords();
+
+        $variant = $this->defaultVariant()->first();
+
+        if (! $variant) {
+            throw new RuntimeException('Default product variant could not be created.');
+        }
+
+        return $variant;
     }
 
     public function syncLegacyFieldsFromVariant(ProductVariant $variant): void

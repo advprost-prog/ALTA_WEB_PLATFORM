@@ -79,6 +79,7 @@ Storefront workflow:
 ## What Was Added
 
 - a read-only `commerce:health-check` artisan command
+- Product Catalog UX correction: simple products now use a transparent default SKU workflow, while explicit variant management appears only when `has_variants` is enabled
 - a checkout submission token to prevent accidental double submit in the same session
 - release checklist and acceptance scenarios in the architecture docs
 - release notes for operators and reviewers

@@ -17,10 +17,12 @@ use App\Models\AiSuggestion;
 use App\Models\CommerceSetting;
 use App\Models\Currency;
 use App\Models\Product;
+use App\Models\ProductBarcode;
 use App\Models\ProductImageCandidate;
 use App\Models\ProductVariant;
 use App\Models\TaxProfile;
 use App\Models\Unit;
+use App\Models\VariantPackage;
 use App\Models\Warehouse;
 use App\Services\Ai\AiSettingsService;
 use App\Services\Ai\ProductEnrichmentService;
@@ -37,6 +39,7 @@ use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
@@ -163,29 +166,58 @@ class ProductResource extends Resource
                                             ->rows(7),
                                     ]),
                             ]),
-                        Tab::make('Продаж / SKU')
+                        Tab::make('Продаж')
                             ->schema([
-                                Section::make('Основний SKU')
-                                    ->description('Для простого товару поля нижче керують default SKU цього товару.')
+                                Section::make('Режим продажу')
+                                    ->schema([
+                                        Toggle::make('has_variants')
+                                            ->label('Товар має варіанти')
+                                            ->helperText('Для простого товару артикул, одиниці, податки, ціни й залишки редагуються як властивості товару.')
+                                            ->default(false)
+                                            ->live(),
+                                        Placeholder::make('variants_sales_notice')
+                                            ->label('Продажні налаштування')
+                                            ->content('Продажні налаштування задаються окремо для кожного варіанту у вкладці "Варіанти".')
+                                            ->visible(fn (callable $get): bool => (bool) $get('has_variants')),
+                                    ])
+                                    ->columns(2),
+                                Section::make('Продажні налаштування')
+                                    ->description('Для простого товару ці поля виглядають як властивості товару, а технічно зберігаються у службовому default SKU.')
+                                    ->visible(fn (callable $get): bool => ! (bool) $get('has_variants'))
                                     ->schema([
                                         TextInput::make('sku')
-                                            ->label('SKU / Артикул')
+                                            ->label('Артикул')
                                             ->required()
                                             ->unique(ignoreRecord: true)
                                             ->maxLength(255),
                                         TextInput::make('default_variant_name')
-                                            ->label('Назва варіанту')
+                                            ->label('Назва для продажу')
                                             ->maxLength(255),
                                         TextInput::make('default_variant_barcode')
                                             ->label('Штрихкод')
                                             ->maxLength(255),
+                                        Select::make('default_variant_base_unit_id')
+                                            ->label('Базова одиниця')
+                                            ->options(fn (): array => Unit::query()->orderBy('sort_order')->pluck('name', 'id')->all())
+                                            ->default(fn (): ?int => Unit::ensurePiece()->id)
+                                            ->searchable()
+                                            ->required(),
+                                        Select::make('default_variant_sales_unit_id')
+                                            ->label('Одиниця продажу')
+                                            ->options(fn (): array => Unit::query()->orderBy('sort_order')->pluck('name', 'id')->all())
+                                            ->searchable(),
+                                        Select::make('default_variant_purchase_unit_id')
+                                            ->label('Одиниця закупівлі')
+                                            ->options(fn (): array => Unit::query()->orderBy('sort_order')->pluck('name', 'id')->all())
+                                            ->searchable(),
                                         Toggle::make('default_variant_is_active')
-                                            ->label('Активний SKU')
+                                            ->label('Активний для продажу')
                                             ->default(true),
                                         Toggle::make('default_variant_is_default')
-                                            ->label('Основний SKU')
+                                            ->label('Основний запис')
                                             ->default(true)
                                             ->disabled()
+                                            ->hidden()
                                             ->dehydrated(false),
                                     ])
                                     ->columns(2),
@@ -292,22 +324,16 @@ class ProductResource extends Resource
                             ]),
                         Tab::make('Податки / Акциз')
                             ->schema([
-                                Section::make('Оподаткування та акциз для основного SKU')
+                                Section::make('Податки та акциз задаються у варіантах')
                                     ->schema([
-                                        Select::make('default_variant_base_unit_id')
-                                            ->label('Базова одиниця')
-                                            ->options(fn (): array => Unit::query()->orderBy('sort_order')->pluck('name', 'id')->all())
-                                            ->default(fn (): ?int => Unit::ensurePiece()->id)
-                                            ->searchable()
-                                            ->required(),
-                                        Select::make('default_variant_sales_unit_id')
-                                            ->label('Одиниця продажу')
-                                            ->options(fn (): array => Unit::query()->orderBy('sort_order')->pluck('name', 'id')->all())
-                                            ->searchable(),
-                                        Select::make('default_variant_purchase_unit_id')
-                                            ->label('Одиниця закупівлі')
-                                            ->options(fn (): array => Unit::query()->orderBy('sort_order')->pluck('name', 'id')->all())
-                                            ->searchable(),
+                                        Placeholder::make('variant_tax_notice')
+                                            ->label('Оподаткування')
+                                            ->content('Податки та акциз задаються окремо для кожного варіанту.'),
+                                    ])
+                                    ->visible(fn (callable $get): bool => (bool) $get('has_variants')),
+                                Section::make('Оподаткування товару')
+                                    ->visible(fn (callable $get): bool => ! (bool) $get('has_variants'))
+                                    ->schema([
                                         Select::make('default_variant_tax_profile_id')
                                             ->label('Оподаткування')
                                             ->options(fn (): array => TaxProfile::query()->orderBy('sort_order')->pluck('name', 'id')->all())
@@ -341,22 +367,102 @@ class ProductResource extends Resource
                             ]),
                         Tab::make('Пакування')
                             ->schema([
-                                Section::make('Пакування основного SKU')
-                                    ->description('Редагуйте пакування у блоці "Варіанти" нижче через дію "Відкрити" для основного SKU.')
+                                Section::make('Пакування товару')
+                                    ->visible(fn (callable $get): bool => ! (bool) $get('has_variants'))
                                     ->schema([
                                         Placeholder::make('default_variant_packages_hint')
-                                            ->label('Пояснення')
-                                            ->content('Пакування привʼязане до SKU. Для простого товару відкрийте основний SKU з таблиці варіантів та змініть пакування там.'),
+                                            ->label('Пакування')
+                                            ->content('Для простого товару пакування редагується як властивість товару. Дані зберігаються у службовому SKU без ручного вибору варіанту.'),
+                                        Repeater::make('default_variant_packages')
+                                            ->label('Пакування товару')
+                                            ->schema([
+                                                Hidden::make('id'),
+                                                TextInput::make('name')
+                                                    ->label('Назва')
+                                                    ->required()
+                                                    ->maxLength(255),
+                                                Select::make('unit_id')
+                                                    ->label('Одиниця')
+                                                    ->options(fn (): array => Unit::query()->orderBy('sort_order')->pluck('name', 'id')->all())
+                                                    ->searchable()
+                                                    ->required(),
+                                                TextInput::make('quantity_in_base_unit')
+                                                    ->label('Кількість у базовій одиниці')
+                                                    ->numeric()
+                                                    ->minValue(0.001)
+                                                    ->default(1)
+                                                    ->required(),
+                                                TextInput::make('barcode')
+                                                    ->label('Штрихкод')
+                                                    ->maxLength(255),
+                                                Toggle::make('is_default_sales_package')
+                                                    ->label('Основне для продажу')
+                                                    ->default(false),
+                                                Toggle::make('is_active')
+                                                    ->label('Активне')
+                                                    ->default(true),
+                                                TextInput::make('sort_order')
+                                                    ->label('Порядок')
+                                                    ->numeric()
+                                                    ->default(0)
+                                                    ->required(),
+                                            ])
+                                            ->columns(4)
+                                            ->defaultItems(0)
+                                            ->columnSpanFull(),
+                                    ]),
+                                Section::make('Пакування задається у варіантах')
+                                    ->visible(fn (callable $get): bool => (bool) $get('has_variants'))
+                                    ->schema([
+                                        Placeholder::make('variant_packages_hint')
+                                            ->label('Пакування')
+                                            ->content('Пакування налаштовується всередині конкретного варіанту.'),
                                     ]),
                             ]),
                         Tab::make('Штрихкоди')
                             ->schema([
-                                Section::make('Штрихкоди основного SKU')
-                                    ->description('Редагуйте штрихкоди у блоці "Варіанти" нижче через дію "Відкрити" для основного SKU.')
+                                Section::make('Штрихкоди товару')
+                                    ->visible(fn (callable $get): bool => ! (bool) $get('has_variants'))
                                     ->schema([
                                         Placeholder::make('default_variant_barcodes_hint')
-                                            ->label('Пояснення')
-                                            ->content('Штрихкоди привʼязані до SKU. Для multi-variant товарів редагуйте штрихкоди у відповідному варіанті.'),
+                                            ->label('Штрихкоди')
+                                            ->content('Для простого товару штрихкоди редагуються як властивість товару. Дані зберігаються у службовому SKU без ручного вибору варіанту.'),
+                                        Repeater::make('default_variant_barcodes')
+                                            ->label('Штрихкоди товару')
+                                            ->schema([
+                                                Hidden::make('id'),
+                                                TextInput::make('barcode')
+                                                    ->label('Штрихкод')
+                                                    ->required()
+                                                    ->maxLength(255),
+                                                Select::make('type')
+                                                    ->label('Тип')
+                                                    ->options([
+                                                        'ean13' => 'EAN-13',
+                                                        'ean8' => 'EAN-8',
+                                                        'code128' => 'Code 128',
+                                                        'upc' => 'UPC',
+                                                        'internal' => 'Внутрішній',
+                                                    ])
+                                                    ->default('ean13')
+                                                    ->required(),
+                                                Toggle::make('is_primary')
+                                                    ->label('Основний')
+                                                    ->default(false),
+                                                Toggle::make('is_active')
+                                                    ->label('Активний')
+                                                    ->default(true),
+                                            ])
+                                            ->columns(4)
+                                            ->defaultItems(0)
+                                            ->columnSpanFull(),
+                                    ]),
+                                Section::make('Штрихкоди задаються у варіантах')
+                                    ->visible(fn (callable $get): bool => (bool) $get('has_variants'))
+                                    ->schema([
+                                        Placeholder::make('variant_barcodes_hint')
+                                            ->label('Штрихкоди')
+                                            ->content('Штрихкоди налаштовуються всередині конкретного варіанту.'),
                                     ]),
                             ]),
                         Tab::make('Фото / SEO')
@@ -455,13 +561,14 @@ class ProductResource extends Resource
                                     ]),
                             ]),
                         Tab::make('Варіанти')
+                            ->visible(fn (callable $get): bool => (bool) $get('has_variants'))
                             ->schema([
-                                Section::make('Варіанти SKU')
-                                    ->description('У нижній частині сторінки доступна таблиця "Варіанти / SKU" для multi-variant товарів.')
+                                Section::make('Варіанти товару')
+                                    ->description('Тут адміністратор працює з реальними SKU тільки для товарів з кількома варіантами.')
                                     ->schema([
                                         Placeholder::make('variants_hint')
                                             ->label('Пояснення')
-                                            ->content('Для більшості товарів достатньо основного SKU у вкладках "Продаж / SKU" та "Податки / Акциз". Для складного товару використовуйте таблицю варіантів нижче.'),
+                                            ->content('Default SKU залишається першим варіантом. Додаткові варіанти мають власні одиниці, податки, пакування, штрихкоди, ціни й залишки.'),
                                     ]),
                             ]),
                     ])
@@ -479,7 +586,9 @@ class ProductResource extends Resource
             return $data;
         }
 
-        $variant = $product->resolveDefaultVariant();
+        $variant = $product->hasVariants()
+            ? $product->resolveDefaultVariant()
+            : $product->ensureDefaultVariant();
 
         if (! $variant) {
             return $data;
@@ -496,6 +605,29 @@ class ProductResource extends Resource
         $data['default_variant_is_excise_applicable'] = (bool) $variant->is_excise_applicable;
         $data['default_variant_excise_rate'] = $variant->excise_rate;
         $data['default_variant_requires_excise_stamp_entry'] = (bool) $variant->requires_excise_stamp_entry;
+        $data['default_variant_packages'] = $variant->packages()
+            ->get()
+            ->map(fn (VariantPackage $package): array => [
+                'id' => $package->id,
+                'name' => $package->name,
+                'unit_id' => $package->unit_id,
+                'quantity_in_base_unit' => $package->quantity_in_base_unit,
+                'barcode' => $package->barcode,
+                'is_default_sales_package' => (bool) $package->is_default_sales_package,
+                'is_active' => (bool) $package->is_active,
+                'sort_order' => $package->sort_order,
+            ])
+            ->all();
+        $data['default_variant_barcodes'] = $variant->barcodes()
+            ->get()
+            ->map(fn (ProductBarcode $barcode): array => [
+                'id' => $barcode->id,
+                'barcode' => $barcode->barcode,
+                'type' => $barcode->type,
+                'is_primary' => (bool) $barcode->is_primary,
+                'is_active' => (bool) $barcode->is_active,
+            ])
+            ->all();
 
         return $data;
     }
@@ -518,6 +650,8 @@ class ProductResource extends Resource
             'default_variant_is_excise_applicable',
             'default_variant_excise_rate',
             'default_variant_requires_excise_stamp_entry',
+            'default_variant_packages',
+            'default_variant_barcodes',
         ];
 
         foreach ($keys as $key) {
@@ -534,28 +668,7 @@ class ProductResource extends Resource
     public static function syncDefaultVariantFromPayload(Product $product, array $payload): void
     {
         $product->refresh();
-        $variant = $product->resolveDefaultVariant();
-
-        if (! $variant) {
-            $pieceUnit = Unit::ensurePiece();
-            $defaultTaxProfile = TaxProfile::ensureDefault();
-
-            $variant = ProductVariant::query()->create([
-                'product_id' => $product->id,
-                'sku' => $product->sku,
-                'base_unit_id' => $pieceUnit->id,
-                'sales_unit_id' => $pieceUnit->id,
-                'purchase_unit_id' => $pieceUnit->id,
-                'tax_profile_id' => $defaultTaxProfile->id,
-                'is_default' => true,
-                'is_active' => (bool) $product->is_active,
-                'sort_order' => 0,
-            ]);
-        }
-
-        if (! $variant) {
-            return;
-        }
+        $variant = $product->ensureDefaultVariant();
 
         $pieceUnit = Unit::ensurePiece();
         $defaultTaxProfile = TaxProfile::ensureDefault();
@@ -588,6 +701,104 @@ class ProductResource extends Resource
         ]);
 
         $variant->save();
+
+        if (! $product->hasVariants()) {
+            self::syncDefaultVariantPackages($variant, $payload['default_variant_packages'] ?? []);
+            self::syncDefaultVariantBarcodes($variant, $payload['default_variant_barcodes'] ?? []);
+        }
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
+     */
+    private static function syncDefaultVariantPackages(ProductVariant $variant, array $rows): void
+    {
+        $seenIds = [];
+
+        foreach ($rows as $row) {
+            if (blank($row['name'] ?? null) || blank($row['unit_id'] ?? null)) {
+                continue;
+            }
+
+            $package = isset($row['id'])
+                ? $variant->packages()->whereKey($row['id'])->first()
+                : null;
+
+            $package ??= new VariantPackage(['product_variant_id' => $variant->id]);
+
+            $package->forceFill([
+                'name' => $row['name'],
+                'unit_id' => $row['unit_id'],
+                'quantity_in_base_unit' => $row['quantity_in_base_unit'] ?? 1,
+                'barcode' => $row['barcode'] ?? null,
+                'is_default_sales_package' => (bool) ($row['is_default_sales_package'] ?? false),
+                'is_active' => (bool) ($row['is_active'] ?? true),
+                'sort_order' => $row['sort_order'] ?? 0,
+            ])->save();
+
+            $seenIds[] = $package->id;
+        }
+
+        $variant->packages()
+            ->when($seenIds !== [], fn ($query) => $query->whereNotIn('id', $seenIds))
+            ->delete();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
+     */
+    private static function syncDefaultVariantBarcodes(ProductVariant $variant, array $rows): void
+    {
+        $seenIds = [];
+
+        foreach ($rows as $row) {
+            if (blank($row['barcode'] ?? null)) {
+                continue;
+            }
+
+            $barcode = isset($row['id'])
+                ? $variant->barcodes()->whereKey($row['id'])->first()
+                : null;
+
+            $barcode ??= new ProductBarcode(['product_variant_id' => $variant->id]);
+
+            $barcode->forceFill([
+                'barcode' => $row['barcode'],
+                'type' => $row['type'] ?? 'ean13',
+                'is_primary' => (bool) ($row['is_primary'] ?? false),
+                'is_active' => (bool) ($row['is_active'] ?? true),
+            ])->save();
+
+            $seenIds[] = $barcode->id;
+        }
+
+        $variant->barcodes()
+            ->when($seenIds !== [], fn ($query) => $query->whereNotIn('id', $seenIds))
+            ->delete();
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function normalizeSkuForVariantMode(array $data): array
+    {
+        if (! ($data['has_variants'] ?? false) || filled($data['sku'] ?? null)) {
+            return $data;
+        }
+
+        $base = Str::upper(Str::slug((string) ($data['slug'] ?? $data['name'] ?? 'product')));
+        $base = $base !== '' ? $base : 'PRODUCT';
+        $sku = $base;
+        $counter = 1;
+
+        while (Product::query()->where('sku', $sku)->exists()) {
+            $sku = $base.'-'.$counter++;
+        }
+
+        $data['sku'] = $sku;
+
+        return $data;
     }
 
     public static function infolist(Schema $schema): Schema

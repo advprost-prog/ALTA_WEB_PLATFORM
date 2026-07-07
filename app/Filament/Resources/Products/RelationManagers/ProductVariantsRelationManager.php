@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Products\RelationManagers;
 
 use App\Filament\Resources\ProductVariants\ProductVariantResource;
+use App\Models\Product;
 use App\Models\ProductVariant;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
@@ -16,12 +17,18 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 class ProductVariantsRelationManager extends RelationManager
 {
     protected static string $relationship = 'variants';
 
     protected static ?string $title = 'Варіанти / SKU';
+
+    public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
+    {
+        return $ownerRecord instanceof Product && $ownerRecord->hasVariants();
+    }
 
     public function form(Schema $schema): Schema
     {

@@ -450,6 +450,34 @@ class CommerceHealthCheck extends Command
             ->limit(20)
             ->get();
 
+        $simpleProductsWithMultipleActiveVariants = Product::query()
+            ->where('has_variants', false)
+            ->whereIn('id', DB::table('product_variants')
+                ->select('product_id')
+                ->where('is_active', true)
+                ->groupBy('product_id')
+                ->havingRaw('COUNT(*) > 1'))
+            ->limit(20)
+            ->get();
+
+        $multiVariantProductsWithoutActiveVariants = Product::query()
+            ->where('has_variants', true)
+            ->whereDoesntHave('variants', fn ($query) => $query->where('is_active', true))
+            ->limit(20)
+            ->get();
+
+        $simpleProductsWithoutDefaultVariant = Product::query()
+            ->where('has_variants', false)
+            ->whereDoesntHave('defaultVariant')
+            ->limit(20)
+            ->get();
+
+        $multiVariantProductsWithoutDefaultVariant = Product::query()
+            ->where('has_variants', true)
+            ->whereDoesntHave('defaultVariant')
+            ->limit(20)
+            ->get();
+
         $variantsWithoutMandatoryRefs = ProductVariant::query()
             ->where(function ($query): void {
                 $query->whereNull('base_unit_id')->orWhereNull('tax_profile_id');
@@ -531,6 +559,30 @@ class CommerceHealthCheck extends Command
                 'variants_multiple_defaults_per_product',
                 'Є товари з кількома основними SKU.',
                 $this->sampleList($productsWithMultipleDefaultVariants->map(fn (object $row): string => 'product#'.$row->product_id.' defaults='.$row->defaults_count)),
+            ),
+            $this->issue(
+                $simpleProductsWithMultipleActiveVariants->isNotEmpty(),
+                'simple_products_multiple_active_variants',
+                'Є прості товари з більше ніж одним активним SKU.',
+                $this->sampleList($this->productsList($simpleProductsWithMultipleActiveVariants)),
+            ),
+            $this->issue(
+                $multiVariantProductsWithoutActiveVariants->isNotEmpty(),
+                'variant_products_without_active_variants',
+                'Є товари з варіантами, але без активних SKU.',
+                $this->sampleList($this->productsList($multiVariantProductsWithoutActiveVariants)),
+            ),
+            $this->issue(
+                $simpleProductsWithoutDefaultVariant->isNotEmpty(),
+                'simple_products_without_default_variant',
+                'Є прості товари без службового default SKU.',
+                $this->sampleList($this->productsList($simpleProductsWithoutDefaultVariant)),
+            ),
+            $this->issue(
+                $multiVariantProductsWithoutDefaultVariant->isNotEmpty(),
+                'variant_products_without_default_variant',
+                'Є товари з варіантами без основного SKU.',
+                $this->sampleList($this->productsList($multiVariantProductsWithoutDefaultVariant)),
             ),
             $this->issue(
                 $variantsWithoutMandatoryRefs->isNotEmpty(),

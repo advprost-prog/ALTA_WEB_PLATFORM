@@ -23,7 +23,7 @@ class CreateProduct extends CreateRecord
     {
         [$data, $this->defaultVariantPayload] = ProductResource::extractDefaultVariantPayload($data);
 
-        return $data;
+        return ProductResource::normalizeSkuForVariantMode($data);
     }
 
     protected function afterCreate(): void

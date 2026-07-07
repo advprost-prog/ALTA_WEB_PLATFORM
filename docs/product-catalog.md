@@ -94,9 +94,11 @@ Added resources:
 Product-centered workflow:
 
 - admins work from `Каталог -> Товари`
-- SKU fields for the simple/default case are edited directly in the product form
-- multi-variant cases are managed from the `Варіанти` block inside the same product page
-- package/barcode/image management is opened from the variant context inside product workflow
+- `products.has_variants = false` means a simple product: the default variant is treated as the product in UI
+- SKU fields for the simple/default case are edited as `Продажні налаштування`, `Одиниці`, `Оподаткування`, `Пакування`, `Штрихкоди`, `Ціни`, and `Залишки` of the product
+- the word "variant" is not emphasized in simple-product workflow even though data is stored in the default `product_variants` row
+- `products.has_variants = true` enables explicit variant management from the `Варіанти` tab and relation manager
+- package/barcode/price/stock/tax records belong to the concrete variant when multi-variant mode is enabled
 
 Navigation policy:
 
@@ -104,7 +106,7 @@ Navigation policy:
 - there are no standalone sidebar items for variant packages, barcodes, or variant images
 - SKU is not presented as a second product-like business object
 
-Product edit now includes `Variants / SKU` relation manager.
+Product edit shows the `Варіанти` tab and relation manager only when `has_variants = true`.
 
 Variant edit includes relation managers for:
 
@@ -117,6 +119,10 @@ Variant edit includes relation managers for:
 `php artisan commerce:health-check` now validates catalog-core risks:
 
 - missing default dictionary entries (`piece`, `kg`, `no_vat`, `vat_20`)
+- simple products with more than one active variant
+- multi-variant products without active variants
+- simple products without a default variant
+- multi-variant products without a default variant
 - active products with inactive default variant
 - active products without active default variant
 - products with multiple default variants
@@ -129,8 +135,9 @@ Variant edit includes relation managers for:
 
 - `ProductVariant/SKU` remains the accounting and sellable backend entity
 - admin UX is product-centered and does not require separate SKU section navigation
-- for simple products, one default SKU is edited as part of product form tabs
-- for multi-variant products, additional variants are managed in product page context
+- for simple products, one default SKU is edited as product fields; admins do not manually choose `product_variant_id`
+- for multi-variant products, additional variants are managed in product page context and each variant owns its units, tax, excise, packages, barcodes, prices, and stock balances
+- `Unit` and `TaxProfile` are dictionaries, not enums
 - delivery/shipment provider flows are not implemented in this phase
 
 ## Test Coverage
