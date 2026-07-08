@@ -249,7 +249,9 @@
                                         >{{ $cfg['label'] }}</x-filament::button>
                                     @else
                                         <x-filament::button
-                                            wire:click="{{ $action }}(@js($item->code))"
+                                            wire:click='{{ $action }}(@js($item->code))'
+                                            wire:loading.attr="disabled"
+                                            wire:target="{{ $action }}(@js($item->code))"
                                             :color="$cfg['color']"
                                             :outlined="$cfg['outlined'] ?? false"
                                             :icon="$cfg['icon']"
@@ -259,7 +261,9 @@
                                 @endforeach
 
                                 <x-filament::button
-                                    wire:click="toggleDetails(@js($item->code))"
+                                    wire:click='toggleDetails(@js($item->code))'
+                                    wire:loading.attr="disabled"
+                                    wire:target="toggleDetails(@js($item->code))"
                                     color="gray"
                                     size="sm"
                                 >{{ $expandedCode === $item->code ? 'Приховати' : 'Деталі' }}</x-filament::button>
