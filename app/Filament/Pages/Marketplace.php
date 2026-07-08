@@ -2,9 +2,11 @@
 
 namespace App\Filament\Pages;
 
+use App\Support\Addons\Marketplace\CompatibilityStatus;
 use App\Support\Addons\Marketplace\MarketplaceItem;
 use App\Support\Addons\Marketplace\MarketplaceManager;
 use App\Support\Addons\Marketplace\MarketplaceStatus;
+use App\Support\Addons\Marketplace\UpdateStatus;
 use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -55,6 +57,8 @@ class Marketplace extends Page
             'diagnostics' => $resolved['diagnostics'],
             'warnings' => $resolved['warnings'],
             'statusLabels' => MarketplaceStatus::LABELS,
+            'updateStatusLabels' => UpdateStatus::LABELS,
+            'compatibilityLabels' => CompatibilityStatus::LABELS,
             'typeOptions' => $this->uniqueOptions($resolved['rows'], fn (MarketplaceItem $i): string => $i->type),
             'statusOptions' => MarketplaceStatus::LABELS,
             'categoryOptions' => $this->uniqueOptions($resolved['rows'], fn (MarketplaceItem $i): string => $i->category),
@@ -62,6 +66,8 @@ class Marketplace extends Page
             'featuredOptions' => ['1' => 'Так', '0' => 'Ні'],
             'summary' => $this->buildSummary($rows),
             'statusColors' => $this->getStatusColors(),
+            'updateStatusColors' => UpdateStatus::COLORS,
+            'compatibilityColors' => CompatibilityStatus::COLORS,
         ];
     }
 
@@ -209,6 +215,11 @@ class Marketplace extends Page
     public function uninstallAddon(string $code): void
     {
         $this->runLifecycle('uninstall', $code, 'Видалення', 'Видалено');
+    }
+
+    public function updateAddon(string $code): void
+    {
+        $this->runLifecycle('update', $code, 'Оновлення', 'Оновлено');
     }
 
     private function guardCode(string $code): void

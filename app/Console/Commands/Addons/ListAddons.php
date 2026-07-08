@@ -3,6 +3,7 @@
 namespace App\Console\Commands\Addons;
 
 use App\Support\Addons\AddonRegistry;
+use App\Support\Addons\Marketplace\MarketplaceManager;
 use Illuminate\Console\Command;
 
 class ListAddons extends Command
@@ -11,7 +12,7 @@ class ListAddons extends Command
 
     protected $description = 'List discovered, installed, and enabled addons.';
 
-    public function handle(AddonRegistry $registry): int
+    public function handle(AddonRegistry $registry, MarketplaceManager $marketplace): int
     {
         $addons = $registry->all();
 
@@ -21,12 +22,18 @@ class ListAddons extends Command
             return self::SUCCESS;
         }
 
+        $availableVersions = [];
+        foreach ($marketplace->resolve()['rows'] as $row) {
+            $availableVersions[$row['item']->code] = $row['available_version'];
+        }
+
         $this->table(
-            ['Code', 'Type', 'Version', 'Status', 'Enabled', 'Source', 'Last error'],
+            ['Code', 'Type', 'Installed', 'Available', 'Status', 'Enabled', 'Source', 'Last error'],
             $addons->map(fn ($addon): array => [
                 $addon->code,
                 $addon->type,
                 $addon->version,
+                $availableVersions[$addon->code] ?? '-',
                 $addon->status,
                 $addon->is_enabled ? 'yes' : 'no',
                 $addon->source,

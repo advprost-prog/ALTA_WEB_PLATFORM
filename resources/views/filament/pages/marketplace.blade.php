@@ -134,13 +134,30 @@
                         if (preg_match_all('/\[([a-z0-9._-]+)\]/', implode(' ', $row['dependency_issues']), $matches) === 1) {
                             $unmet = $matches[1];
                         }
+                        $updateStatus = $row['update_status'] ?? 'unknown';
+                        $updateStatusLabel = $updateStatusLabels[$updateStatus] ?? $updateStatus;
+                        $updateStatusColor = $updateStatusColors[$updateStatus] ?? 'gray';
+                        $compat = $row['compatibility_status'] ?? 'unknown';
+                        $compatLabel = $compatibilityLabels[$compat] ?? $compat;
+                        $compatColor = $compatibilityColors[$compat] ?? 'gray';
+                        $installedVersion = $row['installed_version'] ?? null;
+                        $availableVersion = $row['available_version'] ?? null;
+                        $platformConstraint = $row['platform_constraint'] ?? null;
+                        $isIncompatible = $compat === 'incompatible';
                         $actionConfig = [
                             'discover' => ['label' => 'Discover', 'color' => 'gray', 'icon' => 'heroicon-o-magnifying-glass'],
                             'install' => ['label' => 'Install', 'color' => 'primary', 'icon' => 'heroicon-o-plus-circle'],
                             'enable' => ['label' => 'Enable', 'color' => 'success', 'icon' => 'heroicon-o-play-circle'],
                             'disable' => ['label' => 'Disable', 'color' => 'gray', 'icon' => 'heroicon-o-pause-circle'],
+                            'update' => ['label' => 'Update', 'color' => 'warning', 'icon' => 'heroicon-o-arrow-up-circle'],
                             'uninstall' => ['label' => 'Uninstall', 'color' => 'danger', 'icon' => 'heroicon-o-trash', 'outlined' => true],
                         ];
+                        $dependencyDisplay = [];
+                        foreach ($item->getDependencies() as $dependency) {
+                            $constraint = $dependency['constraint'];
+                            $dependencyDisplay[] = $dependency['code'].($constraint !== null && $constraint !== '' ? ' ('.$constraint.')' : '');
+                        }
+                        $compatDetail = $compatLabel.($platformConstraint !== null && $platformConstraint !== '' ? ' ('.$platformConstraint.')' : '');
                     @endphp
 
                     <x-filament::section
@@ -154,6 +171,8 @@
                             <div>
                                 <x-filament::badge :color="$item->type === 'module' ? 'primary' : 'info'">{{ $typeLabel }}</x-filament::badge>
                                 <x-filament::badge :color="$statusColor">{{ $statusLabel }}</x-filament::badge>
+                                <x-filament::badge :color="$updateStatusColor">{{ $updateStatusLabel }}</x-filament::badge>
+                                <x-filament::badge :color="$compatColor">{{ $compatLabel }}</x-filament::badge>
                                 @if ($item->isFeatured)
                                     <x-filament::badge color="warning">Рекомендовано</x-filament::badge>
                                 @endif
@@ -164,9 +183,19 @@
 
                             {{-- Metadata --}}
                             <div class="fi-in-text" style="margin-top:0.5rem;font-size:0.8rem">
-                                Версія: {{ $item->version }}
+                                @if ($installedVersion)
+                                    Встановлено: <strong>{{ $installedVersion }}</strong>
+                                @else
+                                    Версія: {{ $item->version }}
+                                @endif
+                                @if ($availableVersion && $availableVersion !== $installedVersion)
+                                    · Доступно: <strong>{{ $availableVersion }}</strong>
+                                @endif
                                 · Категорія: {{ $item->category ?: '—' }}
                                 · Платформа: {{ $item->platformVersion ?: '—' }}
+                                @if ($platformConstraint)
+                                    · Обмеження: {{ $platformConstraint }}
+                                @endif
                             </div>
 
                             {{-- Tags --}}
@@ -179,12 +208,21 @@
                             @endif
 
                             {{-- Dependencies --}}
-                            @if ($item->dependencies)
+                            @if ($dependencyDisplay)
                                 <div class="fi-in-text" style="margin-top:0.5rem">
                                     <strong>Залежності:</strong>
-                                    @foreach ($item->dependencies as $dependency)
-                                        <x-filament::badge :color="in_array($dependency, $unmet, true) ? 'danger' : 'gray'">{{ $dependency }}</x-filament::badge>
+                                    @foreach ($dependencyDisplay as $dependency)
+                                        <x-filament::badge :color="in_array(explode(' ', $dependency)[0], $unmet, true) ? 'danger' : 'gray'">{{ $dependency }}</x-filament::badge>
                                     @endforeach
+                                </div>
+                            @endif
+
+                            {{-- Incompatible warning --}}
+                            @if ($isIncompatible)
+                                <div class="fi-callout" style="margin-top:0.5rem;padding:0.5rem;--ctn-color:var(--danger-600)">
+                                    <div class="fi-in-text" style="font-size:0.8rem;color:#b91c1c">
+                                        Несумісно з поточною версією платформи ({{ $platformConstraint }}). Встановлення/оновлення заблоковано.
+                                    </div>
                                 </div>
                             @endif
 
@@ -220,6 +258,10 @@
                                         <div><strong>Code:</strong> {{ $item->code }}</div>
                                         <div><strong>Manifest:</strong> {{ $item->path ?: '—' }}</div>
                                         <div><strong>Статус:</strong> {{ $statusLabel }}</div>
+                                        <div><strong>Installed version:</strong> {{ $installedVersion ?: '—' }}</div>
+                                        <div><strong>Available version:</strong> {{ $availableVersion ?: '—' }}</div>
+                                        <div><strong>Update status:</strong> {{ $updateStatusLabel }}</div>
+                                        <div><strong>Compatibility:</strong> {{ $compatDetail }}</div>
                                         @if ($row['addon'])
                                             <div><strong>system_addons:</strong> {{ $row['addon']->status }} (installed: {{ $row['addon']->is_installed ? 'так' : 'ні' }}, enabled: {{ $row['addon']->is_enabled ? 'так' : 'ні' }})</div>
                                             @if ($row['addon']->last_error)
@@ -242,6 +284,7 @@
                                 'install' => 'installAddon',
                                 'enable' => 'enableAddon',
                                 'disable' => 'disableAddon',
+                                'update' => 'updateAddon',
                                 'uninstall' => 'uninstallAddon',
                                 default => $action,
                             };

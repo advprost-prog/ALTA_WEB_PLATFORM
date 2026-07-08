@@ -6,6 +6,8 @@ use App\Models\SystemAddon;
 use App\Support\Addons\AddonEventLogger;
 use App\Support\Addons\AddonManager;
 use App\Support\Addons\AddonRegistry;
+use App\Support\Addons\PlatformVersion;
+use App\Support\Addons\Version\VersionComparator;
 use RuntimeException;
 
 /**
@@ -23,6 +25,8 @@ final class MarketplaceManager
         private readonly AddonRegistry $registry,
         private readonly AddonManager $manager,
         private readonly AddonEventLogger $events,
+        private readonly VersionComparator $versionComparator = new VersionComparator,
+        private readonly PlatformVersion $platformVersion = new PlatformVersion,
     ) {}
 
     /**
@@ -53,6 +57,12 @@ final class MarketplaceManager
      *     item: MarketplaceItem,
      *     addon: SystemAddon|null,
      *     status: string,
+     *     installed_version: string|null,
+     *     available_version: string|null,
+     *     platform_constraint: string|null,
+     *     dependency_constraints: array<string, string|null>,
+     *     update_status: string,
+     *     compatibility_status: string,
      *     warnings: array<int, string>,
      *     actions: array<int, string>,
      *     dependency_issues: array<int, string>
@@ -69,6 +79,9 @@ final class MarketplaceManager
 
         $status = $this->computeStatus($item, $addon);
 
+        $compatibilityStatus = $this->compatibilityStatus($item);
+        $updateStatus = $this->updateStatus($status, $addon, $item);
+
         $dependencyIssues = $this->dependencyIssues($item);
         foreach ($dependencyIssues as $issue) {
             $warnings[] = "Залежність: {$issue}";
@@ -78,12 +91,18 @@ final class MarketplaceManager
             $this->logDependencyIssues($item->code, $dependencyIssues);
         }
 
-        $actions = $this->availableActions($status, $item, $dependencyIssues);
+        $actions = $this->availableActions($status, $item, $dependencyIssues, $updateStatus, $compatibilityStatus);
 
         return [
             'item' => $item,
             'addon' => $addon,
             'status' => $status,
+            'installed_version' => $addon?->version,
+            'available_version' => $item->version ?: null,
+            'platform_constraint' => $item->getPlatformConstraint(),
+            'dependency_constraints' => $item->getDependencyConstraints(),
+            'update_status' => $updateStatus,
+            'compatibility_status' => $compatibilityStatus,
             'warnings' => $warnings,
             'actions' => $actions,
             'dependency_issues' => $dependencyIssues,
@@ -123,21 +142,66 @@ final class MarketplaceManager
      * @param  array<int, string>  $dependencyIssues
      * @return array<int, string>
      */
-    private function availableActions(string $status, MarketplaceItem $item, array $dependencyIssues): array
+    private function availableActions(string $status, MarketplaceItem $item, array $dependencyIssues, string $updateStatus, string $compatibilityStatus): array
     {
         if ($status === MarketplaceStatus::INVALID) {
             return [];
         }
 
-        return match ($status) {
-            MarketplaceStatus::AVAILABLE, MarketplaceStatus::MISSING_FILES => ['discover'],
-            MarketplaceStatus::DISCOVERED => ['install'],
-            MarketplaceStatus::INSTALLED, MarketplaceStatus::DISABLED => ['enable', 'uninstall'],
-            MarketplaceStatus::ENABLED => ['disable', 'uninstall'],
+        $incompatible = $compatibilityStatus === CompatibilityStatus::INCOMPATIBLE;
+        $canUpdate = $updateStatus === UpdateStatus::UPDATE_AVAILABLE && ! $incompatible;
+
+        $actions = match ($status) {
+            MarketplaceStatus::AVAILABLE, MarketplaceStatus::MISSING_FILES => $incompatible ? [] : ['discover'],
+            MarketplaceStatus::DISCOVERED => $incompatible ? [] : ['install'],
+            MarketplaceStatus::INSTALLED, MarketplaceStatus::DISABLED => array_values(array_filter([
+                $canUpdate ? 'update' : null,
+                'enable',
+                'uninstall',
+            ])),
+            MarketplaceStatus::ENABLED => array_values(array_filter([
+                $canUpdate ? 'update' : null,
+                'disable',
+                'uninstall',
+            ])),
             MarketplaceStatus::FAILED => ['install', 'uninstall'],
             MarketplaceStatus::REMOVED => ['discover'],
             default => [],
         };
+
+        // Blocking safety: incompatible or unmet dependency constraints block enable.
+        if (in_array('enable', $actions, true) && ($dependencyIssues !== [] || $incompatible)) {
+            $actions = array_values(array_diff($actions, ['enable']));
+        }
+
+        return $actions;
+    }
+
+    private function compatibilityStatus(MarketplaceItem $item): string
+    {
+        $constraint = $item->getPlatformConstraint();
+
+        if ($constraint === null || $constraint === '' || $constraint === '*') {
+            return CompatibilityStatus::UNKNOWN;
+        }
+
+        return $this->versionComparator->satisfies($this->platformVersion->version(), $constraint)
+            ? CompatibilityStatus::COMPATIBLE
+            : CompatibilityStatus::INCOMPATIBLE;
+    }
+
+    private function updateStatus(string $status, ?SystemAddon $addon, MarketplaceItem $item): string
+    {
+        if (! in_array($status, [
+            MarketplaceStatus::INSTALLED,
+            MarketplaceStatus::ENABLED,
+            MarketplaceStatus::DISABLED,
+            MarketplaceStatus::FAILED,
+        ], true)) {
+            return UpdateStatus::NOT_INSTALLED;
+        }
+
+        return $this->versionComparator->compareInstalled((string) ($addon?->version ?? ''), (string) $item->version);
     }
 
     /**
@@ -147,17 +211,24 @@ final class MarketplaceManager
     {
         $issues = [];
 
-        foreach ($item->dependencies as $dependencyCode) {
-            $dependency = $this->registry->find($dependencyCode);
+        foreach ($item->getDependencies() as $dependency) {
+            $dependencyCode = $dependency['code'];
+            $constraint = $dependency['constraint'];
+            $dependencyAddon = $this->registry->find($dependencyCode);
 
-            if (! $dependency || ! $dependency->is_installed) {
+            if (! $dependencyAddon || ! $dependencyAddon->is_installed) {
                 $issues[] = "Залежність [{$dependencyCode}] не встановлено.";
 
                 continue;
             }
 
-            if (! $dependency->is_enabled) {
+            if (! $dependencyAddon->is_enabled) {
                 $issues[] = "Залежність [{$dependencyCode}] вимкнено.";
+            }
+
+            if ($constraint !== null && $constraint !== '' && $constraint !== '*'
+                && ! $this->versionComparator->satisfies((string) $dependencyAddon->version, $constraint)) {
+                $issues[] = "Версія залежності [{$dependencyCode}] ({$dependencyAddon->version}) не відповідає обмеженню [{$constraint}].";
             }
         }
 
@@ -196,6 +267,50 @@ final class MarketplaceManager
         }
 
         return $this->manager->enable($code);
+    }
+
+    /**
+     * Local update: records the available (catalog) version as the new installed
+     * version without downloading any files. Keeps the current enabled/disabled
+     * status untouched. Blocked when incompatible or when no update is available.
+     */
+    public function update(string $code): SystemAddon
+    {
+        $addon = $this->registry->find($code);
+
+        if ($addon === null) {
+            throw new RuntimeException("Addon [{$code}] не знайдено. Спочатку виконайте discover.");
+        }
+
+        $item = $this->findItem($code);
+
+        if ($item === null) {
+            throw new RuntimeException("Каталог не містить item [{$code}].");
+        }
+
+        $row = $this->resolveItem($item);
+
+        if ($row['compatibility_status'] === CompatibilityStatus::INCOMPATIBLE) {
+            throw new RuntimeException("Неможливо оновити [{$code}]: несумісно з поточною версією платформи.");
+        }
+
+        if ($row['update_status'] !== UpdateStatus::UPDATE_AVAILABLE) {
+            throw new RuntimeException("Оновлення для [{$code}] недоступне (поточна версія вже актуальна або невідома).");
+        }
+
+        $previousVersion = $addon->version;
+
+        $addon->forceFill([
+            'version' => $item->version,
+            'is_installed' => true,
+        ])->save();
+
+        $this->events->info($code, 'marketplace_updated', "Addon updated to {$item->version}.", [
+            'from' => $previousVersion,
+            'to' => $item->version,
+        ]);
+
+        return $addon->refresh();
     }
 
     /**

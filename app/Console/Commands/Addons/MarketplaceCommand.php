@@ -2,7 +2,9 @@
 
 namespace App\Console\Commands\Addons;
 
+use App\Support\Addons\Marketplace\CompatibilityStatus;
 use App\Support\Addons\Marketplace\MarketplaceManager;
+use App\Support\Addons\Marketplace\UpdateStatus;
 use Illuminate\Console\Command;
 
 class MarketplaceCommand extends Command
@@ -22,11 +24,14 @@ class MarketplaceCommand extends Command
                     'code' => $row['item']->code,
                     'type' => $row['item']->type,
                     'name' => $row['item']->name,
-                    'version' => $row['item']->version,
+                    'available_version' => $row['available_version'],
+                    'installed_version' => $row['installed_version'],
+                    'update_status' => $row['update_status'],
+                    'compatibility_status' => $row['compatibility_status'],
                     'vendor' => $row['item']->vendor,
                     'status' => $row['status'],
                     'valid' => $row['item']->isValid(),
-                    'dependencies' => $row['item']->dependencies,
+                    'dependencies' => $row['item']->getDependencies(),
                     'warnings' => $row['warnings'],
                     'actions' => $row['actions'],
                 ], $rows),
@@ -46,14 +51,17 @@ class MarketplaceCommand extends Command
         }
 
         $this->table(
-            ['Code', 'Type', 'Version', 'Status', 'Featured', 'Dependencies', 'Warnings'],
+            ['Code', 'Type', 'Avail', 'Installed', 'Update', 'Compat', 'Status', 'Featured', 'Dependencies', 'Warnings'],
             array_map(static fn (array $row): array => [
                 $row['item']->code,
                 $row['item']->type,
-                $row['item']->version,
+                $row['available_version'] ?? '-',
+                $row['installed_version'] ?? '-',
+                UpdateStatus::label($row['update_status']),
+                CompatibilityStatus::label($row['compatibility_status']),
                 $row['status'],
                 $row['item']->isFeatured ? 'yes' : 'no',
-                $row['item']->dependencies === [] ? '-' : implode(', ', $row['item']->dependencies),
+                $row['item']->getDependencyCodes() === [] ? '-' : implode(', ', $row['item']->getDependencyCodes()),
                 $row['warnings'] === [] ? '-' : implode('; ', $row['warnings']),
             ], $rows),
         );
