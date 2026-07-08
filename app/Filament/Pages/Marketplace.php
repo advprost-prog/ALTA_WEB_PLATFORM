@@ -60,6 +60,45 @@ class Marketplace extends Page
             'categoryOptions' => $this->uniqueOptions($resolved['rows'], fn (MarketplaceItem $i): string => $i->category),
             'vendorOptions' => $this->uniqueOptions($resolved['rows'], fn (MarketplaceItem $i): string => $i->vendor),
             'featuredOptions' => ['1' => 'Так', '0' => 'Ні'],
+            'summary' => $this->buildSummary($rows),
+            'statusColors' => $this->getStatusColors(),
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array<int, array{label: string, value: int, description: string}>
+     */
+    private function buildSummary(array $rows): array
+    {
+        $enabled = 0;
+        $installed = 0;
+        $needsAttention = 0;
+
+        foreach ($rows as $row) {
+            $status = $row['status'];
+
+            if ($status === 'enabled') {
+                $enabled++;
+            }
+
+            if (in_array($status, ['installed', 'enabled', 'disabled'], true)) {
+                $installed++;
+            }
+
+            $canEnable = in_array('enable', $row['actions'], true);
+            $dependencyBlocked = $canEnable && $row['dependency_issues'] !== [];
+
+            if (in_array($status, ['missing_files', 'invalid', 'failed'], true) || $row['warnings'] !== [] || $dependencyBlocked) {
+                $needsAttention++;
+            }
+        }
+
+        return [
+            ['label' => 'Всього позицій', 'value' => count($rows), 'description' => 'У каталозі Marketplace'],
+            ['label' => 'Увімкнено', 'value' => $enabled, 'description' => 'Активні модулі та розширення'],
+            ['label' => 'Встановлено', 'value' => $installed, 'description' => 'Встановлені локально'],
+            ['label' => 'Потребують уваги', 'value' => $needsAttention, 'description' => 'Помилки, попередження, залежності'],
         ];
     }
 
@@ -188,5 +227,28 @@ class Marketplace extends Page
                 ->danger()
                 ->send();
         }
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function getStatusColors(): array
+    {
+        return [
+            'enabled' => 'success',
+            'installed' => 'info',
+            'disabled' => 'warning',
+            'discovered' => 'gray',
+            'available' => 'gray',
+            'missing_files' => 'danger',
+            'invalid' => 'danger',
+            'failed' => 'danger',
+            'removed' => 'gray',
+        ];
+    }
+
+    public function getStatusColor(string $status): string
+    {
+        return $this->getStatusColors()[$status] ?? 'gray';
     }
 }
