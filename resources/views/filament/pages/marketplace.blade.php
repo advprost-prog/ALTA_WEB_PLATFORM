@@ -8,7 +8,7 @@
             description="Керування локальними модулями та розширеннями платформи."
             icon="heroicon-o-squares-2x2"
         >
-            <x-filament::button wire:click="discover" icon="heroicon-o-arrow-path" size="sm">
+            <x-filament::button wire:click="rescan" icon="heroicon-o-arrow-path" size="sm">
                 Discover / rescan
             </x-filament::button>
         </x-filament::section>
@@ -234,39 +234,48 @@
 
                             {{-- Actions --}}
                             <div style="margin-top:0.75rem">
-                                @foreach ($row['actions'] as $action)
-                                    @php
-                                        $cfg = $actionConfig[$action] ?? ['label' => $action, 'color' => 'gray', 'icon' => null];
-                                        $isBlocked = $action === 'enable' && $dependencyBlocked;
-                                    @endphp
-                                    @if ($isBlocked)
-                                        <x-filament::button
-                                            :disabled="true"
-                                            :tooltip="'Спочатку увімкніть залежності: ' . implode(', ', $row['dependency_issues'])"
-                                            :color="$cfg['color']"
-                                            icon="{{ $cfg['icon'] }}"
-                                            size="sm"
-                                        >{{ $cfg['label'] }}</x-filament::button>
-                                    @else
-                                        <x-filament::button
-                                            wire:click='{{ $action }}(@js($item->code))'
-                                            wire:loading.attr="disabled"
-                                            wire:target="{{ $action }}(@js($item->code))"
-                                            :color="$cfg['color']"
-                                            :outlined="$cfg['outlined'] ?? false"
-                                            :icon="$cfg['icon']"
-                                            size="sm"
-                                        >{{ $cfg['label'] }}</x-filament::button>
-                                    @endif
-                                @endforeach
+                    @foreach ($row['actions'] as $action)
+                        @php
+                            $cfg = $actionConfig[$action] ?? ['label' => $action, 'color' => 'gray', 'icon' => null];
+                            $isBlocked = $action === 'enable' && $dependencyBlocked;
+                            $method = match ($action) {
+                                'install' => 'installAddon',
+                                'enable' => 'enableAddon',
+                                'disable' => 'disableAddon',
+                                'uninstall' => 'uninstallAddon',
+                                default => $action,
+                            };
+                            $code = e($item->code);
+                        @endphp
+                        @if ($isBlocked)
+                            <x-filament::button
+                                :disabled="true"
+                                :tooltip="'Спочатку увімкніть залежності: ' . implode(', ', $row['dependency_issues'])"
+                                :color="$cfg['color']"
+                                icon="{{ $cfg['icon'] }}"
+                                size="sm"
+                            >{{ $cfg['label'] }}</x-filament::button>
+                        @else
+                            <x-filament::button
+                                wire:click="{{ $method }}('{{ $code }}')"
+                                wire:loading.attr="disabled"
+                                wire:target="{{ $method }}('{{ $code }}')"
+                                :color="$cfg['color']"
+                                :outlined="$cfg['outlined'] ?? false"
+                                :icon="$cfg['icon']"
+                                size="sm"
+                            >{{ $cfg['label'] }}</x-filament::button>
+                        @endif
+                    @endforeach
 
-                                <x-filament::button
-                                    wire:click='toggleDetails(@js($item->code))'
-                                    wire:loading.attr="disabled"
-                                    wire:target="toggleDetails(@js($item->code))"
-                                    color="gray"
-                                    size="sm"
-                                >{{ $expandedCode === $item->code ? 'Приховати' : 'Деталі' }}</x-filament::button>
+                    @php($detailsCode = e($item->code))
+                    <x-filament::button
+                        wire:click="toggleDetails('{{ $detailsCode }}')"
+                        wire:loading.attr="disabled"
+                        wire:target="toggleDetails('{{ $detailsCode }}')"
+                        color="gray"
+                        size="sm"
+                    >{{ $expandedCode === $item->code ? 'Приховати' : 'Деталі' }}</x-filament::button>
                             </div>
 
                         </div>

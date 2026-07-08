@@ -34,12 +34,42 @@ class MarketplaceActionsTest extends TestCase
             ->assertSee('core.theme-maker');
     }
 
+    public function test_rendered_html_has_install_addon_wire_click(): void
+    {
+        $admin = $this->createUserWithRole(UserRole::Admin);
+        $this->actingAs($admin);
+
+        $this->marketplace()->call('rescan');
+
+        $this->get('/admin/marketplace')
+            ->assertOk()
+            // Raw HTML must contain a valid, non-broken Livewire expression.
+            ->assertSee('wire:click="installAddon(\'core.theme-maker\')"', false)
+            ->assertSee('wire:click="toggleDetails(\'core.theme-maker\')"', false)
+            // There must be NO leftover @js directive literals.
+            ->assertDontSee('@js(');
+    }
+
+    public function test_rendered_html_has_no_broken_wire_click_attribute(): void
+    {
+        $admin = $this->createUserWithRole(UserRole::Admin);
+        $this->actingAs($admin);
+
+        $this->marketplace()->call('rescan');
+
+        $html = $this->get('/admin/marketplace')->getContent();
+
+        // The button attribute must not be split by an unescaped double quote.
+        $this->assertStringNotContainsString('wire:click="installAddon("', $html);
+        $this->assertStringNotContainsString('@js($item->code)', $html);
+    }
+
     public function test_rescan_discovers_core_theme_maker(): void
     {
         $this->actingAs($this->createUserWithRole(UserRole::Admin));
 
         $this->marketplace()
-            ->call('discover')
+            ->call('rescan')
             ->assertOk();
 
         $this->assertDatabaseHas('system_addons', [
@@ -53,10 +83,12 @@ class MarketplaceActionsTest extends TestCase
         $this->actingAs($this->createUserWithRole(UserRole::Admin));
 
         $this->marketplace()
-            ->call('discover')
-            ->call('install', 'core.theme-maker')
+            ->call('rescan')
+            ->call('installAddon', 'core.theme-maker')
             ->assertOk()
-            ->assertHasNoErrors();
+            ->assertHasNoErrors()
+            // The re-rendered UI must reflect the new status badge.
+            ->assertSee('Встановлено');
 
         $this->assertDatabaseHas('system_addons', [
             'code' => 'core.theme-maker',
@@ -73,9 +105,9 @@ class MarketplaceActionsTest extends TestCase
         $this->actingAs($this->createUserWithRole(UserRole::Admin));
 
         $this->marketplace()
-            ->call('discover')
-            ->call('install', 'core.theme-maker')
-            ->call('enable', 'core.theme-maker')
+            ->call('rescan')
+            ->call('installAddon', 'core.theme-maker')
+            ->call('enableAddon', 'core.theme-maker')
             ->assertOk()
             ->assertHasNoErrors();
 
@@ -90,10 +122,10 @@ class MarketplaceActionsTest extends TestCase
         $this->actingAs($this->createUserWithRole(UserRole::Admin));
 
         $this->marketplace()
-            ->call('discover')
-            ->call('install', 'core.theme-maker')
-            ->call('enable', 'core.theme-maker')
-            ->call('disable', 'core.theme-maker')
+            ->call('rescan')
+            ->call('installAddon', 'core.theme-maker')
+            ->call('enableAddon', 'core.theme-maker')
+            ->call('disableAddon', 'core.theme-maker')
             ->assertOk()
             ->assertHasNoErrors();
 
@@ -108,11 +140,11 @@ class MarketplaceActionsTest extends TestCase
         $this->actingAs($this->createUserWithRole(UserRole::Admin));
 
         $this->marketplace()
-            ->call('discover')
-            ->call('install', 'core.theme-maker')
-            ->call('enable', 'core.theme-maker')
-            ->call('disable', 'core.theme-maker')
-            ->call('uninstall', 'core.theme-maker')
+            ->call('rescan')
+            ->call('installAddon', 'core.theme-maker')
+            ->call('enableAddon', 'core.theme-maker')
+            ->call('disableAddon', 'core.theme-maker')
+            ->call('uninstallAddon', 'core.theme-maker')
             ->assertOk()
             ->assertHasNoErrors();
 
@@ -161,10 +193,10 @@ class MarketplaceActionsTest extends TestCase
         $this->actingAs($this->createUserWithRole(UserRole::Admin));
 
         // core.promotions depends on core.products which is not installed/enabled,
-        // so enable() must throw a RuntimeException handled by the page (no exception page).
+        // so enableAddon() must throw a RuntimeException handled by the page (no exception page).
         $this->marketplace()
-            ->call('discover')
-            ->call('enable', 'core.promotions')
+            ->call('rescan')
+            ->call('enableAddon', 'core.promotions')
             ->assertOk();
 
         // The blocked addon must NOT be enabled; its status stays untouched.

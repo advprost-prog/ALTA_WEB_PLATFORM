@@ -173,7 +173,7 @@ class Marketplace extends Page
         $this->expandedCode = $this->expandedCode === $code ? null : $code;
     }
 
-    public function discover(): void
+    public function rescan(): void
     {
         try {
             $result = app(MarketplaceManager::class)->discover();
@@ -191,28 +191,37 @@ class Marketplace extends Page
         }
     }
 
-    public function install(string $code): void
+    public function installAddon(string $code): void
     {
         $this->runLifecycle('install', $code, 'Встановлення', 'Встановлено');
     }
 
-    public function enable(string $code): void
+    public function enableAddon(string $code): void
     {
         $this->runLifecycle('enable', $code, 'Увімкнення', 'Увімкнено');
     }
 
-    public function disable(string $code): void
+    public function disableAddon(string $code): void
     {
         $this->runLifecycle('disable', $code, 'Вимкнення', 'Вимкнено');
     }
 
-    public function uninstall(string $code): void
+    public function uninstallAddon(string $code): void
     {
         $this->runLifecycle('uninstall', $code, 'Видалення', 'Видалено');
     }
 
+    private function guardCode(string $code): void
+    {
+        if ($code === '' || ! preg_match('/^[a-z0-9._-]+$/i', $code)) {
+            throw new RuntimeException("Некоректний код модуля: [{$code}].");
+        }
+    }
+
     private function runLifecycle(string $method, string $code, string $label, string $done): void
     {
+        $this->guardCode($code);
+
         try {
             app(MarketplaceManager::class)->{$method}($code);
             Notification::make()
