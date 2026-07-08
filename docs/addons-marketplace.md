@@ -152,3 +152,74 @@ php artisan addons:doctor                 # діагностика manifest/depe
 - License server / активація ліцензій.
 - Автоматичне встановлення залежностей.
 - Версіонування та оновлення (update) catalog items.
+
+## Demo addon для перевірки lifecycle
+
+Щоб Marketplace перестав бути лише вітриною, створено один реальний control addon —
+**Theme Maker** (`core.theme-maker`). Це демо/контрольний розширення для
+end-to-end перевірки lifecycle через існуючий pipeline. Воно НЕ генерує теми,
+НЕ змінює storefront і не містить бізнес-логіки Theme Maker.
+
+### Де лежить
+
+- Маніфест: `extensions/Core/ThemeMaker/extension.json`
+- Service provider: `extensions/Core/ThemeMaker/src/ThemeMakerServiceProvider.php`
+  (клас `Extensions\Core\ThemeMaker\ThemeMakerServiceProvider`)
+
+### Маніфест
+
+```json
+{
+    "code": "core.theme-maker",
+    "type": "extension",
+    "name": "Theme Maker",
+    "description": "Demo extension for validating the local addon marketplace lifecycle.",
+    "version": "0.1.0",
+    "vendor": "Core",
+    "enabled_by_default": false,
+    "service_provider": "Extensions\\Core\\ThemeMaker\\ThemeMakerServiceProvider",
+    "dependencies": [],
+    "hooks": [],
+    "settings_schema": [],
+    "compatibility": {
+        "app_min_version": null,
+        "app_max_version": null,
+        "laravel_version": ">=12.0",
+        "php_version": ">=8.3"
+    }
+}
+```
+
+### Lifecycle
+
+```bash
+php artisan addons:discover     # з'являється у system_addons як discovered
+php artisan addons:install core.theme-maker   # installed
+php artisan addons:enable core.theme-maker    # enabled (boot provider)
+php artisan addons:disable core.theme-maker   # disabled
+php artisan addons:uninstall core.theme-maker # soft-uninstall -> discovered
+```
+
+Або через адмінку **Система → Marketplace** (кнопки на картці).
+
+### Як перевірити, що provider boot-иться
+
+`ThemeMakerServiceProvider::boot()` реєструє мінімальний маркер у контейнері:
+
+```php
+app()->instance('core.theme-maker.booted', true);
+```
+
+Перевірка в тесті:
+
+- після `enable` → `app()->bound('core.theme-maker.booted') === true`;
+- коли addon не увімкнено (лише discovered/installed/disabled) → маркер відсутній,
+  бо `AddonManager::bootAddon()` викликається тільки для enabled addon-ів.
+
+Це доводить, що provider реально boot-иться лише у стані `enabled` і не ламає
+застосунок у стані `disabled`.
+
+### Примітка
+
+Theme Maker тут — це **demo/control addon**, а не повноцінний функціонал генерації
+тем. Повноцінна реалізація Theme Maker відкладена на пізніші фази.
