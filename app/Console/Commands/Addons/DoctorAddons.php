@@ -39,6 +39,12 @@ class DoctorAddons extends Command
                 ]);
             }
 
+            if ($row['update_status'] === 'update_available') {
+                $warnings[] = $this->diagnostic('addon_update_available', 'Addon update is available.', [
+                    $code.' installed '.$row['installed_version'].' < catalog '.$row['available_version'],
+                ]);
+            }
+
             foreach ($row['dependency_issues'] as $issue) {
                 if (str_contains($issue, 'не відповідає обмеженню')) {
                     $issues[] = $this->diagnostic('addon_dependency_version_mismatch', 'Addon dependency version mismatch.', [

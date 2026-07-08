@@ -206,4 +206,165 @@ class MarketplaceActionsTest extends TestCase
         $this->assertNotNull($row);
         $this->assertNotSame('enabled', $row['status']);
     }
+
+    public function test_update_addon_action_updates_version(): void
+    {
+        $originalItems = config('addons-marketplace.items');
+        $updatedItems = array_map(function ($item) {
+            if ($item['code'] === 'core.theme-maker') {
+                $item['version'] = '0.2.0';
+            }
+
+            return $item;
+        }, $originalItems);
+        config(['addons-marketplace.items' => $updatedItems]);
+
+        try {
+            $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+            $this->marketplace()
+                ->call('rescan')
+                ->call('installAddon', 'core.theme-maker')
+                ->call('updateAddon', 'core.theme-maker')
+                ->assertOk()
+                ->assertHasNoErrors()
+                ->assertSee('0.2.0')
+                ->assertSee('Актуальна');
+
+            $this->assertDatabaseHas('system_addons', [
+                'code' => 'core.theme-maker',
+                'version' => '0.2.0',
+                'status' => 'installed',
+            ]);
+        } finally {
+            config(['addons-marketplace.items' => $originalItems]);
+        }
+    }
+
+    public function test_update_preserves_enabled_status(): void
+    {
+        $originalItems = config('addons-marketplace.items');
+        $updatedItems = array_map(function ($item) {
+            if ($item['code'] === 'core.theme-maker') {
+                $item['version'] = '0.2.0';
+            }
+
+            return $item;
+        }, $originalItems);
+        config(['addons-marketplace.items' => $updatedItems]);
+
+        try {
+            $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+            $this->marketplace()
+                ->call('rescan')
+                ->call('installAddon', 'core.theme-maker')
+                ->call('enableAddon', 'core.theme-maker')
+                ->call('updateAddon', 'core.theme-maker')
+                ->assertOk()
+                ->assertHasNoErrors();
+
+            $this->assertDatabaseHas('system_addons', [
+                'code' => 'core.theme-maker',
+                'version' => '0.2.0',
+                'status' => 'enabled',
+            ]);
+        } finally {
+            config(['addons-marketplace.items' => $originalItems]);
+        }
+    }
+
+    public function test_update_preserves_disabled_status(): void
+    {
+        $originalItems = config('addons-marketplace.items');
+        $updatedItems = array_map(function ($item) {
+            if ($item['code'] === 'core.theme-maker') {
+                $item['version'] = '0.2.0';
+            }
+
+            return $item;
+        }, $originalItems);
+        config(['addons-marketplace.items' => $updatedItems]);
+
+        try {
+            $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+            $this->marketplace()
+                ->call('rescan')
+                ->call('installAddon', 'core.theme-maker')
+                ->call('enableAddon', 'core.theme-maker')
+                ->call('disableAddon', 'core.theme-maker')
+                ->call('updateAddon', 'core.theme-maker')
+                ->assertOk()
+                ->assertHasNoErrors();
+
+            $this->assertDatabaseHas('system_addons', [
+                'code' => 'core.theme-maker',
+                'version' => '0.2.0',
+                'status' => 'disabled',
+            ]);
+        } finally {
+            config(['addons-marketplace.items' => $originalItems]);
+        }
+    }
+
+    public function test_update_blocked_when_not_installed(): void
+    {
+        $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+        $this->marketplace()
+            ->call('rescan')
+            ->call('updateAddon', 'core.theme-maker')
+            ->assertOk();
+
+        $this->assertDatabaseHas('system_addons', [
+            'code' => 'core.theme-maker',
+            'version' => '0.1.0',
+        ]);
+    }
+
+    public function test_update_blocked_when_no_update_available(): void
+    {
+        $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+        $this->marketplace()
+            ->call('rescan')
+            ->call('installAddon', 'core.theme-maker')
+            ->call('updateAddon', 'core.theme-maker')
+            ->assertOk();
+
+        $this->assertDatabaseHas('system_addons', [
+            'code' => 'core.theme-maker',
+            'version' => '0.1.0',
+        ]);
+    }
+
+    public function test_rendered_html_has_update_addon_wire_click_when_update_available(): void
+    {
+        $originalItems = config('addons-marketplace.items');
+        $updatedItems = array_map(function ($item) {
+            if ($item['code'] === 'core.theme-maker') {
+                $item['version'] = '0.2.0';
+            }
+
+            return $item;
+        }, $originalItems);
+        config(['addons-marketplace.items' => $updatedItems]);
+
+        try {
+            $admin = $this->createUserWithRole(UserRole::Admin);
+            $this->actingAs($admin);
+
+            $this->marketplace()
+                ->call('rescan')
+                ->call('installAddon', 'core.theme-maker');
+
+            $this->get('/admin/marketplace')
+                ->assertOk()
+                ->assertSee('wire:click="updateAddon(\'core.theme-maker\')"', false)
+                ->assertDontSee('wire:click="installAddon(\'core.theme-maker\')"', false);
+        } finally {
+            config(['addons-marketplace.items' => $originalItems]);
+        }
+    }
 }

@@ -144,6 +144,42 @@ php artisan addons:doctor                 # діагностика manifest/depe
 - `app/Filament/Pages/Marketplace.php` + `resources/views/filament/pages/marketplace.blade.php`.
 - `app/Console/Commands/Addons/MarketplaceCommand.php`.
 
+## Локальне оновлення addon-а
+
+Якщо встановлена версія addon-а менша за версію в локальному каталозі,
+Marketplace показує бейдж **Доступне оновлення** і кнопку **Оновити**.
+
+На цьому етапі **Update не завантажує файли з інтернету** і не робить
+`composer require` / `npm install`. Він тільки:
+
+1. Перевіряє, що оновлення безпечне:
+   - addon встановлений;
+   - нова версія більша за встановлену;
+   - addon сумісний з поточною версією платформи;
+   - залежності виконані.
+2. Записує нову версію у `system_addons.version`.
+3. Зберігає поточний статус `enabled` / `disabled` — addon не вимикається автоматично.
+4. Зафіксовує подію в `system_addon_events` (`marketplace_updated`) з `from` / `to`.
+
+### Сценарій оновлення
+
+```bash
+# 1. Переконайтеся, що catalog version більша за installed.
+php artisan addons:marketplace
+
+# 2. Через UI: Система → Marketplace → кнопка «Оновити».
+# Або через Livewire-тест:
+php artisan test --filter="update_addon_action"
+```
+
+### Обмеження
+
+- Update заблокований, якщо addon не встановлений.
+- Update заблокований, якщо версія в каталозі не більша за встановлену.
+- Update заблокований, якщо addon несумісний з платформою.
+- Update заблокований, якщо залежності не виконані.
+- Якщо оновлення неможливе, UI показує danger-notification, а не exception page.
+
 ## Відкладено на Phase 3
 
 - Remote registry / registry server.
@@ -151,7 +187,7 @@ php artisan addons:doctor                 # діагностика manifest/depe
 - Оплата / комерційні пакети.
 - License server / активація ліцензій.
 - Автоматичне встановлення залежностей.
-- Версіонування та оновлення (update) catalog items.
+- Автооновлення файлів з інтернету.
 
 ## Demo addon для перевірки lifecycle
 

@@ -298,6 +298,12 @@ final class MarketplaceManager
             throw new RuntimeException("Оновлення для [{$code}] недоступне (поточна версія вже актуальна або невідома).");
         }
 
+        $dependencyIssues = $this->dependencyIssues($item);
+
+        if ($dependencyIssues !== []) {
+            throw new RuntimeException('Неможливо оновити ['.$code.']: невиконані залежності — '.implode(' ', $dependencyIssues));
+        }
+
         $previousVersion = $addon->version;
 
         $addon->forceFill([
