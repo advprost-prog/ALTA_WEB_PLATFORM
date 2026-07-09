@@ -21,6 +21,10 @@ class DoctorAddons extends Command
         $resolved = $marketplace->resolve();
 
         foreach ($resolved['diagnostics'] as $diagnostic) {
+            if ($diagnostic === 'Registry is disabled.') {
+                continue;
+            }
+
             $issues[] = $this->diagnostic('addon_catalog_diagnostic', 'Marketplace catalog diagnostic.', [$diagnostic]);
         }
 

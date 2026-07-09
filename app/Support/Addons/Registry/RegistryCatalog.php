@@ -22,7 +22,7 @@ class RegistryCatalog
             return [
                 'registry' => [],
                 'items' => [],
-                'diagnostics' => ['Registry is disabled.'],
+                'diagnostics' => [],
             ];
         }
 

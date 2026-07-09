@@ -25,7 +25,7 @@ class RegistryCatalogTest extends TestCase
         $result = $catalog->load();
 
         $this->assertEmpty($result['items']);
-        $this->assertContains('Registry is disabled.', $result['diagnostics']);
+        $this->assertEmpty($result['diagnostics']);
     }
 
     public function test_valid_registry_payload_normalizes_items(): void
