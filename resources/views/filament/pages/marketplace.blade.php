@@ -206,12 +206,30 @@
                             @endif
 
                             {{-- Dependencies --}}
-                            @if ($dependencyDisplay)
+                            @if ($item->getDependencies())
                                 <div class="fi-in-text" style="margin-top:0.5rem">
                                     <strong>Залежності:</strong>
-                                    @foreach ($dependencyDisplay as $dependency)
-                                        <x-filament::badge :color="in_array(explode(' ', $dependency)[0], $unmet, true) ? 'danger' : 'gray'">{{ $dependency }}</x-filament::badge>
+                                    @foreach ($row['dependency_report'] as $code => $report)
+                                        @php
+                                            $dependencyIssues = $report['issues'] ?? [];
+                                            $dependencyColor = $dependencyIssues === [] ? 'gray' : 'danger';
+                                            $dependencyLabel = $code.($report['constraint'] !== null && $report['constraint'] !== '' ? ' ('.$report['constraint'].')' : '');
+                                        @endphp
+                                        <x-filament::badge :color="$dependencyColor">{{ $dependencyLabel }}</x-filament::badge>
+                                        @if ($dependencyIssues !== [])
+                                            <x-filament::badge color="danger">{{ implode('; ', $dependencyIssues) }}</x-filament::badge>
+                                        @endif
                                     @endforeach
+                                    @if ($row['can_install_dependencies'] && $row['dependency_report'] !== [])
+                                        <x-filament::button
+                                            wire:click="installDependencies('{{ e($item->code) }}')"
+                                            wire:loading.attr="disabled"
+                                            wire:target="installDependencies('{{ e($item->code) }}')"
+                                            color="primary"
+                                            size="sm"
+                                            icon="heroicon-o-arrow-down-tray"
+                                        >Встановити залежності</x-filament::button>
+                                    @endif
                                 </div>
                             @endif
 

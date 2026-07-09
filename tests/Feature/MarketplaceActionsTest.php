@@ -410,4 +410,63 @@ class MarketplaceActionsTest extends TestCase
             config(['addons-marketplace.items' => $originalItems]);
         }
     }
+
+    public function test_marketplace_page_shows_dependency_block_for_core_promotions(): void
+    {
+        $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+        $this->marketplace()
+            ->call('rescan');
+
+        $this->get('/admin/marketplace')
+            ->assertOk()
+            ->assertSee('Залежності:', false)
+            ->assertSee('core.products', false)
+            ->assertSee('Залежність [core.products] не встановлено.', false);
+    }
+
+    public function test_marketplace_page_shows_install_dependencies_button_when_installable(): void
+    {
+        $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+        $this->marketplace()
+            ->call('rescan');
+
+        $this->get('/admin/marketplace')
+            ->assertOk()
+            ->assertSee('wire:click="installDependencies(\'core.promotions\')"', false);
+    }
+
+    public function test_install_dependencies_action_installs_core_products(): void
+    {
+        $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+        $this->marketplace()
+            ->call('rescan')
+            ->call('installDependencies', 'core.promotions')
+            ->assertOk()
+            ->assertHasNoErrors()
+            ->assertSee('Встановлено');
+
+        $this->assertDatabaseHas('system_addons', [
+            'code' => 'core.products',
+            'status' => 'installed',
+        ]);
+    }
+
+    public function test_enable_blocked_when_dependency_unresolved(): void
+    {
+        $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+        $this->marketplace()
+            ->call('rescan')
+            ->call('enableAddon', 'core.promotions')
+            ->assertOk();
+
+        $resolved = app(MarketplaceManager::class)->resolve();
+        $row = collect($resolved['rows'])->first(fn ($r) => $r['item']->code === 'core.promotions');
+
+        $this->assertNotNull($row);
+        $this->assertNotSame('enabled', $row['status']);
+    }
 }

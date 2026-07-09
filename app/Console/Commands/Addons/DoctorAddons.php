@@ -50,7 +50,34 @@ class DoctorAddons extends Command
                     $issues[] = $this->diagnostic('addon_dependency_version_mismatch', 'Addon dependency version mismatch.', [
                         $code.': '.$issue,
                     ]);
+                } elseif (str_contains($issue, 'не встановлено')) {
+                    $level = $row['status'] === 'enabled' ? 'issues' : 'warnings';
+                    ${$level}[] = $this->diagnostic('addon_dependency_missing', 'Addon dependency is missing or not installed.', [
+                        $code.': '.$issue,
+                    ]);
+                } elseif (str_contains($issue, 'вимкнено')) {
+                    $issues[] = $this->diagnostic('addon_dependency_disabled', 'Addon dependency is disabled.', [
+                        $code.': '.$issue,
+                    ]);
+                } elseif (str_contains($issue, 'несумісна')) {
+                    $issues[] = $this->diagnostic('addon_dependency_incompatible', 'Addon dependency is incompatible.', [
+                        $code.': '.$issue,
+                    ]);
+                } elseif (str_contains($issue, 'відсутній маніфест')) {
+                    $warnings[] = $this->diagnostic('addon_dependency_missing_files', 'Addon dependency has missing manifest.', [
+                        $code.': '.$issue,
+                    ]);
+                } elseif (str_contains($issue, 'некоректна')) {
+                    $warnings[] = $this->diagnostic('addon_dependency_invalid', 'Addon dependency is invalid.', [
+                        $code.': '.$issue,
+                    ]);
                 }
+            }
+
+            if (isset($row['blocked_reasons']) && $row['blocked_reasons'] !== []) {
+                $warnings[] = $this->diagnostic('addon_dependency_blocked', 'Addon actions are blocked by dependencies.', [
+                    $code.': '.implode('; ', $row['blocked_reasons']),
+                ]);
             }
         }
 
@@ -93,5 +120,18 @@ class DoctorAddons extends Command
                 $this->line('  example: '.$example);
             }
         }
+    }
+
+    /**
+     * @return array{code: string, message: string, count: int, examples: array<int, string>}
+     */
+    private function diagnostic(string $code, string $message, array $examples = []): array
+    {
+        return [
+            'code' => $code,
+            'message' => $message,
+            'count' => count($examples),
+            'examples' => $examples,
+        ];
     }
 }

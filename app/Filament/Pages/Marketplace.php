@@ -222,6 +222,26 @@ class Marketplace extends Page
         $this->runLifecycle('update', $code, 'Оновлення', 'Оновлено');
     }
 
+    public function installDependencies(string $code): void
+    {
+        $this->guardCode($code);
+
+        try {
+            $installed = app(MarketplaceManager::class)->installDependencies($code);
+            Notification::make()
+                ->title('Залежності встановлено')
+                ->body('Встановлено: '.implode(', ', $installed))
+                ->success()
+                ->send();
+        } catch (RuntimeException $exception) {
+            Notification::make()
+                ->title('Встановлення залежностей не вдалося')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
     private function guardCode(string $code): void
     {
         if ($code === '' || ! preg_match('/^[a-z0-9._-]+$/i', $code)) {

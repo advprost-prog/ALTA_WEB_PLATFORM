@@ -49,8 +49,7 @@ class AddonMarketplaceTest extends TestCase
         $this->assertCount(5, $resolved['rows']);
 
         foreach ($resolved['rows'] as $row) {
-            if ($row['item']->code === 'core.theme-maker') {
-                // Real demo addon with a physical manifest: should NOT be missing_files.
+            if ($row['item']->code === 'core.theme-maker' || $row['item']->code === 'core.products') {
                 $this->assertNotSame(MarketplaceStatus::MISSING_FILES, $row['status']);
 
                 continue;

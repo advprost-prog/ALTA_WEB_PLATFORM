@@ -25,6 +25,7 @@ final class MarketplaceManager
         private readonly AddonRegistry $registry,
         private readonly AddonManager $manager,
         private readonly AddonEventLogger $events,
+        private readonly DependencyResolver $resolver = new DependencyResolver,
         private readonly VersionComparator $versionComparator = new VersionComparator,
         private readonly PlatformVersion $platformVersion = new PlatformVersion,
     ) {}
@@ -65,7 +66,10 @@ final class MarketplaceManager
      *     compatibility_status: string,
      *     warnings: array<int, string>,
      *     actions: array<int, string>,
-     *     dependency_issues: array<int, string>
+     *     dependency_issues: array<int, string>,
+     *     dependency_report: array<string, array<string, mixed>>,
+     *     can_install_dependencies: bool,
+     *     blocked_reasons: array<int, string>
      * }
      */
     private function resolveItem(MarketplaceItem $item): array
@@ -82,7 +86,21 @@ final class MarketplaceManager
         $compatibilityStatus = $this->compatibilityStatus($item);
         $updateStatus = $this->updateStatus($status, $addon, $item);
 
-        $dependencyIssues = $this->dependencyIssues($item);
+        $dependencyReport = $this->resolver->resolveItemDependencies(
+            $item,
+            $this->registry,
+            $this->versionComparator,
+            $this->catalog->load()['items'],
+            $compatibilityStatus,
+        );
+
+        $dependencyIssues = [];
+        foreach ($dependencyReport as $code => $report) {
+            foreach ($report['issues'] as $issue) {
+                $dependencyIssues[] = $issue;
+            }
+        }
+
         foreach ($dependencyIssues as $issue) {
             $warnings[] = "Залежність: {$issue}";
         }
@@ -92,6 +110,8 @@ final class MarketplaceManager
         }
 
         $actions = $this->availableActions($status, $item, $dependencyIssues, $updateStatus, $compatibilityStatus);
+        $canInstallDependencies = $this->canInstallDependencies($item->code);
+        $blockedReasons = $this->getBlockedReasons($item->code);
 
         return [
             'item' => $item,
@@ -106,6 +126,9 @@ final class MarketplaceManager
             'warnings' => $warnings,
             'actions' => $actions,
             'dependency_issues' => $dependencyIssues,
+            'dependency_report' => $dependencyReport,
+            'can_install_dependencies' => $canInstallDependencies,
+            'blocked_reasons' => $blockedReasons,
         ];
     }
 
@@ -233,6 +256,182 @@ final class MarketplaceManager
         }
 
         return $issues;
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    public function getDependencyReport(string $code): array
+    {
+        $item = $this->findItem($code);
+
+        if ($item === null) {
+            return [];
+        }
+
+        $compatibilityStatus = $this->compatibilityStatus($item);
+
+        return $this->resolver->resolveItemDependencies(
+            $item,
+            $this->registry,
+            $this->versionComparator,
+            $this->catalog->load()['items'],
+            $compatibilityStatus,
+        );
+    }
+
+    public function canInstallDependencies(string $code): bool
+    {
+        $item = $this->findItem($code);
+
+        if ($item === null) {
+            return false;
+        }
+
+        $report = $this->getDependencyReport($code);
+
+        if ($report === []) {
+            return false;
+        }
+
+        $graph = $this->resolver->buildGraph($this->catalog->load()['items']);
+        $cycles = $this->resolver->detectCycles($graph);
+
+        if ($cycles !== []) {
+            return false;
+        }
+
+        foreach ($report as $dependencyReport) {
+            $hasBlockingIssue = false;
+            $hasOnlyNotInstalledIssue = false;
+
+            foreach ($dependencyReport['issues'] as $issue) {
+                if (str_contains($issue, 'не встановлено і локальні файли відсутні')) {
+                    $hasBlockingIssue = true;
+                } elseif (str_contains($issue, 'не встановлено')) {
+                    $hasOnlyNotInstalledIssue = true;
+                } elseif (str_contains($issue, 'несумісна')) {
+                    $hasBlockingIssue = true;
+                } elseif (str_contains($issue, 'некоректна')) {
+                    $hasBlockingIssue = true;
+                } elseif (str_contains($issue, 'відсутній маніфест')) {
+                    $hasBlockingIssue = true;
+                } else {
+                    $hasBlockingIssue = true;
+                }
+            }
+
+            if ($hasBlockingIssue) {
+                return false;
+            }
+
+            if (! $hasOnlyNotInstalledIssue) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function getBlockedReasons(string $code): array
+    {
+        $item = $this->findItem($code);
+
+        if ($item === null) {
+            return ['Каталог не містить item ['.$code.'].'];
+        }
+
+        $addon = $this->registry->find($code);
+        $compatibilityStatus = $this->compatibilityStatus($item);
+        $dependencyIssues = $this->dependencyIssues($item);
+        $blocked = [];
+
+        if ($compatibilityStatus === CompatibilityStatus::INCOMPATIBLE) {
+            $blocked[] = 'Несумісність з платформою.';
+        }
+
+        foreach ($dependencyIssues as $issue) {
+            $blocked[] = $issue;
+        }
+
+        return $blocked;
+    }
+
+    public function canEnable(string $code): bool
+    {
+        $item = $this->findItem($code);
+
+        if ($item === null) {
+            return false;
+        }
+
+        $addon = $this->registry->find($code);
+
+        if ($addon === null || ! $addon->is_installed) {
+            return false;
+        }
+
+        $compatibilityStatus = $this->compatibilityStatus($item);
+
+        if ($compatibilityStatus === CompatibilityStatus::INCOMPATIBLE) {
+            return false;
+        }
+
+        $dependencyIssues = $this->dependencyIssues($item);
+
+        return $dependencyIssues === [];
+    }
+
+    public function installDependencies(string $code): array
+    {
+        $item = $this->findItem($code);
+
+        if ($item === null) {
+            throw new RuntimeException("Каталог не містить item [{$code}].");
+        }
+
+        $report = $this->getDependencyReport($code);
+        $installed = [];
+        $graph = $this->resolver->buildGraph($this->catalog->load()['items']);
+        $cycles = $this->resolver->detectCycles($graph);
+
+        if ($cycles !== []) {
+            throw new RuntimeException('Неможливо встановити залежності: виявлено циклічні залежності — '.implode(', ', $cycles));
+        }
+
+        foreach ($report as $dependencyCode => $dependencyReport) {
+            $hasBlockingIssue = false;
+
+            foreach ($dependencyReport['issues'] as $issue) {
+                if (str_contains($issue, 'не встановлено')) {
+                    continue;
+                }
+
+                $hasBlockingIssue = true;
+            }
+
+            if ($hasBlockingIssue) {
+                throw new RuntimeException('Неможливо встановити залежність ['.$dependencyCode.']: '.implode(' ', $dependencyReport['issues']));
+            }
+
+            $dependencyAddon = $this->registry->find($dependencyCode);
+
+            if ($dependencyAddon === null || ! $dependencyAddon->is_installed) {
+                $installedAddon = $this->manager->install($dependencyCode);
+                $installed[] = $installedAddon->code;
+            }
+        }
+
+        if ($installed !== []) {
+            $this->events->info($code, 'marketplace_dependencies_installed', 'Dependencies installed.', [
+                'dependencies' => $installed,
+            ]);
+        }
+
+        return $installed;
     }
 
     /**

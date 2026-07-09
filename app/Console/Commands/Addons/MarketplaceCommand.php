@@ -51,7 +51,7 @@ class MarketplaceCommand extends Command
         }
 
         $this->table(
-            ['Code', 'Type', 'Avail', 'Installed', 'Update', 'Compat', 'Status', 'Featured', 'Dependencies', 'Warnings'],
+            ['Code', 'Type', 'Avail', 'Installed', 'Update', 'Compat', 'Status', 'Featured', 'Dependencies', 'DepState', 'Warnings'],
             array_map(static fn (array $row): array => [
                 $row['item']->code,
                 $row['item']->type,
@@ -62,6 +62,7 @@ class MarketplaceCommand extends Command
                 $row['status'],
                 $row['item']->isFeatured ? 'yes' : 'no',
                 $row['item']->getDependencyCodes() === [] ? '-' : implode(', ', $row['item']->getDependencyCodes()),
+                self::dependencyState($row),
                 $row['warnings'] === [] ? '-' : implode('; ', $row['warnings']),
             ], $rows),
         );
@@ -76,5 +77,27 @@ class MarketplaceCommand extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private static function dependencyState(array $row): string
+    {
+        $codes = $row['item']->getDependencyCodes();
+
+        if ($codes === []) {
+            return '-';
+        }
+
+        if ($row['dependency_issues'] === []) {
+            return 'ok';
+        }
+
+        if (isset($row['blocked_reasons']) && $row['blocked_reasons'] !== []) {
+            return 'blocked';
+        }
+
+        return 'warn';
     }
 }
