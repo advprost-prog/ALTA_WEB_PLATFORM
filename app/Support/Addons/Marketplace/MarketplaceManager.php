@@ -422,13 +422,20 @@ final class MarketplaceManager
             if ($dependencyAddon === null || ! $dependencyAddon->is_installed) {
                 $installedAddon = $this->manager->install($dependencyCode);
                 $installed[] = $installedAddon->code;
+                $this->events->info($dependencyCode, 'marketplace_dependency_installed', 'Dependency installed via parent addon.', [
+                    'parent' => $code,
+                ]);
             }
         }
 
         if ($installed !== []) {
-            $this->events->info($code, 'marketplace_dependencies_installed', 'Dependencies installed.', [
-                'dependencies' => $installed,
-            ]);
+            $parentAddon = $this->registry->find($code);
+
+            if ($parentAddon !== null) {
+                $this->events->info($code, 'marketplace_dependencies_installed', 'Dependencies installed.', [
+                    'dependencies' => $installed,
+                ]);
+            }
         }
 
         return $installed;

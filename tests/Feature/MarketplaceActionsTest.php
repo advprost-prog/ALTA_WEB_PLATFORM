@@ -454,6 +454,26 @@ class MarketplaceActionsTest extends TestCase
         ]);
     }
 
+    public function test_install_dependencies_does_not_throw_fk_error_when_parent_missing(): void
+    {
+        $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+        $this->marketplace()
+            ->call('rescan')
+            ->call('installDependencies', 'core.promotions')
+            ->assertOk()
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('system_addons', [
+            'code' => 'core.products',
+            'status' => 'installed',
+        ]);
+
+        $this->assertDatabaseMissing('system_addons', [
+            'code' => 'core.promotions',
+        ]);
+    }
+
     public function test_enable_blocked_when_dependency_unresolved(): void
     {
         $this->actingAs($this->createUserWithRole(UserRole::Admin));
