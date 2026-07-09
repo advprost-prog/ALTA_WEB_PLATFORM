@@ -185,10 +185,8 @@
                             <div class="fi-in-text" style="margin-top:0.5rem;font-size:0.8rem">
                                 @if ($installedVersion)
                                     Встановлено: <strong>{{ $installedVersion }}</strong>
-                                @else
-                                    Версія: {{ $item->version }}
                                 @endif
-                                @if ($availableVersion && $availableVersion !== $installedVersion)
+                                @if ($availableVersion)
                                     · Доступно: <strong>{{ $availableVersion }}</strong>
                                 @endif
                                 · Категорія: {{ $item->category ?: '—' }}

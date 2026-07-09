@@ -367,4 +367,47 @@ class MarketplaceActionsTest extends TestCase
             config(['addons-marketplace.items' => $originalItems]);
         }
     }
+
+    public function test_marketplace_page_shows_installed_and_available_versions(): void
+    {
+        $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+        $this->marketplace()
+            ->call('rescan')
+            ->call('installAddon', 'core.theme-maker');
+
+        $this->get('/admin/marketplace')
+            ->assertOk()
+            ->assertSee('Встановлено: <strong>0.1.0</strong>', false)
+            ->assertSee('Доступно: <strong>0.1.0</strong>', false);
+    }
+
+    public function test_marketplace_page_shows_different_available_version_when_update_available(): void
+    {
+        $originalItems = config('addons-marketplace.items');
+        $updatedItems = array_map(function ($item) {
+            if ($item['code'] === 'core.theme-maker') {
+                $item['version'] = '0.2.0';
+            }
+
+            return $item;
+        }, $originalItems);
+        config(['addons-marketplace.items' => $updatedItems]);
+
+        try {
+            $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+            $this->marketplace()
+                ->call('rescan')
+                ->call('installAddon', 'core.theme-maker');
+
+            $this->get('/admin/marketplace')
+                ->assertOk()
+                ->assertSee('Встановлено: <strong>0.1.0</strong>', false)
+                ->assertSee('Доступно: <strong>0.2.0</strong>', false)
+                ->assertSee('Доступне оновлення', false);
+        } finally {
+            config(['addons-marketplace.items' => $originalItems]);
+        }
+    }
 }
