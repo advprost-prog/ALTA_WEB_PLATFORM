@@ -7,17 +7,11 @@ use App\Support\Addons\AddonEventLogger;
 use App\Support\Addons\AddonManager;
 use App\Support\Addons\AddonRegistry;
 use App\Support\Addons\PlatformVersion;
+use App\Support\Addons\Registry\RegistryCatalog;
+use App\Support\Addons\Registry\RegistryItem;
 use App\Support\Addons\Version\VersionComparator;
 use RuntimeException;
 
-/**
- * Reconciles the local marketplace catalog with the Phase 1 addon lifecycle.
- *
- * It does NOT implement lifecycle logic itself: every install/enable/disable/
- * uninstall/discover is delegated to the existing AddonManager / AddonLifecycle
- * pipeline. The manager only computes a computed status per catalog item,
- * collects diagnostics, and decides which actions are safe to show.
- */
 final class MarketplaceManager
 {
     public function __construct(
@@ -28,6 +22,7 @@ final class MarketplaceManager
         private readonly DependencyResolver $resolver = new DependencyResolver,
         private readonly VersionComparator $versionComparator = new VersionComparator,
         private readonly PlatformVersion $platformVersion = new PlatformVersion,
+        private readonly ?RegistryCatalog $registryCatalog = null,
     ) {}
 
     /**
@@ -41,16 +36,59 @@ final class MarketplaceManager
     {
         $catalog = $this->catalog->load();
         $rows = [];
+        $remoteCatalog = $this->loadRemoteCatalog();
+        $remoteItems = [];
+
+        foreach ($remoteCatalog['items'] ?? [] as $item) {
+            $remoteItems[$item->code] = $item;
+        }
 
         foreach ($catalog['items'] as $item) {
-            $rows[] = $this->resolveItem($item);
+            $remoteItem = $remoteItems[$item->code] ?? null;
+            $row = $this->resolveItem($item, $remoteItem);
+            $row['source'] = $remoteItem !== null ? 'local_remote' : 'local';
+            $row['remote_version'] = $remoteItem?->version;
+            $row['local_catalog_version'] = $item->version;
+            $row['registry_metadata'] = $remoteItem?->raw ?? [];
+            $rows[] = $row;
         }
+
+        foreach ($remoteItems as $code => $remoteItem) {
+            if (isset($remoteItems[$code]) && $this->catalog->load()['items']) {
+                foreach ($this->catalog->load()['items'] as $localItem) {
+                    if ($localItem->code === $code) {
+                        continue 2;
+                    }
+                }
+            }
+
+            $row = $this->resolveRemoteOnlyItem($remoteItem);
+            $row['source'] = 'remote';
+            $row['remote_version'] = $remoteItem->version;
+            $row['local_catalog_version'] = null;
+            $row['registry_metadata'] = $remoteItem->raw;
+            $rows[] = $row;
+        }
+
+        $diagnostics = array_merge($catalog['diagnostics'], $remoteCatalog['diagnostics'] ?? []);
 
         return [
             'rows' => $rows,
-            'diagnostics' => $catalog['diagnostics'],
+            'diagnostics' => $diagnostics,
             'warnings' => $catalog['warnings'],
         ];
+    }
+
+    /**
+     * @return array{items: list<RegistryItem>, diagnostics: list<string>}
+     */
+    private function loadRemoteCatalog(): array
+    {
+        if ($this->registryCatalog === null) {
+            return ['items' => [], 'diagnostics' => []];
+        }
+
+        return $this->registryCatalog->load();
     }
 
     /**
@@ -72,7 +110,7 @@ final class MarketplaceManager
      *     blocked_reasons: array<int, string>
      * }
      */
-    private function resolveItem(MarketplaceItem $item): array
+    private function resolveItem(MarketplaceItem $item, ?RegistryItem $remoteItem = null): array
     {
         $addon = $this->registry->find($item->code);
         $warnings = [];
@@ -82,7 +120,6 @@ final class MarketplaceManager
         }
 
         $status = $this->computeStatus($item, $addon);
-
         $compatibilityStatus = $this->compatibilityStatus($item);
         $updateStatus = $this->updateStatus($status, $addon, $item);
 
@@ -118,6 +155,69 @@ final class MarketplaceManager
             'addon' => $addon,
             'status' => $status,
             'installed_version' => $addon?->version,
+            'available_version' => $item->version ?: null,
+            'platform_constraint' => $item->getPlatformConstraint(),
+            'dependency_constraints' => $item->getDependencyConstraints(),
+            'update_status' => $updateStatus,
+            'compatibility_status' => $compatibilityStatus,
+            'warnings' => $warnings,
+            'actions' => $actions,
+            'dependency_issues' => $dependencyIssues,
+            'dependency_report' => $dependencyReport,
+            'can_install_dependencies' => $canInstallDependencies,
+            'blocked_reasons' => $blockedReasons,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolveRemoteOnlyItem(RegistryItem $remoteItem): array
+    {
+        $item = MarketplaceItem::fromArray([
+            'code' => $remoteItem->code,
+            'type' => $remoteItem->type,
+            'vendor' => $remoteItem->vendor,
+            'name' => $remoteItem->name,
+            'description' => $remoteItem->description,
+            'version' => $remoteItem->version,
+            'category' => $remoteItem->category,
+            'tags' => $remoteItem->tags,
+            'platform_version' => $remoteItem->platformConstraint,
+            'dependencies' => $remoteItem->dependencies,
+            'is_featured' => $remoteItem->isFeatured,
+            'path' => null,
+        ]);
+
+        $status = MarketplaceStatus::REMOTE_ONLY;
+        $compatibilityStatus = $this->compatibilityStatus($item);
+        $updateStatus = UpdateStatus::NOT_INSTALLED;
+        $dependencyIssues = [];
+        $warnings = [];
+        $actions = [];
+        $dependencyReport = $this->resolver->resolveItemDependencies(
+            $item,
+            $this->registry,
+            $this->versionComparator,
+            $this->catalog->load()['items'],
+            $compatibilityStatus,
+        );
+
+        foreach ($dependencyReport as $code => $report) {
+            foreach ($report['issues'] as $issue) {
+                $dependencyIssues[] = $issue;
+                $warnings[] = "Залежність: {$issue}";
+            }
+        }
+
+        $blockedReasons = $this->getBlockedReasons($item->code);
+        $canInstallDependencies = $this->canInstallDependencies($item->code);
+
+        return [
+            'item' => $item,
+            'addon' => null,
+            'status' => $status,
+            'installed_version' => null,
             'available_version' => $item->version ?: null,
             'platform_constraint' => $item->getPlatformConstraint(),
             'dependency_constraints' => $item->getDependencyConstraints(),
@@ -172,6 +272,11 @@ final class MarketplaceManager
         }
 
         $incompatible = $compatibilityStatus === CompatibilityStatus::INCOMPATIBLE;
+
+        if ($status === MarketplaceStatus::REMOTE_ONLY) {
+            return [];
+        }
+
         $canUpdate = $updateStatus === UpdateStatus::UPDATE_AVAILABLE && ! $incompatible;
 
         $actions = match ($status) {
@@ -562,6 +667,14 @@ final class MarketplaceManager
         foreach ($this->catalog->load()['items'] as $item) {
             if ($item->code === $code) {
                 return $item;
+            }
+        }
+
+        $remoteCatalog = $this->loadRemoteCatalog();
+
+        foreach ($remoteCatalog['items'] ?? [] as $item) {
+            if ($item->code === $code) {
+                return MarketplaceItem::fromArray($item->raw);
             }
         }
 

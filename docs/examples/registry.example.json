@@ -1,0 +1,57 @@
+{
+  "registry": {
+    "name": "ALTA Addons Registry",
+    "version": "1.0.0",
+    "generated_at": "2026-07-09T00:00:00Z"
+  },
+  "items": [
+    {
+      "code": "core.theme-maker",
+      "type": "extension",
+      "vendor": "Core",
+      "name": "Theme Maker",
+      "description": "Demo extension for validating the local addon marketplace lifecycle.",
+      "version": "0.3.0",
+      "category": "Дизайн",
+      "tags": ["theme", "design", "demo"],
+      "requires_platform": ">=1.0.0",
+      "dependencies": [],
+      "is_featured": true,
+      "homepage_url": null,
+      "documentation_url": null,
+      "artifact": null
+    },
+    {
+      "code": "core.products",
+      "type": "module",
+      "vendor": "Core",
+      "name": "Каталог товарів",
+      "description": "Demo module for validating the local addon marketplace dependency lifecycle.",
+      "version": "1.0.0",
+      "category": "Каталог",
+      "tags": ["catalog", "products", "core"],
+      "requires_platform": ">=1.0.0",
+      "dependencies": [],
+      "is_featured": true,
+      "homepage_url": null,
+      "documentation_url": null,
+      "artifact": null
+    },
+    {
+      "code": "core.analytics",
+      "type": "module",
+      "vendor": "Core",
+      "name": "Аналітика",
+      "description": "Remote-only analytics module for Phase 3 registry demo.",
+      "version": "1.0.0",
+      "category": "Аналітика",
+      "tags": ["analytics", "reports"],
+      "requires_platform": ">=1.0.0",
+      "dependencies": [],
+      "is_featured": false,
+      "homepage_url": null,
+      "documentation_url": null,
+      "artifact": null
+    }
+  ]
+}

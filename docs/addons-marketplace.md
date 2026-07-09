@@ -259,3 +259,125 @@ app()->instance('core.theme-maker.booted', true);
 
 Theme Maker тут — це **demo/control addon**, а не повноцінний функціонал генерації
 тем. Повноцінна реалізація Theme Maker відкладена на пізніші фази.
+
+## Remote Registry Catalog (Phase 3)
+
+### Огляд
+
+Phase 3 додає **read-only** Remote Registry Catalog як додаткове джерело
+marketplace items. Локальний lifecycle (install/enable/disable/uninstall/update)
+залишається без змін: всі дії виконуються тільки з локальними файлами.
+
+Registry у Phase 3:
+- тільки читає metadata з remote endpoint;
+- НЕ завантажує артефакти;
+- НЕ робить remote install;
+- НЕ виконує remote code;
+- НЕ має payment/license server.
+
+### Конфіг
+
+Файл: `config/addons-registry.php`
+
+```php
+return [
+    'enabled' => env('ADDONS_REGISTRY_ENABLED', false),
+    'url' => env('ADDONS_REGISTRY_URL'),
+    'timeout' => env('ADDONS_REGISTRY_TIMEOUT', 5),
+    'cache_ttl' => env('ADDONS_REGISTRY_CACHE_TTL', 3600),
+    'allowed_hosts' => array_filter(explode(',', env('ADDONS_REGISTRY_ALLOWED_HOSTS', ''))),
+    'verify_ssl' => env('ADDONS_REGISTRY_VERIFY_SSL', true),
+    'mode' => 'read_only',
+];
+```
+
+### JSON contract
+
+Remote registry має повертати JSON:
+
+```json
+{
+  "registry": {
+    "name": "ALTA Addons Registry",
+    "version": "1.0.0",
+    "generated_at": "2026-07-09T00:00:00Z"
+  },
+  "items": [
+    {
+      "code": "core.theme-maker",
+      "type": "extension",
+      "vendor": "Core",
+      "name": "Theme Maker",
+      "description": "Demo extension",
+      "version": "0.3.0",
+      "category": "Дизайн",
+      "tags": ["theme", "design"],
+      "requires_platform": ">=1.0.0",
+      "dependencies": [],
+      "is_featured": true,
+      "homepage_url": null,
+      "documentation_url": null,
+      "artifact": null
+    }
+  ]
+}
+```
+
+### Безпека
+
+- Якщо `enabled = false` — HTTP-запит не виконується.
+- Якщо `url` порожній — HTTP-запит не виконується.
+- `allowed_hosts` — опціональний whitelist хостів. Якщо порожній — будь-який
+  `http://` або `https://` хост дозволений. Якщо заповнений — зовнішні хоста
+  блокуються.
+- SSL верифікація контролюється через `verify_ssl`.
+- Жоден remote artifact не використовується для встановлення.
+
+### Джерела items
+
+Marketplace тепер підтримує три джерела:
+
+- **local** — є тільки в `config/addons-marketplace.php`.
+- **remote** — є тільки у registry.
+- **local_remote** — є і локально, і у registry.
+
+Для `local_remote` UI показує badge `Local + Registry`.
+Для `remote` UI показує badge `Registry`.
+
+### Статуси
+
+- `remote_available` / `remote_only` — addon є в registry, але локальних
+  файлів немає. Install/Update заблоковані з поясненням:
+  “Завантаження буде доступне у наступній фазі”.
+- Локальні статуси (`installed`, `enabled`, `disabled`, `update_available`
+  тощо) залишаються незмінними.
+
+### CLI
+
+```bash
+php artisan addons:marketplace
+```
+
+Додано колонки:
+- `Src` — `local`, `remote`, `local_remote`
+- `Remote` — remote version, якщо є
+
+Опція:
+```bash
+php artisan addons:marketplace --refresh-registry
+```
+Скидає кеш registry і перечитує каталог.
+
+### Doctor
+
+`addons:doctor` показує:
+- `addon_remote_version_mismatch` — якщо remote version відрізняється від
+  installed/local version (warning).
+
+### Що НЕ входить у Phase 3
+
+- Download artifacts.
+- Remote install.
+- Payment/license server.
+- Автоматичне встановлення залежностей з remote.
+- Автооновлення файлів з інтернету.

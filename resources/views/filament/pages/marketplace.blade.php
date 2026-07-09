@@ -11,6 +11,15 @@
             <x-filament::button wire:click="rescan" icon="heroicon-o-arrow-path" size="sm">
                 Discover / rescan
             </x-filament::button>
+            @php
+                $registryConfig = config('addons-registry', []);
+                $registryEnabled = (bool) ($registryConfig['enabled'] ?? false);
+            @endphp
+            @if ($registryEnabled)
+                <x-filament::button wire:click="refreshRegistry" icon="heroicon-o-cloud-arrow-down" size="sm" color="gray" style="margin-left:0.5rem">
+                    Оновити registry
+                </x-filament::button>
+            @endif
         </x-filament::section>
 
         {{-- Summary --}}
@@ -142,6 +151,8 @@
                         $compatColor = $compatibilityColors[$compat] ?? 'gray';
                         $installedVersion = $row['installed_version'] ?? null;
                         $availableVersion = $row['available_version'] ?? null;
+                        $remoteVersion = $row['remote_version'] ?? null;
+                        $source = $row['source'] ?? 'local';
                         $platformConstraint = $row['platform_constraint'] ?? null;
                         $isIncompatible = $compat === 'incompatible';
                         $actionConfig = [
@@ -173,6 +184,11 @@
                                 <x-filament::badge :color="$statusColor">{{ $statusLabel }}</x-filament::badge>
                                 <x-filament::badge :color="$updateStatusColor">{{ $updateStatusLabel }}</x-filament::badge>
                                 <x-filament::badge :color="$compatColor">{{ $compatLabel }}</x-filament::badge>
+                                @if ($source === 'local_remote')
+                                    <x-filament::badge color="info">Local + Registry</x-filament::badge>
+                                @elseif ($source === 'remote')
+                                    <x-filament::badge color="warning">Registry</x-filament::badge>
+                                @endif
                                 @if ($item->isFeatured)
                                     <x-filament::badge color="warning">Рекомендовано</x-filament::badge>
                                 @endif
@@ -188,6 +204,9 @@
                                 @endif
                                 @if ($availableVersion)
                                     · Доступно: <strong>{{ $availableVersion }}</strong>
+                                @endif
+                                @if ($remoteVersion && $remoteVersion !== $availableVersion)
+                                    · У registry: <strong>{{ $remoteVersion }}</strong>
                                 @endif
                                 · Категорія: {{ $item->category ?: '—' }}
                                 · Платформа: {{ $item->platformVersion ?: '—' }}
@@ -238,6 +257,15 @@
                                 <div class="fi-callout" style="margin-top:0.5rem;padding:0.5rem;--ctn-color:var(--danger-600)">
                                     <div class="fi-in-text" style="font-size:0.8rem;color:#b91c1c">
                                         Несумісно з поточною версією платформи ({{ $platformConstraint }}). Встановлення/оновлення заблоковано.
+                                    </div>
+                                </div>
+                            @endif
+
+                            {{-- Remote-only notice --}}
+                            @if ($status === 'remote_only')
+                                <div class="fi-callout" style="margin-top:0.5rem;padding:0.5rem;--ctn-color:var(--warning-600)">
+                                    <div class="fi-in-text" style="font-size:0.8rem;color:#92400e">
+                                        Цей addon доступний тільки у registry. Завантаження буде доступне у наступній фазі.
                                     </div>
                                 </div>
                             @endif

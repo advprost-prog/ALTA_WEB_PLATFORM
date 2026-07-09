@@ -29,6 +29,12 @@ final class MarketplaceStatus
 
     public const REMOVED = 'removed';
 
+    public const REMOTE_AVAILABLE = 'remote_available';
+
+    public const LOCAL_AVAILABLE = 'local_available';
+
+    public const REMOTE_ONLY = 'remote_only';
+
     /**
      * @var array<string, string>
      */
@@ -42,6 +48,9 @@ final class MarketplaceStatus
         self::INVALID => 'Некоректний',
         self::FAILED => 'Помилка',
         self::REMOVED => 'Видалено',
+        self::REMOTE_AVAILABLE => 'У registry',
+        self::LOCAL_AVAILABLE => 'Локально доступний',
+        self::REMOTE_ONLY => 'Тільки у registry',
     ];
 
     public static function label(string $status): string

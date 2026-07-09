@@ -5,16 +5,24 @@ namespace App\Console\Commands\Addons;
 use App\Support\Addons\Marketplace\CompatibilityStatus;
 use App\Support\Addons\Marketplace\MarketplaceManager;
 use App\Support\Addons\Marketplace\UpdateStatus;
+use App\Support\Addons\Registry\RegistryCatalog;
 use Illuminate\Console\Command;
 
 class MarketplaceCommand extends Command
 {
-    protected $signature = 'addons:marketplace {--json : Output machine-readable JSON}';
+    protected $signature = 'addons:marketplace {--json : Output machine-readable JSON} {--refresh-registry : Force refresh remote registry catalog}';
 
     protected $description = 'List local marketplace catalog items and their computed lifecycle status.';
 
     public function handle(MarketplaceManager $manager): int
     {
+        if ($this->option('refresh-registry')) {
+            try {
+                app(RegistryCatalog::class)->flush();
+            } catch (\Throwable $exception) {
+                $this->warn('Registry refresh failed: '.$exception->getMessage());
+            }
+        }
         $resolved = $manager->resolve();
         $rows = $resolved['rows'];
 
@@ -23,9 +31,10 @@ class MarketplaceCommand extends Command
                 'items' => array_map(static fn (array $row): array => [
                     'code' => $row['item']->code,
                     'type' => $row['item']->type,
-                    'name' => $row['item']->name,
+                    'source' => $row['source'] ?? 'local',
                     'available_version' => $row['available_version'],
                     'installed_version' => $row['installed_version'],
+                    'remote_version' => $row['remote_version'] ?? null,
                     'update_status' => $row['update_status'],
                     'compatibility_status' => $row['compatibility_status'],
                     'vendor' => $row['item']->vendor,
@@ -51,12 +60,14 @@ class MarketplaceCommand extends Command
         }
 
         $this->table(
-            ['Code', 'Type', 'Avail', 'Installed', 'Update', 'Compat', 'Status', 'Featured', 'Dependencies', 'DepState', 'Warnings'],
+            ['Code', 'Type', 'Src', 'Avail', 'Installed', 'Remote', 'Update', 'Compat', 'Status', 'Featured', 'Dependencies', 'DepState', 'Warnings'],
             array_map(static fn (array $row): array => [
                 $row['item']->code,
                 $row['item']->type,
+                $row['source'] ?? 'local',
                 $row['available_version'] ?? '-',
                 $row['installed_version'] ?? '-',
+                $row['remote_version'] ?? '-',
                 UpdateStatus::label($row['update_status']),
                 CompatibilityStatus::label($row['compatibility_status']),
                 $row['status'],

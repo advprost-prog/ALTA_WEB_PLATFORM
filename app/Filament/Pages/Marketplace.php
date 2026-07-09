@@ -7,6 +7,7 @@ use App\Support\Addons\Marketplace\MarketplaceItem;
 use App\Support\Addons\Marketplace\MarketplaceManager;
 use App\Support\Addons\Marketplace\MarketplaceStatus;
 use App\Support\Addons\Marketplace\UpdateStatus;
+use App\Support\Addons\Registry\RegistryCatalog;
 use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -236,6 +237,27 @@ class Marketplace extends Page
         } catch (RuntimeException $exception) {
             Notification::make()
                 ->title('Встановлення залежностей не вдалося')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    public function refreshRegistry(): void
+    {
+        try {
+            $manager = app(RegistryCatalog::class);
+            $manager->flush();
+            app(MarketplaceManager::class)->resolve();
+
+            Notification::make()
+                ->title('Registry оновлено')
+                ->body('Каталог registry перечитано.')
+                ->success()
+                ->send();
+        } catch (\Throwable $exception) {
+            Notification::make()
+                ->title('Registry не вдалося оновити')
                 ->body($exception->getMessage())
                 ->danger()
                 ->send();

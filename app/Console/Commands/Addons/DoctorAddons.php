@@ -26,6 +26,18 @@ class DoctorAddons extends Command
 
         foreach ($resolved['rows'] as $row) {
             $code = $row['item']->code;
+            $source = $row['source'] ?? 'local';
+
+            if ($source === 'remote' || $source === 'local_remote') {
+                $remoteVersion = $row['remote_version'] ?? null;
+                $installedVersion = $row['installed_version'] ?? null;
+
+                if ($remoteVersion !== null && $installedVersion !== null && $remoteVersion !== $installedVersion) {
+                    $warnings[] = $this->diagnostic('addon_remote_version_mismatch', 'Remote registry version differs from installed/local version.', [
+                        $code.' remote '.$remoteVersion.' != installed '.$installedVersion,
+                    ]);
+                }
+            }
 
             if ($row['compatibility_status'] === 'incompatible') {
                 $issues[] = $this->diagnostic('addon_incompatible', 'Addon is incompatible with the current platform version.', [

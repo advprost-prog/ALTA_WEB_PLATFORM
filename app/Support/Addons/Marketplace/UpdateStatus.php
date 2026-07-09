@@ -20,6 +20,8 @@ final class UpdateStatus
 
     public const UNKNOWN = 'unknown';
 
+    public const REMOTE_UPDATE_AVAILABLE = 'remote_update_available';
+
     /**
      * @var array<string, string>
      */
@@ -29,6 +31,7 @@ final class UpdateStatus
         self::UPDATE_AVAILABLE => 'Доступне оновлення',
         self::INSTALLED_NEWER => 'Встановлена новіша',
         self::UNKNOWN => 'Невідомо',
+        self::REMOTE_UPDATE_AVAILABLE => 'Доступне remote-оновлення',
     ];
 
     /**
@@ -40,6 +43,7 @@ final class UpdateStatus
         self::UPDATE_AVAILABLE => 'warning',
         self::INSTALLED_NEWER => 'info',
         self::UNKNOWN => 'gray',
+        self::REMOTE_UPDATE_AVAILABLE => 'warning',
     ];
 
     public static function label(string $status): string
