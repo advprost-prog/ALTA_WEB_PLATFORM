@@ -26,18 +26,16 @@ class RegistryClient
             throw RegistryException::urlMissing();
         }
 
-        $host = parse_url($url, PHP_URL_HOST) ?: $url;
+        $scheme = parse_url($url, PHP_URL_SCHEME) ?: 'http';
 
-        if ($host !== null && filter_var($host, FILTER_VALIDATE_IP) === false && ! in_array($host, ['localhost', '127.0.0.1', '::1'], true)) {
-            $allowedHosts = array_values(array_filter((array) ($this->config['allowed_hosts'] ?? []), static fn ($host) => $host !== ''));
-
-            if ($allowedHosts !== [] && ! in_array($host, $allowedHosts, true)) {
-                throw RegistryException::hostNotAllowed($host);
-            }
+        if (! in_array($scheme, ['http', 'https'], true)) {
+            throw RegistryException::urlMissing();
         }
 
-        if (preg_match('/^https?:\/\//', $url) !== 1) {
-            throw RegistryException::urlMissing();
+        $host = parse_url($url, PHP_URL_HOST) ?: $url;
+
+        if (! $this->isHostAllowed($host)) {
+            throw RegistryException::hostNotAllowed($host);
         }
 
         $timeout = (int) ($this->config['timeout'] ?? 5);
@@ -63,5 +61,27 @@ class RegistryClient
         }
 
         return $payload;
+    }
+
+    private function isHostAllowed(string $host): bool
+    {
+        $allowLocalhost = (bool) ($this->config['allow_localhost'] ?? false);
+        $environment = app()->environment();
+
+        if ($host === 'localhost' || $host === '127.0.0.1' || $host === '::1') {
+            return $allowLocalhost && in_array($environment, ['local', 'testing'], true);
+        }
+
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            return false;
+        }
+
+        $allowedHosts = array_values(array_filter((array) ($this->config['allowed_hosts'] ?? []), static fn ($host) => $host !== ''));
+
+        if ($allowedHosts === []) {
+            return false;
+        }
+
+        return in_array($host, $allowedHosts, true);
     }
 }

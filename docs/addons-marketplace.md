@@ -287,49 +287,21 @@ return [
     'cache_ttl' => env('ADDONS_REGISTRY_CACHE_TTL', 3600),
     'allowed_hosts' => array_filter(explode(',', env('ADDONS_REGISTRY_ALLOWED_HOSTS', ''))),
     'verify_ssl' => env('ADDONS_REGISTRY_VERIFY_SSL', true),
+    'allow_localhost' => env('ADDONS_REGISTRY_ALLOW_LOCALHOST', true),
     'mode' => 'read_only',
 ];
-```
-
-### JSON contract
-
-Remote registry має повертати JSON:
-
-```json
-{
-  "registry": {
-    "name": "ALTA Addons Registry",
-    "version": "1.0.0",
-    "generated_at": "2026-07-09T00:00:00Z"
-  },
-  "items": [
-    {
-      "code": "core.theme-maker",
-      "type": "extension",
-      "vendor": "Core",
-      "name": "Theme Maker",
-      "description": "Demo extension",
-      "version": "0.3.0",
-      "category": "Дизайн",
-      "tags": ["theme", "design"],
-      "requires_platform": ">=1.0.0",
-      "dependencies": [],
-      "is_featured": true,
-      "homepage_url": null,
-      "documentation_url": null,
-      "artifact": null
-    }
-  ]
-}
 ```
 
 ### Безпека
 
 - Якщо `enabled = false` — HTTP-запит не виконується.
 - Якщо `url` порожній — HTTP-запит не виконується.
-- `allowed_hosts` — опціональний whitelist хостів. Якщо порожній — будь-який
-  `http://` або `https://` хост дозволений. Якщо заповнений — зовнішні хоста
-  блокуються.
+- `allowed_hosts` — **explicit whitelist**. Якщо порожній — зовнішні хоста
+  **не дозволені**.
+- `allow_localhost` — дозволяє `localhost`/`127.0.0.1`/`::1` тільки коли
+  `true` **і** середовище `local` або `testing`. У production/staging
+  локальні хоста блокуються, якщо явно не налаштовано.
+- Невалідні схеми (`file://`, `ftp://`) блокуються.
 - SSL верифікація контролюється через `verify_ssl`.
 - Жоден remote artifact не використовується для встановлення.
 

@@ -28,17 +28,20 @@ return [
     | Allowed hosts
     |--------------------------------------------------------------------------
     |
-    | Optional whitelist of registry endpoint hosts. If empty, any http/https
-    | host is allowed subject to normal Laravel HTTP client behavior.
+    | Explicit whitelist of registry endpoint hosts. If empty, external hosts
+    | are NOT allowed. Only localhost/127.0.0.1/::1 may be allowed when
+    | `allow_localhost` is true and the app environment is local/testing.
     |
     | Example:
-    |   ADDONS_REGISTRY_ALLOWED_HOSTS=127.0.0.1,localhost,registry.example.com
+    |   ADDONS_REGISTRY_ALLOWED_HOSTS=registry.example.com,registry.internal
     |
     */
 
     'allowed_hosts' => array_filter(explode(',', env('ADDONS_REGISTRY_ALLOWED_HOSTS', ''))),
 
     'verify_ssl' => env('ADDONS_REGISTRY_VERIFY_SSL', true),
+
+    'allow_localhost' => env('ADDONS_REGISTRY_ALLOW_LOCALHOST', true),
 
     'mode' => 'read_only',
 

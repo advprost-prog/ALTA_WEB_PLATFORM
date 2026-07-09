@@ -52,6 +52,7 @@ class RegistryCatalogTest extends TestCase
         $client = new RegistryClient([
             'enabled' => true,
             'url' => 'http://example.test',
+            'allowed_hosts' => ['example.test'],
             'cache_ttl' => 3600,
         ]);
         $catalog = new RegistryCatalog($client, ['enabled' => true, 'cache_ttl' => 3600]);
