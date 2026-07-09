@@ -39,6 +39,7 @@ final class MarketplaceItem
         public readonly int $sortOrder,
         public readonly bool $valid = true,
         public readonly array $errors = [],
+        public readonly array $raw = [],
     ) {}
 
     /**
@@ -135,6 +136,7 @@ final class MarketplaceItem
             sortOrder: is_int($data['sort_order'] ?? null) ? $data['sort_order'] : 999,
             valid: $errors === [],
             errors: $errors,
+            raw: $data,
         );
     }
 

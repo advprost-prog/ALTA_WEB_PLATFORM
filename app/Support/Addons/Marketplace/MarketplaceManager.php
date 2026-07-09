@@ -7,9 +7,13 @@ use App\Support\Addons\AddonEventLogger;
 use App\Support\Addons\AddonManager;
 use App\Support\Addons\AddonRegistry;
 use App\Support\Addons\PlatformVersion;
+use App\Support\Addons\Registry\ArtifactDownloader;
+use App\Support\Addons\Registry\ArtifactDownloadResult;
 use App\Support\Addons\Registry\RegistryCatalog;
+use App\Support\Addons\Registry\RegistryClient;
 use App\Support\Addons\Registry\RegistryItem;
 use App\Support\Addons\Version\VersionComparator;
+use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
 final class MarketplaceManager
@@ -149,6 +153,7 @@ final class MarketplaceManager
         $actions = $this->availableActions($status, $item, $dependencyIssues, $updateStatus, $compatibilityStatus);
         $canInstallDependencies = $this->canInstallDependencies($item->code);
         $blockedReasons = $this->getBlockedReasons($item->code);
+        $artifactStatus = $this->resolveArtifactStatus($remoteItem ?? $item);
 
         return [
             'item' => $item,
@@ -166,6 +171,11 @@ final class MarketplaceManager
             'dependency_report' => $dependencyReport,
             'can_install_dependencies' => $canInstallDependencies,
             'blocked_reasons' => $blockedReasons,
+            'artifact' => $remoteItem?->artifact ?? null,
+            'artifact_status' => $artifactStatus['status'],
+            'artifact_path' => $artifactStatus['path'],
+            'artifact_metadata' => $artifactStatus['metadata'],
+            'artifact_diagnostics' => $artifactStatus['diagnostics'],
         ];
     }
 
@@ -212,6 +222,7 @@ final class MarketplaceManager
 
         $blockedReasons = $this->getBlockedReasons($item->code);
         $canInstallDependencies = $this->canInstallDependencies($item->code);
+        $artifactStatus = $this->resolveArtifactStatus($remoteItem);
 
         return [
             'item' => $item,
@@ -229,6 +240,11 @@ final class MarketplaceManager
             'dependency_report' => $dependencyReport,
             'can_install_dependencies' => $canInstallDependencies,
             'blocked_reasons' => $blockedReasons,
+            'artifact' => $remoteItem->artifact ?? null,
+            'artifact_status' => $artifactStatus['status'],
+            'artifact_path' => $artifactStatus['path'],
+            'artifact_metadata' => $artifactStatus['metadata'],
+            'artifact_diagnostics' => $artifactStatus['diagnostics'],
         ];
     }
 
@@ -303,6 +319,56 @@ final class MarketplaceManager
         }
 
         return $actions;
+    }
+
+    /**
+     * @return array{status: string, path: string|null, metadata: array<string, mixed>|null, diagnostics: list<string>}
+     */
+    private function resolveArtifactStatus(MarketplaceItem|RegistryItem $item): array
+    {
+        $artifact = $item->raw['artifact'] ?? null;
+
+        if (! is_array($artifact) || empty($artifact['url'])) {
+            return ['status' => 'not_available', 'path' => null, 'metadata' => null, 'diagnostics' => []];
+        }
+
+        $downloadsConfig = config('addons-registry.downloads', []);
+        $downloadsEnabled = (bool) ($downloadsConfig['enabled'] ?? false);
+
+        if (! $downloadsEnabled) {
+            return ['status' => 'downloads_disabled', 'path' => null, 'metadata' => null, 'diagnostics' => []];
+        }
+
+        $disk = (string) ($downloadsConfig['disk'] ?? 'local');
+        $quarantinePath = (string) ($downloadsConfig['quarantine_path'] ?? 'addons/quarantine');
+        $filename = basename(parse_url($artifact['url'], PHP_URL_PATH) ?: $item->code.'.zip');
+        $directory = rtrim($quarantinePath.'/'.$item->code.'/'.$item->version, '/');
+        $path = $directory.'/'.$filename;
+        $metadataPath = $directory.'/metadata.json';
+
+        $storage = Storage::disk($disk);
+
+        if (! $storage->exists($path)) {
+            return ['status' => 'not_downloaded', 'path' => null, 'metadata' => null, 'diagnostics' => []];
+        }
+
+        if (! $storage->exists($metadataPath)) {
+            return ['status' => 'not_downloaded', 'path' => $path, 'metadata' => null, 'diagnostics' => []];
+        }
+
+        $metadata = json_decode($storage->get($metadataPath), true) ?: [];
+
+        if (! is_array($metadata)) {
+            return ['status' => 'not_downloaded', 'path' => $path, 'metadata' => null, 'diagnostics' => []];
+        }
+
+        $status = $metadata['status'] ?? 'not_downloaded';
+
+        if ($status === 'rejected') {
+            return ['status' => 'rejected', 'path' => $path, 'metadata' => $metadata, 'diagnostics' => []];
+        }
+
+        return ['status' => 'quarantined', 'path' => $path, 'metadata' => $metadata, 'diagnostics' => []];
     }
 
     private function compatibilityStatus(MarketplaceItem $item): string
@@ -660,6 +726,40 @@ final class MarketplaceManager
     public function uninstall(string $code): SystemAddon
     {
         return $this->manager->uninstall($code);
+    }
+
+    /**
+     * @return array{status: string, path: string|null, metadata: array<string, mixed>|null, diagnostics: list<string>}
+     */
+    public function getArtifactStatus(string $code): array
+    {
+        $item = $this->findItem($code);
+
+        if ($item === null) {
+            return ['status' => 'not_available', 'path' => null, 'metadata' => null, 'diagnostics' => ['Catalog item not found.']];
+        }
+
+        return $this->resolveArtifactStatus($item);
+    }
+
+    /**
+     * Download a remote-only artifact into quarantine.
+     *
+     * Never installs, unpacks into modules/extensions, or executes remote code.
+     * Returns a structured result describing the outcome and stored path.
+     */
+    public function downloadArtifact(string $code): ArtifactDownloadResult
+    {
+        $item = $this->findItem($code);
+
+        if ($item === null) {
+            return ArtifactDownloadResult::failed('not_available', ["Addon [{$code}] не знайдено у каталозі marketplace."]);
+        }
+
+        $registryItem = RegistryItem::fromArray($item->raw);
+        $downloader = new ArtifactDownloader(new RegistryClient(config('addons-registry', [])), config('addons-registry', []));
+
+        return $downloader->download($registryItem);
     }
 
     private function findItem(string $code): ?MarketplaceItem

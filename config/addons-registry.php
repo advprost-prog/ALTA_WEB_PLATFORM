@@ -45,4 +45,13 @@ return [
 
     'mode' => 'read_only',
 
+    'downloads' => [
+        'enabled' => env('ADDONS_REGISTRY_DOWNLOADS_ENABLED', false),
+        'disk' => env('ADDONS_REGISTRY_DOWNLOAD_DISK', 'addons'),
+        'quarantine_path' => env('ADDONS_REGISTRY_QUARANTINE_PATH', 'addons/quarantine'),
+        'max_size' => (int) env('ADDONS_REGISTRY_MAX_ARTIFACT_SIZE', 20 * 1024 * 1024),
+        'allowed_types' => ['zip'],
+        'allowed_extensions' => ['zip'],
+    ],
+
 ];

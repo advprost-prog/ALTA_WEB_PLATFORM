@@ -92,4 +92,9 @@ class RegistryCatalog
     {
         Cache::forget('addons.registry.catalog');
     }
+
+    public function getClient(): RegistryClient
+    {
+        return $this->client;
+    }
 }

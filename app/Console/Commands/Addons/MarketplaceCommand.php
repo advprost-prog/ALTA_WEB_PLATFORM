@@ -37,6 +37,7 @@ class MarketplaceCommand extends Command
                     'remote_version' => $row['remote_version'] ?? null,
                     'update_status' => $row['update_status'],
                     'compatibility_status' => $row['compatibility_status'],
+                    'artifact_status' => $row['artifact_status'] ?? null,
                     'vendor' => $row['item']->vendor,
                     'status' => $row['status'],
                     'valid' => $row['item']->isValid(),
@@ -60,7 +61,7 @@ class MarketplaceCommand extends Command
         }
 
         $this->table(
-            ['Code', 'Type', 'Src', 'Avail', 'Installed', 'Remote', 'Update', 'Compat', 'Status', 'Featured', 'Dependencies', 'DepState', 'Warnings'],
+            ['Code', 'Type', 'Src', 'Avail', 'Installed', 'Remote', 'Update', 'Compat', 'Status', 'Artifact', 'Featured', 'Dependencies', 'DepState', 'Warnings'],
             array_map(static fn (array $row): array => [
                 $row['item']->code,
                 $row['item']->type,
@@ -71,6 +72,7 @@ class MarketplaceCommand extends Command
                 UpdateStatus::label($row['update_status']),
                 CompatibilityStatus::label($row['compatibility_status']),
                 $row['status'],
+                $row['artifact_status'] ?? '-',
                 $row['item']->isFeatured ? 'yes' : 'no',
                 $row['item']->getDependencyCodes() === [] ? '-' : implode(', ', $row['item']->getDependencyCodes()),
                 self::dependencyState($row),

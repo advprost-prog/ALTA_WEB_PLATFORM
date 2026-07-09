@@ -51,7 +51,13 @@
       "is_featured": false,
       "homepage_url": null,
       "documentation_url": null,
-      "artifact": null
+      "artifact": {
+        "url": "http://127.0.0.1:9001/artifacts/core.analytics-1.0.0.zip",
+        "type": "zip",
+        "sha256": "44e46b376ddb5d9786862915e20190a291e3582f7f978640c9eebde1e3d50e35",
+        "size": 358,
+        "signature": null
+      }
     }
   ]
 }

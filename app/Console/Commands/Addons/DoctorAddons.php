@@ -17,8 +17,13 @@ class DoctorAddons extends Command
         $diagnostics = $healthCheck->diagnostics();
         $issues = $diagnostics['issues'];
         $warnings = $diagnostics['warnings'];
+        $info = [];
 
         $resolved = $marketplace->resolve();
+
+        $downloadsConfig = config('addons-registry.downloads', []);
+        $downloadsEnabled = (bool) ($downloadsConfig['enabled'] ?? false);
+        $maxSize = (int) ($downloadsConfig['max_size'] ?? 20 * 1024 * 1024);
 
         foreach ($resolved['diagnostics'] as $diagnostic) {
             if ($diagnostic === 'Registry is disabled.') {
@@ -95,17 +100,65 @@ class DoctorAddons extends Command
                     $code.': '.implode('; ', $row['blocked_reasons']),
                 ]);
             }
+
+            $artifact = $row['artifact'] ?? null;
+            $artifactStatus = $row['artifact_status'] ?? 'not_available';
+
+            if ($artifact !== null) {
+                if (! $downloadsEnabled) {
+                    $info[] = $this->diagnostic('addon_artifact_downloads_disabled', 'Artifact downloads are disabled.', [
+                        $code.': set ADDONS_REGISTRY_DOWNLOADS_ENABLED=true to allow quarantine downloads.',
+                    ]);
+                }
+
+                $host = parse_url($artifact['url'] ?? '', PHP_URL_HOST) ?: '';
+                $allowed = $this->isArtifactHostAllowed($host);
+
+                if ($downloadsEnabled && $host !== '' && ! $allowed) {
+                    $warnings[] = $this->diagnostic('addon_artifact_host_not_allowed', 'Artifact host is not in the allowed hosts list.', [
+                        $code.' host ['.$host.'] is not allowed.',
+                    ]);
+                }
+
+                if (empty($artifact['sha256'])) {
+                    $warnings[] = $this->diagnostic('addon_artifact_missing_sha256', 'Artifact is missing a sha256 checksum.', [
+                        $code.' artifact has no sha256 in registry metadata.',
+                    ]);
+                }
+
+                if (isset($artifact['size']) && is_int($artifact['size']) && $artifact['size'] > $maxSize) {
+                    $warnings[] = $this->diagnostic('addon_artifact_size_exceeds_max', 'Artifact size exceeds the maximum allowed size.', [
+                        $code.' size '.$artifact['size'].' > max '.$maxSize,
+                    ]);
+                }
+
+                if ($artifactStatus === 'rejected') {
+                    $issues[] = $this->diagnostic('addon_artifact_checksum_mismatch', 'Artifact checksum mismatch or rejected.', [
+                        $code.' was rejected during quarantine download (checksum mismatch).',
+                    ]);
+                }
+
+                if ($artifactStatus === 'quarantined' && $row['status'] === 'remote_only') {
+                    $info[] = $this->diagnostic('addon_artifact_quarantined_remote_only', 'Artifact quarantined but remote-only addon is not yet installable.', [
+                        $code.' is in quarantine but cannot be installed in Phase 3.1.',
+                    ]);
+                }
+            }
         }
 
         if ($this->option('json')) {
-            $this->line(json_encode(['issues' => $issues, 'warnings' => $warnings], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            $this->line(json_encode([
+                'issues' => $issues,
+                'warnings' => $warnings,
+                'info' => $info,
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
             return $issues === [] ? self::SUCCESS : self::FAILURE;
         }
 
         $this->info('Addon doctor');
 
-        if ($issues === [] && $warnings === []) {
+        if ($issues === [] && $warnings === [] && $info === []) {
             $this->info('No addon issues found.');
 
             return self::SUCCESS;
@@ -121,7 +174,39 @@ class DoctorAddons extends Command
             $this->renderDiagnostics($warnings);
         }
 
+        if ($info !== []) {
+            $this->info('Info:');
+            $this->renderDiagnostics($info);
+        }
+
         return $issues === [] ? self::SUCCESS : self::FAILURE;
+    }
+
+    private function isArtifactHostAllowed(string $host): bool
+    {
+        if ($host === '') {
+            return false;
+        }
+
+        $config = config('addons-registry', []);
+        $allowLocalhost = (bool) ($config['allow_localhost'] ?? false);
+        $environment = app()->environment();
+
+        if ($host === 'localhost' || $host === '127.0.0.1' || $host === '::1') {
+            return $allowLocalhost && in_array($environment, ['local', 'testing'], true);
+        }
+
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            return false;
+        }
+
+        $allowedHosts = array_values(array_filter((array) ($config['allowed_hosts'] ?? []), static fn ($h) => $h !== ''));
+
+        if ($allowedHosts === []) {
+            return false;
+        }
+
+        return in_array($host, $allowedHosts, true);
     }
 
     /**

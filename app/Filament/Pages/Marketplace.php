@@ -264,6 +264,37 @@ class Marketplace extends Page
         }
     }
 
+    public function downloadArtifact(string $code): void
+    {
+        $this->guardCode($code);
+
+        try {
+            $result = app(MarketplaceManager::class)->downloadArtifact($code);
+
+            if ($result->success) {
+                Notification::make()
+                    ->title('Artifact завантажено')
+                    ->body("Файл [{$code}] поміщено у quarantine. Встановлення недоступне.")
+                    ->success()
+                    ->send();
+
+                return;
+            }
+
+            Notification::make()
+                ->title('Artifact не завантажено')
+                ->body(implode(' ', $result->diagnostics) ?: 'Невідома помилка завантаження.')
+                ->danger()
+                ->send();
+        } catch (RuntimeException $exception) {
+            Notification::make()
+                ->title('Artifact не завантажено')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
     private function guardCode(string $code): void
     {
         if ($code === '' || ! preg_match('/^[a-z0-9._-]+$/i', $code)) {

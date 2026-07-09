@@ -21,7 +21,7 @@ class RegistryItem
         public readonly bool $isFeatured,
         public readonly ?string $homepageUrl,
         public readonly ?string $documentationUrl,
-        public readonly ?string $artifact,
+        public readonly ?array $artifact,
         public readonly array $raw = [],
     ) {}
 
@@ -47,7 +47,7 @@ class RegistryItem
             isFeatured: (bool) ($data['is_featured'] ?? false),
             homepageUrl: isset($data['homepage_url']) && is_string($data['homepage_url']) && $data['homepage_url'] !== '' ? $data['homepage_url'] : null,
             documentationUrl: isset($data['documentation_url']) && is_string($data['documentation_url']) && $data['documentation_url'] !== '' ? $data['documentation_url'] : null,
-            artifact: isset($data['artifact']) && is_string($data['artifact']) && $data['artifact'] !== '' ? $data['artifact'] : null,
+            artifact: self::normalizeArtifact($data['artifact'] ?? null),
             raw: $data,
         );
     }
@@ -80,5 +80,23 @@ class RegistryItem
         }
 
         return $normalized;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private static function normalizeArtifact(mixed $artifact): ?array
+    {
+        if (! is_array($artifact)) {
+            return null;
+        }
+
+        return [
+            'url' => (string) ($artifact['url'] ?? ''),
+            'type' => (string) ($artifact['type'] ?? ''),
+            'sha256' => (string) ($artifact['sha256'] ?? ''),
+            'size' => isset($artifact['size']) ? (int) $artifact['size'] : 0,
+            'signature' => isset($artifact['signature']) && is_string($artifact['signature']) && $artifact['signature'] !== '' ? $artifact['signature'] : null,
+        ];
     }
 }

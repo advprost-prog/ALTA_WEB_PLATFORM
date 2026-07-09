@@ -153,6 +153,10 @@
                         $availableVersion = $row['available_version'] ?? null;
                         $remoteVersion = $row['remote_version'] ?? null;
                         $source = $row['source'] ?? 'local';
+                        $artifact = $row['artifact'] ?? null;
+                        $artifactStatus = $row['artifact_status'] ?? 'not_available';
+                        $artifactMetadata = $row['artifact_metadata'] ?? null;
+                        $downloadsEnabled = (bool) (config('addons-registry.downloads.enabled') ?? false);
                         $platformConstraint = $row['platform_constraint'] ?? null;
                         $isIncompatible = $compat === 'incompatible';
                         $actionConfig = [
@@ -261,12 +265,51 @@
                                 </div>
                             @endif
 
-                            {{-- Remote-only notice --}}
-                            @if ($status === 'remote_only')
+                            {{-- Remote-only / artifact notice --}}
+                            @if ($status === 'remote_only' || $artifact !== null)
                                 <div class="fi-callout" style="margin-top:0.5rem;padding:0.5rem;--ctn-color:var(--warning-600)">
-                                    <div class="fi-in-text" style="font-size:0.8rem;color:#92400e">
-                                        Цей addon доступний тільки у registry. Завантаження буде доступне у наступній фазі.
-                                    </div>
+                                    @if ($status === 'remote_only')
+                                        <div class="fi-in-text" style="font-size:0.8rem;color:#92400e">
+                                            Цей addon доступний тільки у registry (remote-only). Встановлення/оновлення недоступні.
+                                        </div>
+                                    @endif
+                                    @if ($artifact !== null)
+                                        <div class="fi-in-text" style="font-size:0.8rem;margin-top:0.25rem">
+                                            <x-filament::badge :color="match ($artifactStatus) {
+                                                'quarantined' => 'success',
+                                                'not_downloaded' => 'gray',
+                                                'downloads_disabled' => 'warning',
+                                                'rejected' => 'danger',
+                                                'failed' => 'danger',
+                                                default => 'gray',
+                                            }">{{ $statusLabels[$artifactStatus] ?? $artifactStatus }}</x-filament::badge>
+                                            @if ($downloadsEnabled)
+                                                · Розмір: <strong>{{ number_format($artifact['size'] ?? 0) }}</strong> байт
+                                                @if (! empty($artifact['sha256']))
+                                                    · SHA256: <strong>{{ Str::substr($artifact['sha256'], 0, 12) }}…</strong>
+                                                @endif
+                                            @else
+                                                · Завантаження вимкнено (ADDONS_REGISTRY_DOWNLOADS_ENABLED=false)
+                                            @endif
+                                        </div>
+                                        @if ($downloadsEnabled && in_array($artifactStatus, ['not_downloaded', 'rejected', 'failed'], true))
+                                            <div style="margin-top:0.5rem">
+                                                <x-filament::button
+                                                    wire:click="downloadArtifact('{{ e($item->code) }}')"
+                                                    wire:loading.attr="disabled"
+                                                    wire:target="downloadArtifact('{{ e($item->code) }}')"
+                                                    color="primary"
+                                                    size="sm"
+                                                    icon="heroicon-o-arrow-down-tray"
+                                                >Завантажити artifact</x-filament::button>
+                                            </div>
+                                        @endif
+                                        @if ($artifactStatus === 'quarantined' && $artifactMetadata !== null)
+                                            <div class="fi-in-text" style="font-size:0.75rem;margin-top:0.25rem;font-family:var(--mono-font-family),monospace">
+                                                {{ $artifactMetadata['status'] ?? 'quarantined' }} · {{ $artifactMetadata['path'] ?? '' }}
+                                            </div>
+                                        @endif
+                                    @endif
                                 </div>
                             @endif
 

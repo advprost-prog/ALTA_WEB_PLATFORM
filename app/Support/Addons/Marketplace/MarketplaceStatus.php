@@ -35,9 +35,21 @@ final class MarketplaceStatus
 
     public const REMOTE_ONLY = 'remote_only';
 
+    public const DOWNLOAD_NOT_AVAILABLE = 'not_available';
+
+    public const DOWNLOADS_DISABLED = 'downloads_disabled';
+
+    public const DOWNLOAD_NOT_DOWNLOADED = 'not_downloaded';
+
+    public const DOWNLOAD_QUARANTINED = 'quarantined';
+
+    public const DOWNLOAD_REJECTED = 'rejected';
+
+    public const DOWNLOAD_FAILED = 'failed';
+
     /**
-     * @var array<string, string>
-     */
+      * @var array<string, string>
+      */
     public const LABELS = [
         self::AVAILABLE => 'Доступний',
         self::DISCOVERED => 'Виявлено',
@@ -51,6 +63,12 @@ final class MarketplaceStatus
         self::REMOTE_AVAILABLE => 'У registry',
         self::LOCAL_AVAILABLE => 'Локально доступний',
         self::REMOTE_ONLY => 'Тільки у registry',
+        self::DOWNLOAD_NOT_AVAILABLE => 'Немає artifact',
+        self::DOWNLOADS_DISABLED => 'Завантаження вимкнено',
+        self::DOWNLOAD_NOT_DOWNLOADED => 'Не завантажено',
+        self::DOWNLOAD_QUARANTINED => 'У quarantine',
+        self::DOWNLOAD_REJECTED => 'Відхилено',
+        self::DOWNLOAD_FAILED => 'Помилка завантаження',
     ];
 
     public static function label(string $status): string

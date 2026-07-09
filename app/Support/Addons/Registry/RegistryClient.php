@@ -63,7 +63,7 @@ class RegistryClient
         return $payload;
     }
 
-    private function isHostAllowed(string $host): bool
+    public function isHostAllowed(string $host): bool
     {
         $allowLocalhost = (bool) ($this->config['allow_localhost'] ?? false);
         $environment = app()->environment();
