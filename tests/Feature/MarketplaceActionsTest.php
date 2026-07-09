@@ -212,7 +212,7 @@ class MarketplaceActionsTest extends TestCase
         $originalItems = config('addons-marketplace.items');
         $updatedItems = array_map(function ($item) {
             if ($item['code'] === 'core.theme-maker') {
-                $item['version'] = '0.2.0';
+                $item['version'] = '0.3.0';
             }
 
             return $item;
@@ -228,12 +228,12 @@ class MarketplaceActionsTest extends TestCase
                 ->call('updateAddon', 'core.theme-maker')
                 ->assertOk()
                 ->assertHasNoErrors()
-                ->assertSee('0.2.0')
+                ->assertSee('0.3.0')
                 ->assertSee('Актуальна');
 
             $this->assertDatabaseHas('system_addons', [
                 'code' => 'core.theme-maker',
-                'version' => '0.2.0',
+                'version' => '0.3.0',
                 'status' => 'installed',
             ]);
         } finally {
@@ -246,7 +246,7 @@ class MarketplaceActionsTest extends TestCase
         $originalItems = config('addons-marketplace.items');
         $updatedItems = array_map(function ($item) {
             if ($item['code'] === 'core.theme-maker') {
-                $item['version'] = '0.2.0';
+                $item['version'] = '0.3.0';
             }
 
             return $item;
@@ -266,7 +266,7 @@ class MarketplaceActionsTest extends TestCase
 
             $this->assertDatabaseHas('system_addons', [
                 'code' => 'core.theme-maker',
-                'version' => '0.2.0',
+                'version' => '0.3.0',
                 'status' => 'enabled',
             ]);
         } finally {
@@ -279,7 +279,7 @@ class MarketplaceActionsTest extends TestCase
         $originalItems = config('addons-marketplace.items');
         $updatedItems = array_map(function ($item) {
             if ($item['code'] === 'core.theme-maker') {
-                $item['version'] = '0.2.0';
+                $item['version'] = '0.3.0';
             }
 
             return $item;
@@ -300,7 +300,7 @@ class MarketplaceActionsTest extends TestCase
 
             $this->assertDatabaseHas('system_addons', [
                 'code' => 'core.theme-maker',
-                'version' => '0.2.0',
+                'version' => '0.3.0',
                 'status' => 'disabled',
             ]);
         } finally {
@@ -319,7 +319,7 @@ class MarketplaceActionsTest extends TestCase
 
         $this->assertDatabaseHas('system_addons', [
             'code' => 'core.theme-maker',
-            'version' => '0.1.0',
+            'version' => '0.2.0',
         ]);
     }
 
@@ -335,7 +335,7 @@ class MarketplaceActionsTest extends TestCase
 
         $this->assertDatabaseHas('system_addons', [
             'code' => 'core.theme-maker',
-            'version' => '0.1.0',
+            'version' => '0.2.0',
         ]);
     }
 
@@ -344,7 +344,7 @@ class MarketplaceActionsTest extends TestCase
         $originalItems = config('addons-marketplace.items');
         $updatedItems = array_map(function ($item) {
             if ($item['code'] === 'core.theme-maker') {
-                $item['version'] = '0.2.0';
+                $item['version'] = '0.3.0';
             }
 
             return $item;
@@ -378,8 +378,8 @@ class MarketplaceActionsTest extends TestCase
 
         $this->get('/admin/marketplace')
             ->assertOk()
-            ->assertSee('Встановлено: <strong>0.1.0</strong>', false)
-            ->assertSee('Доступно: <strong>0.1.0</strong>', false);
+            ->assertSee('Встановлено: <strong>0.2.0</strong>', false)
+            ->assertSee('Доступно: <strong>0.2.0</strong>', false);
     }
 
     public function test_marketplace_page_shows_different_available_version_when_update_available(): void
@@ -387,7 +387,7 @@ class MarketplaceActionsTest extends TestCase
         $originalItems = config('addons-marketplace.items');
         $updatedItems = array_map(function ($item) {
             if ($item['code'] === 'core.theme-maker') {
-                $item['version'] = '0.2.0';
+                $item['version'] = '0.3.0';
             }
 
             return $item;
@@ -403,8 +403,8 @@ class MarketplaceActionsTest extends TestCase
 
             $this->get('/admin/marketplace')
                 ->assertOk()
-                ->assertSee('Встановлено: <strong>0.1.0</strong>', false)
-                ->assertSee('Доступно: <strong>0.2.0</strong>', false)
+                ->assertSee('Встановлено: <strong>0.2.0</strong>', false)
+                ->assertSee('Доступно: <strong>0.3.0</strong>', false)
                 ->assertSee('Доступне оновлення', false);
         } finally {
             config(['addons-marketplace.items' => $originalItems]);

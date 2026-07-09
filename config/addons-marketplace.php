@@ -94,7 +94,7 @@ return [
             'vendor' => 'Core',
             'name' => 'Theme Maker',
             'description' => 'Demo extension for validating the local addon marketplace lifecycle.',
-            'version' => '0.1.0',
+            'version' => '0.2.0',
             'category' => 'Дизайн',
             'icon' => 'heroicon-o-paint-brush',
             'path' => 'extensions/Core/ThemeMaker/extension.json',

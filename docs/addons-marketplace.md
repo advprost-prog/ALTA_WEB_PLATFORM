@@ -210,7 +210,7 @@ end-to-end перевірки lifecycle через існуючий pipeline. В
     "type": "extension",
     "name": "Theme Maker",
     "description": "Demo extension for validating the local addon marketplace lifecycle.",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "vendor": "Core",
     "enabled_by_default": false,
     "service_provider": "Extensions\\Core\\ThemeMaker\\ThemeMakerServiceProvider",
