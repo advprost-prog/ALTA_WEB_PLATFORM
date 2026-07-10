@@ -8,6 +8,7 @@ use App\Support\Addons\Marketplace\MarketplaceItem;
 use App\Support\Addons\Marketplace\MarketplaceManager;
 use App\Support\Addons\Marketplace\MarketplaceStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Config;
 use RuntimeException;
 use Tests\Feature\Concerns\CreatesCommerceData;
 use Tests\TestCase;
@@ -16,6 +17,16 @@ class AddonMarketplaceTest extends TestCase
 {
     use CreatesCommerceData;
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Keep local marketplace CLI/lifecycle tests independent of a remote
+        // registry: explicitly disable it (the suite-wide phpunit.xml default
+        // already disables it, but we assert it here too).
+        Config::set('addons-registry.enabled', false);
+    }
 
     public function test_catalog_config_has_five_demo_items(): void
     {

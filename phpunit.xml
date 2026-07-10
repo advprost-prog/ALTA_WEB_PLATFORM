@@ -32,5 +32,18 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+
+        <!--
+            Addon registry testing defaults: keep the suite deterministic and
+            independent of the developer's local .env (which may enable a real
+            registry). Registry-specific tests explicitly enable it via
+            Config::set + Http::fake.
+        -->
+        <env name="ADDONS_REGISTRY_ENABLED" value="false"/>
+        <env name="ADDONS_REGISTRY_DOWNLOADS_ENABLED" value="false"/>
+        <env name="ADDONS_REGISTRY_ALLOW_LOCALHOST" value="false"/>
+        <env name="ADDONS_REGISTRY_URL" value=""/>
+        <env name="ADDONS_REGISTRY_ALLOWED_HOSTS" value=""/>
+        <env name="ADDONS_REGISTRY_REQUIRE_SIGNATURE" value="true"/>
     </php>
 </phpunit>

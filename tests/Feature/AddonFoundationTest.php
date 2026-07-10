@@ -10,6 +10,7 @@ use App\Support\Addons\AddonHookRegistry;
 use App\Support\Addons\AddonManager;
 use App\Support\Addons\AddonRegistry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\File;
 use Tests\Feature\Concerns\CreatesCommerceData;
 use Tests\TestCase;
@@ -26,6 +27,9 @@ class AddonFoundationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Keep local addon CLI/lifecycle tests independent of a remote registry.
+        Config::set('addons-registry.enabled', false);
 
         $this->testModulesPath = base_path('modules/TestSuite');
         $this->testExtensionsPath = base_path('extensions/TestSuite');
