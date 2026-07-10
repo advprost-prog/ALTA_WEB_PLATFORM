@@ -69,6 +69,8 @@ class Marketplace extends Page
             'statusColors' => $this->getStatusColors(),
             'updateStatusColors' => UpdateStatus::COLORS,
             'compatibilityColors' => CompatibilityStatus::COLORS,
+            'inspectionLabels' => $this->getInspectionLabels(),
+            'inspectionColors' => $this->getInspectionColors(),
         ];
     }
 
@@ -295,6 +297,60 @@ class Marketplace extends Page
         }
     }
 
+    public function inspectArtifact(string $code): void
+    {
+        $this->guardCode($code);
+
+        try {
+            $result = app(MarketplaceManager::class)->inspectArtifact($code);
+
+            if (! $result['success']) {
+                Notification::make()
+                    ->title('Перевірку artifact не виконано')
+                    ->body(implode(' ', $result['diagnostics']) ?: 'Artifact ще не завантажено.')
+                    ->warning()
+                    ->send();
+
+                return;
+            }
+
+            $report = $result['report'];
+            $trust = $report['trust_status'] ?? 'untrusted';
+
+            if ($trust === 'trusted') {
+                Notification::make()
+                    ->title('Artifact translations перевірено')
+                    ->body("Підпис: {$report['signature_label']}; Manifest: {$report['manifest_label']}; Trust: {$report['trust_label']}.")
+                    ->success()
+                    ->send();
+
+                return;
+            }
+
+            if ($trust === 'rejected') {
+                Notification::make()
+                    ->title('Artifact відхилено')
+                    ->body(implode(' ', $result['diagnostics']) ?: 'Артефакт не пройшов перевірку цілісності.')
+                    ->danger()
+                    ->send();
+
+                return;
+            }
+
+            Notification::make()
+                ->title('Artifact перевірено')
+                ->body("Підпис: {$report['signature_label']}; Manifest: {$report['manifest_label']}; Trust: {$report['trust_label']}.")
+                ->warning()
+                ->send();
+        } catch (RuntimeException $exception) {
+            Notification::make()
+                ->title('Перевірку artifact не виконано')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
     private function guardCode(string $code): void
     {
         if ($code === '' || ! preg_match('/^[a-z0-9._-]+$/i', $code)) {
@@ -343,5 +399,75 @@ class Marketplace extends Page
     public function getStatusColor(string $status): string
     {
         return $this->getStatusColors()[$status] ?? 'gray';
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function getInspectionLabels(): array
+    {
+        return [
+            'not_required' => 'Не вимагається',
+            'missing' => 'Підпис відсутній',
+            'unknown_key' => 'Невідомий ключ',
+            'unsupported_type' => 'Непідтримуваний тип',
+            'invalid' => 'Підпис недійсний',
+            'valid' => 'Підпис дійсний',
+            'error' => 'Помилка перевірки',
+            'not_inspected' => 'Не перевірено',
+            'manifest_missing' => 'Manifest відсутній',
+            'manifest_invalid' => 'Manifest некоректний',
+            'identity_mismatch' => 'Code/version не збігаються',
+            'untrusted' => 'Недовірений',
+            'partially_trusted' => 'Частково довірений',
+            'trusted' => 'Довірений',
+            'rejected' => 'Відхилений',
+            'pending' => 'Очікує review',
+            'approved' => 'Схвалено',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function getInspectionColors(): array
+    {
+        return [
+            'not_required' => 'gray',
+            'missing' => 'warning',
+            'unknown_key' => 'warning',
+            'unsupported_type' => 'warning',
+            'invalid' => 'danger',
+            'valid' => 'success',
+            'error' => 'danger',
+            'not_inspected' => 'gray',
+            'manifest_missing' => 'danger',
+            'manifest_invalid' => 'danger',
+            'identity_mismatch' => 'danger',
+            'untrusted' => 'warning',
+            'partially_trusted' => 'warning',
+            'trusted' => 'success',
+            'rejected' => 'danger',
+            'pending' => 'gray',
+            'approved' => 'success',
+        ];
+    }
+
+    public function inspectionLabel(?string $status, array $labels): string
+    {
+        if ($status === null || $status === '') {
+            return '—';
+        }
+
+        return $labels[$status] ?? $status;
+    }
+
+    public function inspectionColor(?string $status, array $colors): string
+    {
+        if ($status === null || $status === '') {
+            return 'gray';
+        }
+
+        return $colors[$status] ?? 'gray';
     }
 }

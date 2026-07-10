@@ -143,6 +143,66 @@ class DoctorAddons extends Command
                         $code.' is in quarantine but cannot be installed in Phase 3.1.',
                     ]);
                 }
+
+                $artifactMetadata = $row['artifact_metadata'] ?? null;
+                $signatureStatus = $row['signature_status'] ?? ($artifactMetadata['signature_status'] ?? null);
+                $manifestStatus = $row['manifest_status'] ?? ($artifactMetadata['manifest_status'] ?? null);
+                $trustStatus = $row['trust_status'] ?? ($artifactMetadata['trust_status'] ?? null);
+                $requireSignature = (bool) (config('addons-registry.trust.require_signature') ?? true);
+
+                if ($signatureStatus === 'missing' && $requireSignature) {
+                    $warnings[] = $this->diagnostic('addon_artifact_unsigned_required', 'Quarantined artifact has no signature while signatures are required.', [
+                        $code.' artifact is unsigned; installs will be blocked until signed.',
+                    ]);
+                }
+
+                if ($signatureStatus === 'unknown_key') {
+                    $warnings[] = $this->diagnostic('addon_artifact_unknown_key', 'Artifact signature uses an unknown trusted key.', [
+                        $code.' signature key ['.($artifactMetadata['signature_key_id'] ?? '?').'] is not in trusted_keys.',
+                    ]);
+                }
+
+                if ($signatureStatus === 'invalid') {
+                    $issues[] = $this->diagnostic('addon_artifact_signature_invalid', 'Artifact signature is invalid.', [
+                        $code.' signature does not verify against the artifact bytes.',
+                    ]);
+                }
+
+                if ($signatureStatus === 'not_required') {
+                    $info[] = $this->diagnostic('addon_artifact_signature_not_required', 'Signatures are not required for this artifact.', [
+                        $code.' trust policy requires no signature (ADDONS_REGISTRY_REQUIRE_SIGNATURE=false).',
+                    ]);
+                }
+
+                if ($manifestStatus === 'manifest_missing') {
+                    $issues[] = $this->diagnostic('addon_artifact_manifest_missing', 'Artifact manifest is missing.', [
+                        $code.' artifact zip has no module.json/extension.json/manifest.json.',
+                    ]);
+                }
+
+                if ($manifestStatus === 'manifest_invalid') {
+                    $warnings[] = $this->diagnostic('addon_artifact_manifest_invalid', 'Artifact manifest is not valid JSON.', [
+                        $code.' manifest could not be parsed.',
+                    ]);
+                }
+
+                if ($manifestStatus === 'identity_mismatch') {
+                    $issues[] = $this->diagnostic('addon_artifact_manifest_mismatch', 'Artifact manifest code/version does not match the registry item.', [
+                        $code.' manifest identity does not match registry item.',
+                    ]);
+                }
+
+                if ($trustStatus === 'rejected') {
+                    $issues[] = $this->diagnostic('addon_artifact_trust_rejected', 'Quarantined artifact trust evaluation rejected the artifact.', [
+                        $code.' trust_status=rejected; install is blocked.',
+                    ]);
+                }
+
+                if ($trustStatus === 'trusted' && $row['status'] === 'remote_only') {
+                    $info[] = $this->diagnostic('addon_artifact_trusted_not_installable', 'Artifact is trusted but remote-only addon is not installable yet.', [
+                        $code.' is trusted in quarantine but cannot be installed in Phase 3.2.',
+                    ]);
+                }
             }
         }
 

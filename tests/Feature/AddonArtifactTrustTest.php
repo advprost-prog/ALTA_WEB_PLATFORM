@@ -1,0 +1,671 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Console\Commands\Addons\InspectAddonArtifact;
+use App\Enums\UserRole;
+use App\Filament\Pages\Marketplace;
+use App\Support\Addons\Marketplace\MarketplaceManager;
+use App\Support\Addons\Registry\ArtifactSignatureVerifier;
+use App\Support\Addons\Registry\ArtifactTrustEvaluator;
+use App\Support\Addons\Registry\QuarantinedArtifactInspector;
+use App\Support\Addons\Registry\RegistryCatalog;
+use App\Support\Addons\Registry\RegistryClient;
+use Filament\Facades\Filament;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+use Livewire\Livewire;
+use Tests\Feature\Concerns\CreatesCommerceData;
+use Tests\TestCase;
+
+class AddonArtifactTrustTest extends TestCase
+{
+    use CreatesCommerceData;
+    use RefreshDatabase;
+
+    private string $registryUrl = 'http://127.0.0.1:9001/registry.example.json';
+
+    private string $artifactUrl = 'http://127.0.0.1:9001/artifacts/core.analytics-1.0.0.zip';
+
+    private string $quarantineDir = 'addons/quarantine/core.analytics/1.0.0';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Storage::disk('addons')->deleteDirectory('addons/quarantine');
+    }
+
+    protected function tearDown(): void
+    {
+        Storage::disk('addons')->deleteDirectory('addons/quarantine');
+
+        parent::tearDown();
+    }
+
+    /* ---------------------------------------------------------------------
+     | Helpers
+     | ------------------------------------------------------------------ */
+
+    /**
+     * @return array{secret: string, public: string, public_b64: string}
+     */
+    private function makeKeypair(): array
+    {
+        $keypair = sodium_crypto_sign_keypair();
+        $public = sodium_crypto_sign_publickey($keypair);
+        $secret = sodium_crypto_sign_secretkey($keypair);
+
+        return [
+            'secret' => $secret,
+            'public' => $public,
+            'public_b64' => base64_encode($public),
+        ];
+    }
+
+    private function sign(string $bytes, string $secret): string
+    {
+        return base64_encode(sodium_crypto_sign_detached($bytes, $secret));
+    }
+
+    private function realArtifactBytes(): string
+    {
+        return (string) file_get_contents(base_path('docs/examples/artifacts/core.analytics-1.0.0.zip'));
+    }
+
+    private function realArtifactSha256(): string
+    {
+        return hash_file('sha256', base_path('docs/examples/artifacts/core.analytics-1.0.0.zip'));
+    }
+
+    /**
+     * @param  array<string, mixed>  $artifactOverride
+     */
+    private function fakeRegistryWithArtifact(array $artifactOverride, string $body, ?string $sha256 = null): void
+    {
+        $sha256 ??= hash('sha256', $body);
+
+        $registry = [
+            'registry' => ['name' => 'test', 'version' => '1.0.0'],
+            'items' => [
+                [
+                    'code' => 'core.analytics',
+                    'type' => 'module',
+                    'vendor' => 'Core',
+                    'name' => 'Analytics',
+                    'description' => 'Demo',
+                    'version' => '1.0.0',
+                    'artifact' => array_merge([
+                        'url' => $this->artifactUrl,
+                        'type' => 'zip',
+                        'sha256' => $sha256,
+                        'size' => strlen($body),
+                    ], $artifactOverride),
+                ],
+            ],
+        ];
+
+        Http::fake([
+            $this->registryUrl => Http::response($registry, 200, ['Content-Type' => 'application/json']),
+            $this->artifactUrl => Http::response($body, 200, ['Content-Type' => 'application/zip']),
+        ]);
+    }
+
+    /**
+     * @param  array<string, string>  $trustedKeys
+     */
+    private function configureRegistry(bool $downloadsEnabled, bool $requireSignature, array $trustedKeys, array $overrides = []): void
+    {
+        $config = array_merge([
+            'enabled' => true,
+            'url' => $this->registryUrl,
+            'timeout' => 5,
+            'cache_ttl' => 60,
+            'allowed_hosts' => [],
+            'verify_ssl' => true,
+            'allow_localhost' => true,
+            'mode' => 'read_only',
+            'trust' => [
+                'require_signature' => $requireSignature,
+                'trusted_keys' => $trustedKeys,
+            ],
+            'downloads' => [
+                'enabled' => $downloadsEnabled,
+                'disk' => 'addons',
+                'quarantine_path' => 'addons/quarantine',
+                'max_size' => 20 * 1024 * 1024,
+                'allowed_types' => ['zip'],
+                'allowed_extensions' => ['zip'],
+            ],
+        ], $overrides);
+
+        config(['addons-registry' => $config]);
+
+        app()->forgetInstance(RegistryClient::class);
+        app()->forgetInstance(RegistryCatalog::class);
+        app()->forgetInstance(MarketplaceManager::class);
+
+        app()->singleton(RegistryClient::class, fn () => new RegistryClient(config('addons-registry')));
+        app()->singleton(RegistryCatalog::class, fn ($app) => new RegistryCatalog(
+            $app->make(RegistryClient::class),
+            config('addons-registry'),
+        ));
+
+        app(RegistryCatalog::class)->flush();
+    }
+
+    private function buildZip(string $manifestJson, string $basename = 'manifest.json'): string
+    {
+        $path = tempnam(sys_get_temp_dir(), 'artifact').'.zip';
+
+        $zip = new \ZipArchive;
+        $zip->open($path, \ZipArchive::CREATE);
+        $zip->addFromString($basename, $manifestJson);
+        $zip->addFromString('README.md', '# demo');
+        $zip->close();
+
+        return $path;
+    }
+
+    /* ---------------------------------------------------------------------
+     | ArtifactSignatureVerifier
+     | ------------------------------------------------------------------ */
+
+    public function test_signature_verifier_valid_ed25519(): void
+    {
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+        $signature = ['type' => 'ed25519', 'value' => $this->sign($bytes, $keypair['secret']), 'key_id' => 'k1'];
+
+        $result = (new ArtifactSignatureVerifier)->verify($signature, $bytes, true, ['k1' => $keypair['public_b64']]);
+
+        $this->assertSame(ArtifactSignatureVerifier::STATUS_VALID, $result->status);
+        $this->assertSame('k1', $result->keyId);
+    }
+
+    public function test_signature_verifier_invalid_signature(): void
+    {
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+        $bad = base64_encode(random_bytes(SODIUM_CRYPTO_SIGN_BYTES));
+
+        $result = (new ArtifactSignatureVerifier)->verify(
+            ['type' => 'ed25519', 'value' => $bad, 'key_id' => 'k1'],
+            $bytes,
+            true,
+            ['k1' => $keypair['public_b64']],
+        );
+
+        $this->assertSame(ArtifactSignatureVerifier::STATUS_INVALID, $result->status);
+    }
+
+    public function test_signature_verifier_missing_when_required(): void
+    {
+        $result = (new ArtifactSignatureVerifier)->verify(null, 'x', true, []);
+
+        $this->assertSame(ArtifactSignatureVerifier::STATUS_MISSING, $result->status);
+    }
+
+    public function test_signature_verifier_not_required(): void
+    {
+        $result = (new ArtifactSignatureVerifier)->verify(null, 'x', false, []);
+
+        $this->assertSame(ArtifactSignatureVerifier::STATUS_NOT_REQUIRED, $result->status);
+    }
+
+    public function test_signature_verifier_unknown_key(): void
+    {
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+
+        $result = (new ArtifactSignatureVerifier)->verify(
+            ['type' => 'ed25519', 'value' => $this->sign($bytes, $keypair['secret']), 'key_id' => 'unknown'],
+            $bytes,
+            true,
+            ['k1' => $keypair['public_b64']],
+        );
+
+        $this->assertSame(ArtifactSignatureVerifier::STATUS_UNKNOWN_KEY, $result->status);
+    }
+
+    public function test_signature_verifier_unsupported_type(): void
+    {
+        $result = (new ArtifactSignatureVerifier)->verify(
+            ['type' => 'rsa', 'value' => 'x', 'key_id' => 'k1'],
+            'x',
+            true,
+            ['k1' => 'x'],
+        );
+
+        $this->assertSame(ArtifactSignatureVerifier::STATUS_UNSUPPORTED_TYPE, $result->status);
+    }
+
+    public function test_signature_verifier_error_when_sodium_unavailable(): void
+    {
+        $verifier = new class extends ArtifactSignatureVerifier
+        {
+            public function sodiumAvailable(): bool
+            {
+                return false;
+            }
+        };
+
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+
+        $result = $verifier->verify(
+            ['type' => 'ed25519', 'value' => $this->sign($bytes, $keypair['secret']), 'key_id' => 'k1'],
+            $bytes,
+            true,
+            ['k1' => $keypair['public_b64']],
+        );
+
+        $this->assertSame(ArtifactSignatureVerifier::STATUS_ERROR, $result->status);
+        $this->assertStringContainsStringIgnoringCase('sodium', $result->diagnostics[0]);
+    }
+
+    /* ---------------------------------------------------------------------
+     | QuarantinedArtifactInspector
+     | ------------------------------------------------------------------ */
+
+    public function test_inspector_valid_manifest(): void
+    {
+        $path = $this->buildZip(json_encode(['code' => 'core.analytics', 'version' => '1.0.0', 'type' => 'module']));
+
+        $result = (new QuarantinedArtifactInspector)->inspect($path, 'core.analytics', '1.0.0');
+
+        $this->assertSame(QuarantinedArtifactInspector::STATUS_VALID, $result->status);
+    }
+
+    public function test_inspector_manifest_missing(): void
+    {
+        $path = $this->buildZip('not a manifest', 'README.md');
+
+        $result = (new QuarantinedArtifactInspector)->inspect($path, 'core.analytics', '1.0.0');
+
+        $this->assertSame(QuarantinedArtifactInspector::STATUS_MANIFEST_MISSING, $result->status);
+    }
+
+    public function test_inspector_manifest_invalid_json(): void
+    {
+        $path = $this->buildZip('{not json', 'manifest.json');
+
+        $result = (new QuarantinedArtifactInspector)->inspect($path, 'core.analytics', '1.0.0');
+
+        $this->assertSame(QuarantinedArtifactInspector::STATUS_MANIFEST_INVALID, $result->status);
+    }
+
+    public function test_inspector_code_mismatch(): void
+    {
+        $path = $this->buildZip(json_encode(['code' => 'other', 'version' => '1.0.0', 'type' => 'module']));
+
+        $result = (new QuarantinedArtifactInspector)->inspect($path, 'core.analytics', '1.0.0');
+
+        $this->assertSame(QuarantinedArtifactInspector::STATUS_IDENTITY_MISMATCH, $result->status);
+    }
+
+    public function test_inspector_version_mismatch(): void
+    {
+        $path = $this->buildZip(json_encode(['code' => 'core.analytics', 'version' => '2.0.0', 'type' => 'module']));
+
+        $result = (new QuarantinedArtifactInspector)->inspect($path, 'core.analytics', '1.0.0');
+
+        $this->assertSame(QuarantinedArtifactInspector::STATUS_IDENTITY_MISMATCH, $result->status);
+    }
+
+    public function test_inspector_broken_zip_errors(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'broken').'.zip';
+        file_put_contents($path, 'not a zip');
+
+        $result = (new QuarantinedArtifactInspector)->inspect($path, 'core.analytics', '1.0.0');
+
+        $this->assertSame(QuarantinedArtifactInspector::STATUS_ERROR, $result->status);
+    }
+
+    /* ---------------------------------------------------------------------
+     | ArtifactTrustEvaluator
+     | ------------------------------------------------------------------ */
+
+    public function test_evaluator_trusted(): void
+    {
+        $result = (new ArtifactTrustEvaluator)->evaluate(
+            true,
+            ArtifactSignatureVerifier::STATUS_VALID,
+            QuarantinedArtifactInspector::STATUS_VALID,
+            true,
+        );
+
+        $this->assertSame(ArtifactTrustEvaluator::TRUST_TRUSTED, $result->trustStatus);
+    }
+
+    public function test_evaluator_untrusted_when_signature_missing_required(): void
+    {
+        $result = (new ArtifactTrustEvaluator)->evaluate(
+            true,
+            ArtifactSignatureVerifier::STATUS_MISSING,
+            QuarantinedArtifactInspector::STATUS_VALID,
+            true,
+        );
+
+        $this->assertSame(ArtifactTrustEvaluator::TRUST_UNTRUSTED, $result->trustStatus);
+    }
+
+    public function test_evaluator_rejected_when_signature_invalid(): void
+    {
+        $result = (new ArtifactTrustEvaluator)->evaluate(
+            true,
+            ArtifactSignatureVerifier::STATUS_INVALID,
+            QuarantinedArtifactInspector::STATUS_VALID,
+            true,
+        );
+
+        $this->assertSame(ArtifactTrustEvaluator::TRUST_REJECTED, $result->trustStatus);
+    }
+
+    public function test_evaluator_rejected_when_manifest_mismatch(): void
+    {
+        $result = (new ArtifactTrustEvaluator)->evaluate(
+            true,
+            ArtifactSignatureVerifier::STATUS_VALID,
+            QuarantinedArtifactInspector::STATUS_IDENTITY_MISMATCH,
+            true,
+        );
+
+        $this->assertSame(ArtifactTrustEvaluator::TRUST_REJECTED, $result->trustStatus);
+    }
+
+    public function test_evaluator_partially_trusted_when_signature_not_required(): void
+    {
+        $result = (new ArtifactTrustEvaluator)->evaluate(
+            true,
+            ArtifactSignatureVerifier::STATUS_NOT_REQUIRED,
+            QuarantinedArtifactInspector::STATUS_VALID,
+            false,
+        );
+
+        $this->assertSame(ArtifactTrustEvaluator::TRUST_PARTIALLY_TRUSTED, $result->trustStatus);
+    }
+
+    public function test_evaluator_rejected_on_checksum_mismatch(): void
+    {
+        $result = (new ArtifactTrustEvaluator)->evaluate(
+            false,
+            ArtifactSignatureVerifier::STATUS_VALID,
+            QuarantinedArtifactInspector::STATUS_VALID,
+            true,
+        );
+
+        $this->assertSame(ArtifactTrustEvaluator::TRUST_REJECTED, $result->trustStatus);
+    }
+
+    /* ---------------------------------------------------------------------
+     | MarketplaceManager::inspectArtifact
+     | ------------------------------------------------------------------ */
+
+    public function test_inspect_signed_trusted(): void
+    {
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+        $signature = ['type' => 'ed25519', 'value' => $this->sign($bytes, $keypair['secret']), 'key_id' => 'k1'];
+
+        $this->configureRegistry(true, true, ['k1' => $keypair['public_b64']]);
+        $this->fakeRegistryWithArtifact(['signature' => $signature], $bytes);
+
+        $manager = app(MarketplaceManager::class);
+        $manager->downloadArtifact('core.analytics');
+        $report = $manager->inspectArtifact('core.analytics');
+
+        $this->assertTrue($report['success']);
+        $this->assertSame('trusted', $report['status']);
+        $this->assertSame('valid', $report['report']['signature_status']);
+        $this->assertSame('valid', $report['report']['manifest_status']);
+    }
+
+    public function test_inspect_unsigned_untrusted(): void
+    {
+        $this->configureRegistry(true, true, []);
+        $this->fakeRegistryWithArtifact(['signature' => null], $this->realArtifactBytes());
+
+        $manager = app(MarketplaceManager::class);
+        $manager->downloadArtifact('core.analytics');
+        $report = $manager->inspectArtifact('core.analytics');
+
+        $this->assertTrue($report['success']);
+        $this->assertSame('untrusted', $report['status']);
+        $this->assertSame('missing', $report['report']['signature_status']);
+    }
+
+    public function test_inspect_invalid_signature_rejected(): void
+    {
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+        $bad = ['type' => 'ed25519', 'value' => base64_encode(random_bytes(SODIUM_CRYPTO_SIGN_BYTES)), 'key_id' => 'k1'];
+
+        $this->configureRegistry(true, true, ['k1' => $keypair['public_b64']]);
+        $this->fakeRegistryWithArtifact(['signature' => $bad], $bytes);
+
+        $manager = app(MarketplaceManager::class);
+        $manager->downloadArtifact('core.analytics');
+        $report = $manager->inspectArtifact('core.analytics');
+
+        $this->assertTrue($report['success']);
+        $this->assertSame('rejected', $report['status']);
+    }
+
+    public function test_inspect_unknown_key_untrusted(): void
+    {
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+        $signature = ['type' => 'ed25519', 'value' => $this->sign($bytes, $keypair['secret']), 'key_id' => 'unknown'];
+
+        $this->configureRegistry(true, true, ['k1' => 'x']);
+        $this->fakeRegistryWithArtifact(['signature' => $signature], $bytes);
+
+        $manager = app(MarketplaceManager::class);
+        $manager->downloadArtifact('core.analytics');
+        $report = $manager->inspectArtifact('core.analytics');
+
+        $this->assertSame('untrusted', $report['status']);
+        $this->assertSame('unknown_key', $report['report']['signature_status']);
+    }
+
+    public function test_inspect_manifest_mismatch_rejected(): void
+    {
+        $keypair = $this->makeKeypair();
+        $manifestMismatchBytes = file_get_contents($this->buildZip(json_encode(['code' => 'other', 'version' => '1.0.0', 'type' => 'module'])));
+        $signature = ['type' => 'ed25519', 'value' => $this->sign($manifestMismatchBytes, $keypair['secret']), 'key_id' => 'k1'];
+
+        $this->configureRegistry(true, true, ['k1' => $keypair['public_b64']]);
+        $this->fakeRegistryWithArtifact(['signature' => $signature], $manifestMismatchBytes);
+
+        $manager = app(MarketplaceManager::class);
+        $manager->downloadArtifact('core.analytics');
+        $report = $manager->inspectArtifact('core.analytics');
+
+        $this->assertSame('rejected', $report['status']);
+        $this->assertSame('identity_mismatch', $report['report']['manifest_status']);
+    }
+
+    public function test_inspect_not_required_partially_trusted(): void
+    {
+        $this->configureRegistry(true, false, []);
+        $this->fakeRegistryWithArtifact(['signature' => null], $this->realArtifactBytes());
+
+        $manager = app(MarketplaceManager::class);
+        $manager->downloadArtifact('core.analytics');
+        $report = $manager->inspectArtifact('core.analytics');
+
+        $this->assertSame('partially_trusted', $report['status']);
+    }
+
+    public function test_inspect_not_downloaded_fails(): void
+    {
+        $this->configureRegistry(true, true, []);
+        $this->fakeRegistryWithArtifact(['signature' => null], $this->realArtifactBytes());
+
+        $report = app(MarketplaceManager::class)->inspectArtifact('core.analytics');
+
+        $this->assertFalse($report['success']);
+        $this->assertSame('not_downloaded', $report['status']);
+    }
+
+    public function test_inspect_persists_metadata(): void
+    {
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+        $signature = ['type' => 'ed25519', 'value' => $this->sign($bytes, $keypair['secret']), 'key_id' => 'k1'];
+
+        $this->configureRegistry(true, true, ['k1' => $keypair['public_b64']]);
+        $this->fakeRegistryWithArtifact(['signature' => $signature], $bytes);
+
+        $manager = app(MarketplaceManager::class);
+        $manager->downloadArtifact('core.analytics');
+        $manager->inspectArtifact('core.analytics');
+
+        $metadata = json_decode(Storage::disk('addons')->get($this->quarantineDir.'/metadata.json'), true);
+
+        $this->assertSame('valid', $metadata['signature_status']);
+        $this->assertSame('k1', $metadata['signature_key_id']);
+        $this->assertSame('valid', $metadata['manifest_status']);
+        $this->assertSame('trusted', $metadata['trust_status']);
+        $this->assertSame('pending', $metadata['review_status']);
+        $this->assertArrayHasKey('signature_checked_at', $metadata);
+        $this->assertArrayHasKey('manifest_checked_at', $metadata);
+    }
+
+    /* ---------------------------------------------------------------------
+     | CLI addons:inspect-artifact
+     | ------------------------------------------------------------------ */
+
+    public function test_cli_inspect_artifact_works(): void
+    {
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+        $signature = ['type' => 'ed25519', 'value' => $this->sign($bytes, $keypair['secret']), 'key_id' => 'k1'];
+
+        $this->configureRegistry(true, true, ['k1' => $keypair['public_b64']]);
+        $this->fakeRegistryWithArtifact(['signature' => $signature], $bytes);
+
+        app(MarketplaceManager::class)->downloadArtifact('core.analytics');
+
+        $this->artisan(InspectAddonArtifact::class, ['code' => 'core.analytics'])
+            ->assertSuccessful()
+            ->expectsOutputToContain('trust:')
+            ->expectsOutputToContain('signature:')
+            ->expectsOutputToContain('manifest:');
+    }
+
+    /* ---------------------------------------------------------------------
+     | Doctor diagnostics
+     | ------------------------------------------------------------------ */
+
+    public function test_doctor_unsigned_warning(): void
+    {
+        $this->configureRegistry(true, true, []);
+        $this->fakeRegistryWithArtifact(['signature' => null], $this->realArtifactBytes());
+
+        app(MarketplaceManager::class)->downloadArtifact('core.analytics');
+
+        $this->artisan('addons:doctor')
+            ->expectsOutputToContain('addon_artifact_unsigned_required');
+    }
+
+    public function test_doctor_invalid_signature_error(): void
+    {
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+        $bad = ['type' => 'ed25519', 'value' => base64_encode(random_bytes(SODIUM_CRYPTO_SIGN_BYTES)), 'key_id' => 'k1'];
+
+        $this->configureRegistry(true, true, ['k1' => $keypair['public_b64']]);
+        $this->fakeRegistryWithArtifact(['signature' => $bad], $bytes);
+
+        app(MarketplaceManager::class)->downloadArtifact('core.analytics');
+
+        $this->artisan('addons:doctor')
+            ->expectsOutputToContain('addon_artifact_signature_invalid');
+    }
+
+    public function test_doctor_manifest_mismatch_error(): void
+    {
+        $keypair = $this->makeKeypair();
+        $mismatchBytes = file_get_contents($this->buildZip(json_encode(['code' => 'other', 'version' => '1.0.0', 'type' => 'module'])));
+        $signature = ['type' => 'ed25519', 'value' => $this->sign($mismatchBytes, $keypair['secret']), 'key_id' => 'k1'];
+
+        $this->configureRegistry(true, true, ['k1' => $keypair['public_b64']]);
+        $this->fakeRegistryWithArtifact(['signature' => $signature], $mismatchBytes);
+
+        app(MarketplaceManager::class)->downloadArtifact('core.analytics');
+
+        $this->artisan('addons:doctor')
+            ->expectsOutputToContain('addon_artifact_manifest_mismatch');
+    }
+
+    /* ---------------------------------------------------------------------
+     | UI / Livewire
+     | ------------------------------------------------------------------ */
+
+    public function test_marketplace_html_has_inspect_artifact_wire_click(): void
+    {
+        $this->configureRegistry(true, true, []);
+        $this->fakeRegistryWithArtifact(['signature' => null], $this->realArtifactBytes());
+
+        app(MarketplaceManager::class)->downloadArtifact('core.analytics');
+
+        $admin = $this->createUserWithRole(UserRole::Admin);
+        $this->actingAs($admin);
+
+        $this->get('/admin/marketplace')
+            ->assertOk()
+            ->assertSee('wire:click="inspectArtifact(\'core.analytics\')"', false);
+    }
+
+    public function test_livewire_inspect_artifact_updates_metadata(): void
+    {
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+        $signature = ['type' => 'ed25519', 'value' => $this->sign($bytes, $keypair['secret']), 'key_id' => 'k1'];
+
+        $this->configureRegistry(true, true, ['k1' => $keypair['public_b64']]);
+        $this->fakeRegistryWithArtifact(['signature' => $signature], $bytes);
+
+        $manager = app(MarketplaceManager::class);
+        $manager->downloadArtifact('core.analytics');
+
+        $admin = $this->createUserWithRole(UserRole::Admin);
+        $this->actingAs($admin);
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+
+        Livewire::test(Marketplace::class)
+            ->call('downloadArtifact', 'core.analytics')
+            ->assertHasNoErrors()
+            ->call('inspectArtifact', 'core.analytics')
+            ->assertHasNoErrors();
+
+        $status = $manager->getArtifactTrustStatus('core.analytics');
+        $this->assertSame('trusted', $status);
+    }
+
+    public function test_marketplace_renders_trusted_and_rejected_badges(): void
+    {
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+        $signature = ['type' => 'ed25519', 'value' => $this->sign($bytes, $keypair['secret']), 'key_id' => 'k1'];
+
+        $this->configureRegistry(true, true, ['k1' => $keypair['public_b64']]);
+        $this->fakeRegistryWithArtifact(['signature' => $signature], $bytes);
+
+        $manager = app(MarketplaceManager::class);
+        $manager->downloadArtifact('core.analytics');
+        $manager->inspectArtifact('core.analytics');
+
+        $admin = $this->createUserWithRole(UserRole::Admin);
+        $this->actingAs($admin);
+
+        $this->get('/admin/marketplace')
+            ->assertOk()
+            ->assertSee('Довірений')
+            ->assertSee('Встановлення з quarantine буде доступне у наступній фазі.');
+    }
+}

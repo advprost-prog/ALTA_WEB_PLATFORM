@@ -96,7 +96,27 @@ class RegistryItem
             'type' => (string) ($artifact['type'] ?? ''),
             'sha256' => (string) ($artifact['sha256'] ?? ''),
             'size' => isset($artifact['size']) ? (int) $artifact['size'] : 0,
-            'signature' => isset($artifact['signature']) && is_string($artifact['signature']) && $artifact['signature'] !== '' ? $artifact['signature'] : null,
+            'signature' => self::normalizeSignature($artifact['signature'] ?? null),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private static function normalizeSignature(mixed $signature): ?array
+    {
+        if (! is_array($signature)) {
+            return null;
+        }
+
+        if (empty($signature['type']) || empty($signature['value'])) {
+            return null;
+        }
+
+        return [
+            'type' => (string) $signature['type'],
+            'value' => (string) $signature['value'],
+            'key_id' => isset($signature['key_id']) && is_string($signature['key_id']) ? $signature['key_id'] : null,
         ];
     }
 }

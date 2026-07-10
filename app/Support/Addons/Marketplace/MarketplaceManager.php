@@ -9,6 +9,9 @@ use App\Support\Addons\AddonRegistry;
 use App\Support\Addons\PlatformVersion;
 use App\Support\Addons\Registry\ArtifactDownloader;
 use App\Support\Addons\Registry\ArtifactDownloadResult;
+use App\Support\Addons\Registry\ArtifactSignatureVerifier;
+use App\Support\Addons\Registry\ArtifactTrustEvaluator;
+use App\Support\Addons\Registry\QuarantinedArtifactInspector;
 use App\Support\Addons\Registry\RegistryCatalog;
 use App\Support\Addons\Registry\RegistryClient;
 use App\Support\Addons\Registry\RegistryItem;
@@ -176,6 +179,10 @@ final class MarketplaceManager
             'artifact_path' => $artifactStatus['path'],
             'artifact_metadata' => $artifactStatus['metadata'],
             'artifact_diagnostics' => $artifactStatus['diagnostics'],
+            'signature_status' => $artifactStatus['metadata']['signature_status'] ?? null,
+            'manifest_status' => $artifactStatus['metadata']['manifest_status'] ?? null,
+            'trust_status' => $artifactStatus['metadata']['trust_status'] ?? null,
+            'review_status' => $artifactStatus['metadata']['review_status'] ?? null,
         ];
     }
 
@@ -245,6 +252,10 @@ final class MarketplaceManager
             'artifact_path' => $artifactStatus['path'],
             'artifact_metadata' => $artifactStatus['metadata'],
             'artifact_diagnostics' => $artifactStatus['diagnostics'],
+            'signature_status' => $artifactStatus['metadata']['signature_status'] ?? null,
+            'manifest_status' => $artifactStatus['metadata']['manifest_status'] ?? null,
+            'trust_status' => $artifactStatus['metadata']['trust_status'] ?? null,
+            'review_status' => $artifactStatus['metadata']['review_status'] ?? null,
         ];
     }
 
@@ -339,36 +350,239 @@ final class MarketplaceManager
             return ['status' => 'downloads_disabled', 'path' => null, 'metadata' => null, 'diagnostics' => []];
         }
 
-        $disk = (string) ($downloadsConfig['disk'] ?? 'local');
-        $quarantinePath = (string) ($downloadsConfig['quarantine_path'] ?? 'addons/quarantine');
-        $filename = basename(parse_url($artifact['url'], PHP_URL_PATH) ?: $item->code.'.zip');
-        $directory = rtrim($quarantinePath.'/'.$item->code.'/'.$item->version, '/');
-        $path = $directory.'/'.$filename;
-        $metadataPath = $directory.'/metadata.json';
+        $paths = $this->artifactPaths($item->code, $item->version, $artifact['url']);
+        $storage = Storage::disk($paths['disk']);
 
-        $storage = Storage::disk($disk);
-
-        if (! $storage->exists($path)) {
+        if (! $storage->exists($paths['path'])) {
             return ['status' => 'not_downloaded', 'path' => null, 'metadata' => null, 'diagnostics' => []];
         }
 
-        if (! $storage->exists($metadataPath)) {
-            return ['status' => 'not_downloaded', 'path' => $path, 'metadata' => null, 'diagnostics' => []];
+        if (! $storage->exists($paths['metadataPath'])) {
+            return ['status' => 'not_downloaded', 'path' => $paths['path'], 'metadata' => null, 'diagnostics' => []];
         }
 
-        $metadata = json_decode($storage->get($metadataPath), true) ?: [];
+        $metadata = json_decode($storage->get($paths['metadataPath']), true) ?: [];
 
         if (! is_array($metadata)) {
-            return ['status' => 'not_downloaded', 'path' => $path, 'metadata' => null, 'diagnostics' => []];
+            return ['status' => 'not_downloaded', 'path' => $paths['path'], 'metadata' => null, 'diagnostics' => []];
         }
 
         $status = $metadata['status'] ?? 'not_downloaded';
 
         if ($status === 'rejected') {
-            return ['status' => 'rejected', 'path' => $path, 'metadata' => $metadata, 'diagnostics' => []];
+            return ['status' => 'rejected', 'path' => $paths['path'], 'metadata' => $metadata, 'diagnostics' => []];
         }
 
-        return ['status' => 'quarantined', 'path' => $path, 'metadata' => $metadata, 'diagnostics' => []];
+        return ['status' => 'quarantined', 'path' => $paths['path'], 'metadata' => $metadata, 'diagnostics' => []];
+    }
+
+    /**
+     * @return array{path: string, metadataPath: string, disk: string, directory: string}
+     */
+    private function artifactPaths(string $code, string $version, string $url): array
+    {
+        $downloadsConfig = config('addons-registry.downloads', []);
+        $disk = (string) ($downloadsConfig['disk'] ?? 'local');
+        $quarantinePath = (string) ($downloadsConfig['quarantine_path'] ?? 'addons/quarantine');
+        $filename = basename(parse_url($url, PHP_URL_PATH) ?: $code.'.zip');
+        $directory = rtrim($quarantinePath.'/'.$code.'/'.$version, '/');
+        $path = $directory.'/'.$filename;
+        $metadataPath = $directory.'/metadata.json';
+
+        return ['path' => $path, 'metadataPath' => $metadataPath, 'disk' => $disk, 'directory' => $directory];
+    }
+
+    /**
+     * Inspect an already-downloaded quarantined artifact: verify its signature,
+     * inspect its manifest, evaluate trust, and persist the results into
+     * metadata.json. Never installs, unpacks into modules/extensions, or runs
+     * any code from the artifact.
+     *
+     * @return array{success: bool, status: string, path: string|null, metadata: array<string, mixed>|null, diagnostics: list<string>, report: array<string, mixed>}
+     */
+    public function inspectArtifact(string $code): array
+    {
+        $item = $this->findItem($code);
+
+        if ($item === null) {
+            return $this->inspectionFailed('not_available', ["Addon [{$code}] не знайдено у каталозі marketplace."]);
+        }
+
+        $artifact = $item->raw['artifact'] ?? null;
+
+        if (! is_array($artifact) || empty($artifact['url'])) {
+            return $this->inspectionFailed('not_available', ["Addon [{$code}] не має artifact у registry."]);
+        }
+
+        $paths = $this->artifactPaths($code, $item->version, $artifact['url']);
+        $storage = Storage::disk($paths['disk']);
+
+        if (! $storage->exists($paths['path'])) {
+            return $this->inspectionFailed('not_downloaded', ["Artifact для [{$code}] ще не завантажено у quarantine."]);
+        }
+
+        $bytes = $storage->get($paths['path']);
+        $calculatedHash = hash('sha256', $bytes);
+        $checksumValid = $calculatedHash === ((string) ($artifact['sha256'] ?? ''));
+
+        $trustConfig = config('addons-registry.trust', []);
+        $requireSignature = (bool) ($trustConfig['require_signature'] ?? true);
+        $trustedKeys = is_array($trustConfig['trusted_keys'] ?? null) ? $trustConfig['trusted_keys'] : [];
+
+        $verifier = new ArtifactSignatureVerifier;
+        $signatureResult = $verifier->verify(
+            $artifact['signature'] ?? null,
+            $bytes,
+            $requireSignature,
+            $trustedKeys,
+        );
+
+        $inspector = new QuarantinedArtifactInspector;
+        $manifestResult = $inspector->inspect(
+            $storage->path($paths['path']),
+            $code,
+            $item->version,
+        );
+
+        $evaluator = new ArtifactTrustEvaluator;
+        $trustResult = $evaluator->evaluate(
+            $checksumValid,
+            $signatureResult->status,
+            $manifestResult->status,
+            $requireSignature,
+        );
+
+        $metadata = [];
+        if ($storage->exists($paths['metadataPath'])) {
+            $decoded = json_decode($storage->get($paths['metadataPath']), true);
+            $metadata = is_array($decoded) ? $decoded : [];
+        }
+
+        $now = now()->toIso8601String();
+        $metadata = array_merge($metadata, [
+            'code' => $code,
+            'version' => $item->version,
+            'source_url' => $artifact['url'],
+            'sha256' => $artifact['sha256'] ?? $calculatedHash,
+            'size' => $artifact['size'] ?? strlen($bytes),
+            'status' => $metadata['status'] ?? 'quarantined',
+            'signature_status' => $signatureResult->status,
+            'signature_checked_at' => $now,
+            'signature_key_id' => $signatureResult->keyId,
+            'manifest_status' => $manifestResult->status,
+            'manifest_checked_at' => $now,
+            'trust_status' => $trustResult->trustStatus,
+            'review_status' => $metadata['review_status'] ?? 'pending',
+            'reviewed_at' => $metadata['reviewed_at'] ?? null,
+            'reviewed_by' => $metadata['reviewed_by'] ?? null,
+            'artifact_diagnostics' => array_values(array_unique([
+                ...$signatureResult->diagnostics,
+                ...$manifestResult->diagnostics,
+                ...$trustResult->diagnostics,
+            ])),
+        ]);
+
+        $storage->put($paths['metadataPath'], json_encode($metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        $report = [
+            'code' => $code,
+            'version' => $item->version,
+            'path' => $paths['path'],
+            'checksum_valid' => $checksumValid,
+            'sha256' => $calculatedHash,
+            'signature_status' => $signatureResult->status,
+            'signature_label' => $signatureResult->label(),
+            'signature_key_id' => $signatureResult->keyId,
+            'manifest_status' => $manifestResult->status,
+            'manifest_label' => $manifestResult->label(),
+            'manifest_path' => $manifestResult->manifestPath,
+            'trust_status' => $trustResult->trustStatus,
+            'trust_label' => $trustResult->label(),
+            'review_status' => $metadata['review_status'],
+            'diagnostics' => $metadata['artifact_diagnostics'],
+        ];
+
+        return [
+            'success' => true,
+            'status' => $trustResult->trustStatus,
+            'path' => $paths['path'],
+            'metadata' => $metadata,
+            'diagnostics' => $metadata['artifact_diagnostics'],
+            'report' => $report,
+        ];
+    }
+
+    /**
+     * @return array{success: bool, status: string, path: string|null, metadata: array<string, mixed>|null, diagnostics: list<string>, report: array<string, mixed>}
+     */
+    public function getArtifactInspectionReport(string $code): array
+    {
+        $item = $this->findItem($code);
+
+        if ($item === null) {
+            return $this->inspectionFailed('not_available', ["Addon [{$code}] не знайдено у каталозі marketplace."]);
+        }
+
+        $artifact = $item->raw['artifact'] ?? null;
+
+        if (! is_array($artifact) || empty($artifact['url'])) {
+            return $this->inspectionFailed('not_available', ["Addon [{$code}] не має artifact у registry."]);
+        }
+
+        $paths = $this->artifactPaths($code, $item->version, $artifact['url']);
+        $storage = Storage::disk($paths['disk']);
+
+        if (! $storage->exists($paths['path'])) {
+            return $this->inspectionFailed('not_downloaded', ["Artifact для [{$code}] ще не завантажено у quarantine."]);
+        }
+
+        $metadata = [];
+        if ($storage->exists($paths['metadataPath'])) {
+            $decoded = json_decode($storage->get($paths['metadataPath']), true);
+            $metadata = is_array($decoded) ? $decoded : [];
+        }
+
+        return [
+            'success' => true,
+            'status' => $metadata['trust_status'] ?? 'not_inspected',
+            'path' => $paths['path'],
+            'metadata' => $metadata,
+            'diagnostics' => $metadata['artifact_diagnostics'] ?? [],
+            'report' => [
+                'code' => $code,
+                'version' => $item->version,
+                'path' => $paths['path'],
+                'sha256' => $metadata['sha256'] ?? null,
+                'signature_status' => $metadata['signature_status'] ?? null,
+                'manifest_status' => $metadata['manifest_status'] ?? null,
+                'trust_status' => $metadata['trust_status'] ?? null,
+                'review_status' => $metadata['review_status'] ?? null,
+                'diagnostics' => $metadata['artifact_diagnostics'] ?? [],
+            ],
+        ];
+    }
+
+    public function getArtifactTrustStatus(string $code): ?string
+    {
+        $report = $this->getArtifactInspectionReport($code);
+
+        return $report['report']['trust_status'] ?? null;
+    }
+
+    /**
+     * @param  list<string>  $diagnostics
+     * @return array{success: bool, status: string, path: string|null, metadata: array<string, mixed>|null, diagnostics: list<string>, report: array<string, mixed>}
+     */
+    private function inspectionFailed(string $status, array $diagnostics): array
+    {
+        return [
+            'success' => false,
+            'status' => $status,
+            'path' => null,
+            'metadata' => null,
+            'diagnostics' => $diagnostics,
+            'report' => [],
+        ];
     }
 
     private function compatibilityStatus(MarketplaceItem $item): string

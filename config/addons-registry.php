@@ -45,6 +45,36 @@ return [
 
     'mode' => 'read_only',
 
+    /*
+    |--------------------------------------------------------------------------
+    | Trust policy
+    |--------------------------------------------------------------------------
+    |
+    | Controls cryptographic signature verification for remote artifacts.
+    |
+    | - require_signature: when true, an unsigned artifact stays in quarantine
+    |   and future install/unpack is blocked (trust_status = untrusted).
+    | - trusted_keys: key_id => base64-encoded ed25519 public key. Signatures
+    |   are verified with sodium_crypto_sign_verify_detached.
+    |
+    | The public key below is an INSECURE DEMO key used only for local testing
+    | of the registry example fixtures. It is NOT a production secret. Do not
+    | sign production artifacts with the matching private key. Generate your
+    | own keypair for real registries.
+    |
+    |   $keypair = sodium_crypto_sign_keypair();
+    |   $public  = base64_encode(sodium_crypto_sign_publickey($keypair));
+    |
+    */
+
+    'trust' => [
+        'require_signature' => env('ADDONS_REGISTRY_REQUIRE_SIGNATURE', true),
+        'trusted_keys' => [
+            // Insecure demo ed25519 public key for docs/examples/artifacts.
+            'alta-demo-key-1' => 'mCWvikNz7pfcagq5odfFiCa1nhsa17D4Up02EkZ4alM=',
+        ],
+    ],
+
     'downloads' => [
         'enabled' => env('ADDONS_REGISTRY_DOWNLOADS_ENABLED', false),
         'disk' => env('ADDONS_REGISTRY_DOWNLOAD_DISK', 'addons'),

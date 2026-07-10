@@ -56,7 +56,11 @@
         "type": "zip",
         "sha256": "44e46b376ddb5d9786862915e20190a291e3582f7f978640c9eebde1e3d50e35",
         "size": 358,
-        "signature": null
+        "signature": {
+          "type": "ed25519",
+          "value": "ZHtUkIBbRWJBfCNMrA1LvazsfdPw5jNC/JThB8O8adtjMqwnVRY8fBKSXWw/4UX0utD6N1zmxuyVWIhraWblAQ==",
+          "key_id": "alta-demo-key-1"
+        }
       }
     }
   ]

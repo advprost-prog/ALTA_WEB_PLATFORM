@@ -305,8 +305,61 @@
                                             </div>
                                         @endif
                                         @if ($artifactStatus === 'quarantined' && $artifactMetadata !== null)
+                                            @php
+                                                $signatureStatus = $row['signature_status'] ?? null;
+                                                $manifestStatus = $row['manifest_status'] ?? null;
+                                                $trustStatus = $row['trust_status'] ?? null;
+                                                $reviewStatus = $row['review_status'] ?? null;
+                                                $signatureKeyId = $artifactMetadata['signature_key_id'] ?? null;
+                                            @endphp
                                             <div class="fi-in-text" style="font-size:0.75rem;margin-top:0.25rem;font-family:var(--mono-font-family),monospace">
-                                                {{ $artifactMetadata['status'] ?? 'quarantined' }} · {{ $artifactMetadata['path'] ?? '' }}
+                                                {{ $artifactMetadata['status'] ?? 'quarantined' }}
+                                                @if (! empty($artifactMetadata['path']))
+                                                    · {{ $artifactMetadata['path'] }}
+                                                @endif
+                                            </div>
+                                            <div style="margin-top:0.5rem;display:flex;flex-wrap:wrap;gap:0.35rem">
+                                                <x-filament::badge :color="$this->inspectionColor($signatureStatus, $inspectionColors)">
+                                                    Підпис: {{ $this->inspectionLabel($signatureStatus, $inspectionLabels) }}
+                                                </x-filament::badge>
+                                                <x-filament::badge :color="$this->inspectionColor($manifestStatus, $inspectionColors)">
+                                                    Manifest: {{ $this->inspectionLabel($manifestStatus, $inspectionLabels) }}
+                                                </x-filament::badge>
+                                                <x-filament::badge :color="$this->inspectionColor($trustStatus, $inspectionColors)">
+                                                    Trust: {{ $this->inspectionLabel($trustStatus, $inspectionLabels) }}
+                                                </x-filament::badge>
+                                                @if ($reviewStatus)
+                                                    <x-filament::badge :color="$this->inspectionColor($reviewStatus, $inspectionColors)">
+                                                        Review: {{ $this->inspectionLabel($reviewStatus, $inspectionLabels) }}
+                                                    </x-filament::badge>
+                                                @endif
+                                                @if ($signatureKeyId)
+                                                    <x-filament::badge color="gray">Key: {{ $signatureKeyId }}</x-filament::badge>
+                                                @endif
+                                            </div>
+                                            @if ($trustStatus === 'trusted')
+                                                <div class="fi-callout" style="margin-top:0.5rem;padding:0.5rem;--ctn-color:var(--success-600)">
+                                                    <div class="fi-in-text" style="font-size:0.8rem;color:#15803d">
+                                                        Artifact довірений (Trusted). Встановлення з quarantine буде доступне у наступній фазі.
+                                                    </div>
+                                                </div>
+                                            @elseif ($trustStatus === 'rejected')
+                                                <div class="fi-callout" style="margin-top:0.5rem;padding:0.5rem;--ctn-color:var(--danger-600)">
+                                                    <div class="fi-in-text" style="font-size:0.8rem;color:#b91c1c">
+                                                        Artifact відхилено (Rejected). Причина: {{ implode('; ', $artifactMetadata['artifact_diagnostics'] ?? []) ?: 'Невідома' }}.
+                                                        Встановлення заблоковано.
+                                                    </div>
+                                                </div>
+                                            @endif
+                                            <div style="margin-top:0.5rem">
+                                                <x-filament::button
+                                                    wire:click="inspectArtifact('{{ e($item->code) }}')"
+                                                    wire:loading.attr="disabled"
+                                                    wire:target="inspectArtifact('{{ e($item->code) }}')"
+                                                    color="info"
+                                                    size="sm"
+                                                    icon="heroicon-o-magnifying-glass"
+                                                >Перевірити artifact</x-filament::button>
                                             </div>
                                         @endif
                                     @endif

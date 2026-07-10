@@ -50,6 +50,8 @@ class AddonArtifactDownloadTest extends TestCase
      */
     private function configureRegistry(bool $downloadsEnabled, array $overrides = []): void
     {
+        $realTrust = config('addons-registry.trust', []);
+
         $config = array_merge([
             'enabled' => true,
             'url' => $this->registryUrl,
@@ -59,6 +61,7 @@ class AddonArtifactDownloadTest extends TestCase
             'verify_ssl' => true,
             'allow_localhost' => true,
             'mode' => 'read_only',
+            'trust' => $realTrust,
             'downloads' => [
                 'enabled' => $downloadsEnabled,
                 'disk' => 'addons',

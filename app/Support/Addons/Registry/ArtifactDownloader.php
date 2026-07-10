@@ -85,6 +85,33 @@ class ArtifactDownloader
             return ArtifactDownloadResult::failed('failed', ['Failed to store artifact.']);
         }
 
+        $trustConfig = $this->config['trust'] ?? [];
+        $requireSignature = (bool) ($trustConfig['require_signature'] ?? true);
+        $trustedKeys = is_array($trustConfig['trusted_keys'] ?? null) ? $trustConfig['trusted_keys'] : [];
+
+        $verifier = new ArtifactSignatureVerifier;
+        $signatureResult = $verifier->verify(
+            $artifact['signature'] ?? null,
+            $body,
+            $requireSignature,
+            $trustedKeys,
+        );
+
+        $inspector = new QuarantinedArtifactInspector;
+        $manifestResult = $inspector->inspect(
+            $diskInstance->path($path),
+            $item->code,
+            $item->version,
+        );
+
+        $evaluator = new ArtifactTrustEvaluator;
+        $trustResult = $evaluator->evaluate(
+            $calculatedHash === ($artifact['sha256'] ?? ''),
+            $signatureResult->status,
+            $manifestResult->status,
+            $requireSignature,
+        );
+
         $metadata = [
             'code' => $item->code,
             'version' => $item->version,
@@ -93,6 +120,20 @@ class ArtifactDownloader
             'size' => $artifact['size'],
             'downloaded_at' => now()->toIso8601String(),
             'status' => 'quarantined',
+            'signature_status' => $signatureResult->status,
+            'signature_checked_at' => now()->toIso8601String(),
+            'signature_key_id' => $signatureResult->keyId,
+            'manifest_status' => $manifestResult->status,
+            'manifest_checked_at' => now()->toIso8601String(),
+            'trust_status' => $trustResult->trustStatus,
+            'review_status' => 'pending',
+            'reviewed_at' => null,
+            'reviewed_by' => null,
+            'artifact_diagnostics' => array_values(array_unique([
+                ...$signatureResult->diagnostics,
+                ...$manifestResult->diagnostics,
+                ...$trustResult->diagnostics,
+            ])),
         ];
 
         $diskInstance->put($metadataPath, json_encode($metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
