@@ -209,9 +209,6 @@ class AddonManager
 
         try {
             app()->register($addon->service_provider);
-            $this->events->info($addon->code, 'service_provider_registered', 'Addon service provider registered.', [
-                'service_provider' => $addon->service_provider,
-            ]);
         } catch (Throwable $exception) {
             $this->markRuntimeFailure($addon, 'Addon boot failed: '.$exception->getMessage(), 'service_provider_failed', [
                 'service_provider' => $addon->service_provider,

@@ -21,6 +21,14 @@ class AddonLifecycle
             $this->assertDependenciesResolvable($addon, requireEnabled: false);
             $this->assertCompatible($addon);
 
+            if ($addon->is_installed && in_array($addon->status, [
+                SystemAddon::STATUS_INSTALLED,
+                SystemAddon::STATUS_ENABLED,
+                SystemAddon::STATUS_DISABLED,
+            ], true)) {
+                return $addon;
+            }
+
             $addon->forceFill([
                 'status' => SystemAddon::STATUS_INSTALLED,
                 'is_installed' => true,
@@ -46,6 +54,10 @@ class AddonLifecycle
             $this->assertDependenciesResolvable($addon, requireEnabled: true);
             $this->assertCompatible($addon);
             $this->assertManifestPresent($addon);
+
+            if ($addon->is_enabled && $addon->status === SystemAddon::STATUS_ENABLED) {
+                return $addon;
+            }
 
             if ($addon->service_provider && ! $this->serviceProviderIsAllowed($addon)) {
                 $this->fail($addon, 'Service provider is outside the allowed local addon namespace/path.');
@@ -73,6 +85,10 @@ class AddonLifecycle
         return DB::transaction(function () use ($code): SystemAddon {
             $addon = $this->addonOrFail($code);
 
+            if (! $addon->is_enabled && $addon->status === SystemAddon::STATUS_DISABLED) {
+                return $addon;
+            }
+
             $addon->forceFill([
                 'status' => SystemAddon::STATUS_DISABLED,
                 'is_enabled' => false,
@@ -91,6 +107,10 @@ class AddonLifecycle
     {
         return DB::transaction(function () use ($code): SystemAddon {
             $addon = $this->addonOrFail($code);
+
+            if (! $addon->is_installed && $addon->status === SystemAddon::STATUS_DISCOVERED) {
+                return $addon;
+            }
 
             $addon->forceFill([
                 'status' => SystemAddon::STATUS_DISCOVERED,
