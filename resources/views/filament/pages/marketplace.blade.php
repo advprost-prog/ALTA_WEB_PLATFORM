@@ -266,14 +266,14 @@
 
                             {{-- Remote-only / artifact notice --}}
                             @if ($status === 'remote_only' || $artifact !== null)
-                                <div class="fi-callout addon-marketplace-card__artifact" style="--ctn-color:var(--warning-600)">
+                                <div class="addon-marketplace-artifact">
                                     @if ($status === 'remote_only')
-                                        <div class="fi-in-text" style="font-size:0.8rem;color:#92400e">
-                                            Цей addon доступний тільки у registry (remote-only). Встановлення/оновлення недоступні.
+                                        <div class="addon-marketplace-artifact__notice">
+                                            Цей addon доступний тільки у registry. Встановлення та оновлення недоступні.
                                         </div>
                                     @endif
                                     @if ($artifact !== null)
-                                        <div class="addon-marketplace-card__artifact-header">
+                                        <div class="addon-marketplace-artifact__header">
                                             <strong>Artifact</strong>
                                             <x-filament::badge :color="match ($artifactStatus) {
                                                 'quarantined' => 'success',
@@ -284,28 +284,16 @@
                                                 default => 'gray',
                                             }">{{ $statusLabels[$artifactStatus] ?? $artifactStatus }}</x-filament::badge>
                                         </div>
-                                        <div class="fi-in-text addon-marketplace-card__technical-summary">
+                                        <dl class="addon-marketplace-artifact__meta">
                                             @if ($downloadsEnabled)
-                                                Розмір: <strong>{{ number_format($artifact['size'] ?? 0) }}</strong> байт
+                                                <dt>Розмір</dt><dd>{{ number_format($artifact['size'] ?? 0) }} байт</dd>
                                                 @if (! empty($artifact['sha256']))
-                                                    · SHA256: <strong>{{ Str::substr($artifact['sha256'], 0, 12) }}…</strong>
+                                                    <dt>SHA-256</dt><dd>{{ Str::substr($artifact['sha256'], 0, 12) }}…</dd>
                                                 @endif
                                             @else
-                                                · Завантаження вимкнено (ADDONS_REGISTRY_DOWNLOADS_ENABLED=false)
+                                                <dt>Download</dt><dd>Вимкнено</dd>
                                             @endif
-                                        </div>
-                                        @if ($downloadsEnabled && in_array($artifactStatus, ['not_downloaded', 'rejected', 'failed'], true))
-                                            <div style="margin-top:0.5rem">
-                                                <x-filament::button
-                                                    wire:click="downloadArtifact('{{ e($item->code) }}')"
-                                                    wire:loading.attr="disabled"
-                                                    wire:target="downloadArtifact('{{ e($item->code) }}')"
-                                                    color="primary"
-                                                    size="sm"
-                                                    icon="heroicon-o-arrow-down-tray"
-                                                >Завантажити artifact</x-filament::button>
-                                            </div>
-                                        @endif
+                                        </dl>
                                         @if ($artifactStatus === 'quarantined' && $artifactMetadata !== null)
                                             @php
                                                 $signatureStatus = $row['signature_status'] ?? null;
@@ -314,27 +302,27 @@
                                                 $reviewStatus = $row['review_status'] ?? null;
                                                 $signatureKeyId = $artifactMetadata['signature_key_id'] ?? null;
                                             @endphp
-                                            <div class="addon-marketplace-card__badges addon-marketplace-card__security">
-                                                <x-filament::badge :color="$this->inspectionColor($signatureStatus, $inspectionColors)">
+                                            <div class="addon-marketplace-artifact__statuses">
+                                                <x-filament::badge class="addon-marketplace-artifact__badge" :color="$this->inspectionColor($signatureStatus, $inspectionColors)">
                                                     {{ match ($signatureStatus) { 'valid' => 'Підпис дійсний', default => $this->inspectionLabel($signatureStatus, $inspectionLabels) } }}
                                                 </x-filament::badge>
-                                                <x-filament::badge :color="$this->inspectionColor($manifestStatus, $inspectionColors)">
+                                                <x-filament::badge class="addon-marketplace-artifact__badge" :color="$this->inspectionColor($manifestStatus, $inspectionColors)">
                                                     Manifest: {{ match ($manifestStatus) { 'valid' => 'валідний', 'manifest_missing' => 'відсутній', 'manifest_invalid' => 'некоректний', 'identity_mismatch' => 'code/version не збігаються', default => $this->inspectionLabel($manifestStatus, $inspectionLabels) } }}
                                                 </x-filament::badge>
-                                                <x-filament::badge :color="$this->inspectionColor($trustStatus, $inspectionColors)">
+                                                <x-filament::badge class="addon-marketplace-artifact__badge" :color="$this->inspectionColor($trustStatus, $inspectionColors)">
                                                     {{ match ($trustStatus) { 'trusted' => 'Довірений', default => $this->inspectionLabel($trustStatus, $inspectionLabels) } }}
                                                 </x-filament::badge>
                                                 @if ($reviewStatus)
-                                                    <x-filament::badge :color="$this->inspectionColor($reviewStatus, $inspectionColors)">
+                                                    <x-filament::badge class="addon-marketplace-artifact__badge" :color="$this->inspectionColor($reviewStatus, $inspectionColors)">
                                                         Review: {{ $row['review_label'] ?? $this->inspectionLabel($reviewStatus, $inspectionLabels) }}
                                                     </x-filament::badge>
                                                 @endif
                                                 @if ($signatureKeyId)
-                                                    <x-filament::badge color="gray">Key: {{ $signatureKeyId }}</x-filament::badge>
+                                                    <x-filament::badge class="addon-marketplace-artifact__badge" color="gray">Key: {{ $signatureKeyId }}</x-filament::badge>
                                                 @endif
                                             </div>
                                             @if ($reviewStatus)
-                                                <div class="fi-callout" style="margin-top:0.5rem;padding:0.65rem">
+                                                <div class="addon-marketplace-artifact__review">
                                                     <div class="fi-in-text" style="font-size:0.8rem">
                                                         <strong>Review:</strong> {{ $row['review_label'] ?? $reviewStatus }}
                                                         @if (! empty($row['reviewed_by_name']))
@@ -358,7 +346,7 @@
                                                         </ul>
                                                     @endif
                                                     @if (! empty($row['review_history']))
-                                                        <details class="addon-marketplace-card__details">
+                                                        <details class="addon-marketplace-artifact__details">
                                                             <summary>Історія перевірки ({{ count($row['review_history']) }})</summary>
                                                         <ul class="fi-in-text">
                                                             @foreach ($row['review_history'] as $entry)
@@ -370,7 +358,7 @@
                                                 </div>
                                             @endif
                                             @if ($canReview)
-                                                <div class="addon-marketplace-card__actions">
+                                                <div class="addon-marketplace-artifact__actions">
                                                     @if ($row['can_approve'] ?? false)
                                                         <x-filament::button wire:click="openApproveArtifactModal('{{ e($item->code) }}')" color="success" size="sm" title="Схвалити artifact" aria-label="Схвалити artifact">Схвалити</x-filament::button>
                                                     @endif
@@ -383,20 +371,20 @@
                                                 </div>
                                             @endif
                                             @if ($trustStatus === 'trusted')
-                                                <div class="fi-callout" style="margin-top:0.5rem;padding:0.5rem;--ctn-color:var(--success-600)">
+                                                <div class="addon-marketplace-artifact__notice addon-marketplace-artifact__notice--success">
                                                     <div class="fi-in-text" style="font-size:0.8rem;color:#15803d">
                                                         Artifact довірений (Trusted). Встановлення з quarantine буде доступне у наступній фазі.
                                                     </div>
                                                 </div>
                                             @elseif ($trustStatus === 'rejected')
-                                                <div class="fi-callout" style="margin-top:0.5rem;padding:0.5rem;--ctn-color:var(--danger-600)">
+                                                <div class="addon-marketplace-artifact__notice addon-marketplace-artifact__notice--danger">
                                                     <div class="fi-in-text" style="font-size:0.8rem;color:#b91c1c">
                                                         Artifact відхилено (Rejected). Причина: {{ implode('; ', $artifactMetadata['artifact_diagnostics'] ?? []) ?: 'Невідома' }}.
                                                         Встановлення заблоковано.
                                                     </div>
                                                 </div>
                                             @endif
-                                            <div class="addon-marketplace-card__actions">
+                                            <div class="addon-marketplace-artifact__actions">
                                                 <x-filament::button
                                                     wire:click="inspectArtifact('{{ e($item->code) }}')"
                                                     wire:loading.attr="disabled"
@@ -408,7 +396,7 @@
                                                     aria-label="Перевірити artifact"
                                                 >Перевірити</x-filament::button>
                                             </div>
-                                            <details class="addon-marketplace-card__details">
+                                            <details class="addon-marketplace-artifact__details">
                                                 <summary>Технічні дані</summary>
                                                 <dl class="addon-marketplace-card__meta addon-marketplace-card__technical">
                                                     <dt>Code</dt><dd>{{ $item->code }}</dd>
@@ -417,6 +405,20 @@
                                                     <dt>Quarantine</dt><dd>{{ $artifactMetadata['path'] ?? '—' }}</dd>
                                                 </dl>
                                             </details>
+                                        @endif
+                                        @if ($downloadsEnabled && in_array($artifactStatus, ['not_downloaded', 'rejected', 'failed'], true))
+                                            <div class="addon-marketplace-artifact__actions">
+                                                <x-filament::button
+                                                    wire:click="downloadArtifact('{{ e($item->code) }}')"
+                                                    wire:loading.attr="disabled"
+                                                    wire:target="downloadArtifact('{{ e($item->code) }}')"
+                                                    color="primary"
+                                                    size="sm"
+                                                    icon="heroicon-o-arrow-down-tray"
+                                                    title="Завантажити artifact"
+                                                    aria-label="Завантажити artifact"
+                                                >Завантажити</x-filament::button>
+                                            </div>
                                         @endif
                                     @endif
                                 </div>
