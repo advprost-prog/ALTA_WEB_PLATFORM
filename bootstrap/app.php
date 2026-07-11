@@ -1,11 +1,14 @@
 <?php
 
+use App\Console\Commands\Addons\ApproveAddonArtifact;
 use App\Console\Commands\Addons\DisableAddon;
 use App\Console\Commands\Addons\DiscoverAddons;
 use App\Console\Commands\Addons\DoctorAddons;
 use App\Console\Commands\Addons\EnableAddon;
 use App\Console\Commands\Addons\InstallAddon;
 use App\Console\Commands\Addons\ListAddons;
+use App\Console\Commands\Addons\RejectAddonArtifact;
+use App\Console\Commands\Addons\RevokeAddonArtifact;
 use App\Console\Commands\Addons\UninstallAddon;
 use App\Console\Commands\AdminGovernanceCheck;
 use App\Console\Commands\AiHealth;
@@ -29,12 +32,15 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withCommands([
         AdminGovernanceCheck::class,
+        ApproveAddonArtifact::class,
         DisableAddon::class,
         DiscoverAddons::class,
         DoctorAddons::class,
         EnableAddon::class,
         InstallAddon::class,
         ListAddons::class,
+        RejectAddonArtifact::class,
+        RevokeAddonArtifact::class,
         UninstallAddon::class,
         AiHealth::class,
         BackfillCustomersFromOrders::class,

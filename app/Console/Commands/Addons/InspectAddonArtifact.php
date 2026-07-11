@@ -39,6 +39,13 @@ class InspectAddonArtifact extends Command
         $this->line('  trust:           '.$report['trust_status'].' ('.$report['trust_label'].')');
         $this->line('  review:          '.($report['review_status'] ?? '—'));
 
+        $review = $manager->getArtifactReviewReport($code)['report'] ?? [];
+        $this->line('  reviewed_by:     '.($review['reviewed_by_name'] ?? '—'));
+        $this->line('  reviewed_at:     '.($review['reviewed_at'] ?? '—'));
+        $this->line('  review_note:     '.($review['review_note'] ?? '—'));
+        $this->line('  approval_stale:  '.(($review['approval_is_stale'] ?? false) ? 'yes' : 'no'));
+        $this->line('  review_history:  '.count($review['review_history'] ?? []));
+
         if ($report['diagnostics'] !== []) {
             $this->warn('Diagnostics:');
             foreach ($report['diagnostics'] as $diagnostic) {

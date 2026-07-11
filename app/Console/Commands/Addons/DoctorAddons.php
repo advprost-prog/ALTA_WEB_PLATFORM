@@ -148,7 +148,62 @@ class DoctorAddons extends Command
                 $signatureStatus = $row['signature_status'] ?? ($artifactMetadata['signature_status'] ?? null);
                 $manifestStatus = $row['manifest_status'] ?? ($artifactMetadata['manifest_status'] ?? null);
                 $trustStatus = $row['trust_status'] ?? ($artifactMetadata['trust_status'] ?? null);
+                $reviewStatus = $row['review_status'] ?? ($artifactMetadata['review_status'] ?? 'pending');
                 $requireSignature = (bool) (config('addons-registry.trust.require_signature') ?? true);
+
+                if ($reviewStatus === 'pending' && $trustStatus === 'trusted') {
+                    $info[] = $this->diagnostic('artifact_review_pending_trusted', 'Trusted artifact is awaiting manual review.', [
+                        $code.' review_status=pending.',
+                    ]);
+                }
+
+                if ($reviewStatus === 'approved') {
+                    $info[] = $this->diagnostic('artifact_review_approved', 'Artifact has been manually approved.', [
+                        $code.' review_status=approved.',
+                    ]);
+
+                    if ($row['approval_is_stale'] ?? false) {
+                        $issues[] = $this->diagnostic('artifact_approval_stale', 'Artifact approval integrity snapshot is stale.', [
+                            $code.' changed after approval and must be reviewed again.',
+                        ]);
+                    }
+
+                    if ($trustStatus !== 'trusted') {
+                        $issues[] = $this->diagnostic('artifact_approved_untrusted', 'Approved artifact is no longer trusted.', [
+                            $code.' trust_status='.($trustStatus ?? 'unknown').'.',
+                        ]);
+                    }
+
+                    if ($signatureStatus !== 'valid' || $manifestStatus !== 'valid') {
+                        $issues[] = $this->diagnostic('artifact_approved_integrity_invalid', 'Approved artifact has invalid signature or manifest state.', [
+                            $code.' signature='.($signatureStatus ?? 'unknown').', manifest='.($manifestStatus ?? 'unknown').'.',
+                        ]);
+                    }
+
+                    if (empty($row['reviewed_by']) || empty($row['reviewed_at'])) {
+                        $warnings[] = $this->diagnostic('artifact_review_missing_actor', 'Approved artifact review metadata is incomplete.', [
+                            $code.' requires reviewed_by and reviewed_at.',
+                        ]);
+                    }
+                }
+
+                if ($reviewStatus === 'rejected') {
+                    $warnings[] = $this->diagnostic('artifact_review_rejected', 'Artifact was manually rejected and remains in quarantine.', [
+                        $code.' review_status=rejected.',
+                    ]);
+                }
+
+                if ($reviewStatus === 'revoked') {
+                    $warnings[] = $this->diagnostic('artifact_review_revoked', 'Artifact approval was revoked.', [
+                        $code.' review_status=revoked.',
+                    ]);
+                }
+
+                if (! is_array($artifactMetadata['review_history'] ?? [])) {
+                    $warnings[] = $this->diagnostic('artifact_review_history_invalid', 'Artifact review history metadata is malformed.', [
+                        $code.' review_history must be an array.',
+                    ]);
+                }
 
                 if ($signatureStatus === 'missing' && $requireSignature) {
                     $warnings[] = $this->diagnostic('addon_artifact_unsigned_required', 'Quarantined artifact has no signature while signatures are required.', [

@@ -9,6 +9,10 @@ use App\Support\Addons\AddonRegistry;
 use App\Support\Addons\PlatformVersion;
 use App\Support\Addons\Registry\ArtifactDownloader;
 use App\Support\Addons\Registry\ArtifactDownloadResult;
+use App\Support\Addons\Registry\ArtifactReviewActor;
+use App\Support\Addons\Registry\ArtifactReviewManager;
+use App\Support\Addons\Registry\ArtifactReviewResult;
+use App\Support\Addons\Registry\ArtifactReviewStatus;
 use App\Support\Addons\Registry\ArtifactSignatureVerifier;
 use App\Support\Addons\Registry\ArtifactTrustEvaluator;
 use App\Support\Addons\Registry\QuarantinedArtifactInspector;
@@ -16,6 +20,7 @@ use App\Support\Addons\Registry\RegistryCatalog;
 use App\Support\Addons\Registry\RegistryClient;
 use App\Support\Addons\Registry\RegistryItem;
 use App\Support\Addons\Version\VersionComparator;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
@@ -30,6 +35,7 @@ final class MarketplaceManager
         private readonly VersionComparator $versionComparator = new VersionComparator,
         private readonly PlatformVersion $platformVersion = new PlatformVersion,
         private readonly ?RegistryCatalog $registryCatalog = null,
+        private readonly ?ArtifactReviewManager $reviewManager = null,
     ) {}
 
     /**
@@ -183,6 +189,7 @@ final class MarketplaceManager
             'manifest_status' => $artifactStatus['metadata']['manifest_status'] ?? null,
             'trust_status' => $artifactStatus['metadata']['trust_status'] ?? null,
             'review_status' => $artifactStatus['metadata']['review_status'] ?? null,
+            ...$this->reviewData($item->code),
         ];
     }
 
@@ -256,6 +263,7 @@ final class MarketplaceManager
             'manifest_status' => $artifactStatus['metadata']['manifest_status'] ?? null,
             'trust_status' => $artifactStatus['metadata']['trust_status'] ?? null,
             'review_status' => $artifactStatus['metadata']['review_status'] ?? null,
+            ...$this->reviewData($remoteItem->code),
         ];
     }
 
@@ -484,6 +492,12 @@ final class MarketplaceManager
 
         $storage->put($paths['metadataPath'], json_encode($metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
+        $reviewReport = $this->getArtifactReviewReport($code)['report'] ?? null;
+        if (is_array($reviewReport)) {
+            $metadata['approval_is_stale'] = (bool) ($reviewReport['approval_is_stale'] ?? false);
+            $storage->put($paths['metadataPath'], json_encode($metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        }
+
         $report = [
             'code' => $code,
             'version' => $item->version,
@@ -567,6 +581,111 @@ final class MarketplaceManager
         $report = $this->getArtifactInspectionReport($code);
 
         return $report['report']['trust_status'] ?? null;
+    }
+
+    /* ---------------------------------------------------------------------
+     | Quarantine review workflow (Phase 3.3)
+     | ------------------------------------------------------------------- */
+
+    public function approveArtifact(string $code, ?string $note, mixed $actor): ArtifactReviewResult
+    {
+        return $this->reviewManager()->approve($code, $note, $this->toActor($actor));
+    }
+
+    public function rejectArtifact(string $code, string $note, mixed $actor): ArtifactReviewResult
+    {
+        return $this->reviewManager()->reject($code, $note, $this->toActor($actor));
+    }
+
+    public function revokeArtifactApproval(string $code, ?string $note, mixed $actor): ArtifactReviewResult
+    {
+        return $this->reviewManager()->revoke($code, $note, $this->toActor($actor));
+    }
+
+    public function getArtifactReviewReport(string $code): array
+    {
+        return $this->reviewManager()->getReviewReport($code);
+    }
+
+    public function canApproveArtifact(string $code): bool
+    {
+        return $this->reviewManager()->canApprove($code);
+    }
+
+    public function canRejectArtifact(string $code): bool
+    {
+        return $this->reviewManager()->canReject($code);
+    }
+
+    public function canRevokeArtifact(string $code): bool
+    {
+        return $this->reviewManager()->canRevoke($code);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function getReviewBlockedReasons(string $code): array
+    {
+        return $this->reviewManager()->getReviewBlockedReasons($code);
+    }
+
+    private function reviewManager(): ArtifactReviewManager
+    {
+        return $this->reviewManager ?? app(ArtifactReviewManager::class);
+    }
+
+    private function toActor(mixed $actor): ArtifactReviewActor
+    {
+        if ($actor instanceof ArtifactReviewActor) {
+            return $actor;
+        }
+
+        if ($actor instanceof Authenticatable) {
+            return ArtifactReviewActor::fromUser($actor);
+        }
+
+        return ArtifactReviewActor::cli();
+    }
+
+    /**
+     * Merge review workflow data into a resolved marketplace row.
+     *
+     * @return array<string, mixed>
+     */
+    private function reviewData(string $code): array
+    {
+        $report = $this->reviewManager()->getReviewReport($code)['report'] ?? null;
+
+        if ($report === null) {
+            return [
+                'review_label' => ArtifactReviewStatus::label(ArtifactReviewStatus::PENDING),
+                'review_history' => [],
+                'reviewed_at' => null,
+                'reviewed_by' => null,
+                'reviewed_by_name' => null,
+                'review_note' => null,
+                'approval_is_stale' => false,
+                'can_approve' => false,
+                'can_reject' => false,
+                'can_revoke' => false,
+                'review_blocked_reasons' => [],
+            ];
+        }
+
+        return [
+            'review_label' => $report['review_label'],
+            'review_history' => $report['review_history'],
+            'reviewed_at' => $report['reviewed_at'],
+            'reviewed_by' => $report['reviewed_by'],
+            'reviewed_by_name' => $report['reviewed_by_name'],
+            'review_note' => $report['review_note'],
+            'approval_is_stale' => $report['approval_is_stale'],
+            'can_approve' => $report['can_approve'],
+            'can_reject' => $report['can_reject'],
+            'can_revoke' => $report['can_revoke'],
+            'review_blocked_reasons' => $report['review_blocked_reasons'],
+        ];
     }
 
     /**

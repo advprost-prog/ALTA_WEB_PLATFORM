@@ -2,11 +2,15 @@
 
 namespace App\Filament\Pages;
 
+use App\Policies\AddonArtifactReviewPolicy;
 use App\Support\Addons\Marketplace\CompatibilityStatus;
 use App\Support\Addons\Marketplace\MarketplaceItem;
 use App\Support\Addons\Marketplace\MarketplaceManager;
 use App\Support\Addons\Marketplace\MarketplaceStatus;
 use App\Support\Addons\Marketplace\UpdateStatus;
+use App\Support\Addons\Registry\ArtifactReviewActor;
+use App\Support\Addons\Registry\ArtifactReviewResult;
+use App\Support\Addons\Registry\ArtifactReviewStatus;
 use App\Support\Addons\Registry\RegistryCatalog;
 use BackedEnum;
 use Filament\Notifications\Notification;
@@ -40,9 +44,23 @@ class Marketplace extends Page
 
     public ?string $expandedCode = null;
 
+    // Review workflow modal state (Phase 3.3).
+    public ?string $reviewingArtifactCode = null;
+
+    public ?string $reviewAction = null;
+
+    public ?string $reviewNote = null;
+
+    public bool $reviewModalOpen = false;
+
     public function mount(): void
     {
         //
+    }
+
+    public function canReviewArtifacts(): bool
+    {
+        return AddonArtifactReviewPolicy::canReviewAddonArtifacts(auth()->user());
     }
 
     /**
@@ -71,6 +89,9 @@ class Marketplace extends Page
             'compatibilityColors' => CompatibilityStatus::COLORS,
             'inspectionLabels' => $this->getInspectionLabels(),
             'inspectionColors' => $this->getInspectionColors(),
+            'reviewLabels' => ArtifactReviewStatus::LABELS,
+            'reviewColors' => ArtifactReviewStatus::COLORS,
+            'canReview' => $this->canReviewArtifacts(),
         ];
     }
 
@@ -349,6 +370,132 @@ class Marketplace extends Page
                 ->danger()
                 ->send();
         }
+    }
+
+    public function openApproveArtifactModal(string $code): void
+    {
+        $this->openReviewModal($code, 'approve');
+    }
+
+    public function openRejectArtifactModal(string $code): void
+    {
+        $this->openReviewModal($code, 'reject');
+    }
+
+    public function openRevokeArtifactModal(string $code): void
+    {
+        $this->openReviewModal($code, 'revoke');
+    }
+
+    private function openReviewModal(string $code): void
+    {
+        $this->guardCode($code);
+
+        if (! $this->canReviewArtifacts()) {
+            Notification::make()
+                ->title('Дія заборонена')
+                ->body('Тільки адміністратори можуть виконувати review artifact.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        $this->reviewingArtifactCode = $code;
+        $this->reviewAction = func_get_arg(1);
+        $this->reviewNote = null;
+        $this->reviewModalOpen = true;
+    }
+
+    public function closeReviewModal(): void
+    {
+        $this->reviewModalOpen = false;
+        $this->reviewingArtifactCode = null;
+        $this->reviewAction = null;
+        $this->reviewNote = null;
+    }
+
+    public function approveArtifact(): void
+    {
+        $this->submitReview('approve', fn (MarketplaceManager $manager, string $code, ?string $note, $actor) => $manager->approveArtifact($code, $note, $actor));
+    }
+
+    public function rejectArtifact(): void
+    {
+        $this->submitReview('reject', fn (MarketplaceManager $manager, string $code, ?string $note, $actor) => $manager->rejectArtifact($code, (string) $note, $actor));
+    }
+
+    public function revokeArtifactApproval(): void
+    {
+        $this->submitReview('revoke', fn (MarketplaceManager $manager, string $code, ?string $note, $actor) => $manager->revokeArtifactApproval($code, $note, $actor));
+    }
+
+    /**
+     * @param  callable(MarketplaceManager, string, ?string, mixed): ArtifactReviewResult  $operation
+     */
+    private function submitReview(string $action, callable $operation): void
+    {
+        $code = (string) $this->reviewingArtifactCode;
+        $this->guardCode($code);
+
+        if (! $this->canReviewArtifacts()) {
+            Notification::make()
+                ->title('Дія заборонена')
+                ->body('Тільки адміністратори можуть виконувати review artifact.')
+                ->danger()
+                ->send();
+
+            $this->closeReviewModal();
+
+            return;
+        }
+
+        $note = trim((string) $this->reviewNote);
+
+        $this->validate([
+            'reviewNote' => $action === 'reject' && (bool) config('addons-registry.review.require_note_on_reject', true)
+                ? ['required', 'string', 'max:2000']
+                : ['nullable', 'string', 'max:2000'],
+        ], [
+            'reviewNote.required' => 'Вкажіть причину відхилення artifact.',
+            'reviewNote.max' => 'Review note не може перевищувати 2000 символів.',
+        ]);
+
+        try {
+            $result = $operation(app(MarketplaceManager::class), $code, $note, ArtifactReviewActor::fromUser(auth()->user()));
+        } catch (RuntimeException $exception) {
+            Notification::make()
+                ->title('Review не виконано')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        if (! $result->success) {
+            Notification::make()
+                ->title('Review не виконано')
+                ->body(implode(' ', $result->diagnostics) ?: 'Операцію заблоковано.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        $labels = [
+            'approve' => 'Artifact схвалено',
+            'reject' => 'Artifact відхилено',
+            'revoke' => 'Схвалення відкликано',
+        ];
+
+        Notification::make()
+            ->title($labels[$action] ?? 'Review виконано')
+            ->body('['.$code.'] review status: '.$result->label().'.')
+            ->success()
+            ->send();
+
+        $this->closeReviewModal();
     }
 
     private function guardCode(string $code): void

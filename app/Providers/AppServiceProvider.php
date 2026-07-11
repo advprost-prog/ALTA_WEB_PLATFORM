@@ -2,11 +2,14 @@
 
 namespace App\Providers;
 
+use App\Enums\UserRole;
 use App\Models\Category;
+use App\Models\User;
 use App\Services\Commerce\ProductPricingService;
 use App\Services\Themes\ThemeResolver;
-use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\View;
+use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -23,6 +26,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Gate::define('review-addon-artifacts', static function (?User $user): bool {
+            if ($user === null) {
+                return false;
+            }
+
+            return $user->role === UserRole::Admin;
+        });
+
         View::composer(['layouts.storefront', 'storefront.*'], function ($view): void {
             $request = request();
             $storefrontPayload = $request->attributes->get('storefront_payload');

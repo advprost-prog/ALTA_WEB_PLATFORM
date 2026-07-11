@@ -337,6 +337,53 @@
                                                     <x-filament::badge color="gray">Key: {{ $signatureKeyId }}</x-filament::badge>
                                                 @endif
                                             </div>
+                                            @if ($reviewStatus)
+                                                <div class="fi-callout" style="margin-top:0.5rem;padding:0.65rem">
+                                                    <div class="fi-in-text" style="font-size:0.8rem">
+                                                        <strong>Review:</strong> {{ $row['review_label'] ?? $reviewStatus }}
+                                                        @if (! empty($row['reviewed_by_name']))
+                                                            · <strong>Reviewed by:</strong> {{ $row['reviewed_by_name'] }}
+                                                        @endif
+                                                        @if (! empty($row['reviewed_at']))
+                                                            · <strong>Reviewed at:</strong> {{ $row['reviewed_at'] }}
+                                                        @endif
+                                                    </div>
+                                                    @if (! empty($row['review_note']))
+                                                        <div class="fi-in-text" style="font-size:0.8rem;margin-top:0.25rem"><strong>Review note:</strong> {{ $row['review_note'] }}</div>
+                                                    @endif
+                                                    @if ($row['approval_is_stale'] ?? false)
+                                                        <div class="fi-in-text" style="font-size:0.8rem;margin-top:0.4rem;color:#b91c1c"><strong>Approval stale:</strong> integrity artifact змінилася після схвалення.</div>
+                                                    @endif
+                                                    @if (! empty($row['review_blocked_reasons']))
+                                                        <ul class="fi-in-text" style="font-size:0.75rem;margin-top:0.4rem;color:#92400e">
+                                                            @foreach ($row['review_blocked_reasons'] as $reason)
+                                                                <li>{{ $reason }}</li>
+                                                            @endforeach
+                                                        </ul>
+                                                    @endif
+                                                    @if (! empty($row['review_history']))
+                                                        <div class="fi-in-text" style="font-size:0.75rem;margin-top:0.4rem"><strong>Review history</strong></div>
+                                                        <ul class="fi-in-text" style="font-size:0.75rem">
+                                                            @foreach ($row['review_history'] as $entry)
+                                                                <li>{{ $entry['action'] ?? 'unknown' }} · {{ $entry['actor_name'] ?? '—' }} · {{ $entry['created_at'] ?? '—' }}@if (! empty($entry['note'])) · {{ $entry['note'] }}@endif</li>
+                                                            @endforeach
+                                                        </ul>
+                                                    @endif
+                                                </div>
+                                            @endif
+                                            @if ($canReview)
+                                                <div style="margin-top:0.5rem;display:flex;gap:0.35rem;flex-wrap:wrap">
+                                                    @if ($row['can_approve'] ?? false)
+                                                        <x-filament::button wire:click="openApproveArtifactModal('{{ e($item->code) }}')" color="success" size="sm">Схвалити artifact</x-filament::button>
+                                                    @endif
+                                                    @if ($row['can_reject'] ?? false)
+                                                        <x-filament::button wire:click="openRejectArtifactModal('{{ e($item->code) }}')" color="danger" size="sm">Відхилити artifact</x-filament::button>
+                                                    @endif
+                                                    @if ($row['can_revoke'] ?? false)
+                                                        <x-filament::button wire:click="openRevokeArtifactModal('{{ e($item->code) }}')" color="warning" size="sm">Відкликати схвалення</x-filament::button>
+                                                    @endif
+                                                </div>
+                                            @endif
                                             @if ($trustStatus === 'trusted')
                                                 <div class="fi-callout" style="margin-top:0.5rem;padding:0.5rem;--ctn-color:var(--success-600)">
                                                     <div class="fi-in-text" style="font-size:0.8rem;color:#15803d">
@@ -467,5 +514,31 @@
             </div>
         @endif
 
+        @if ($reviewModalOpen)
+            <div role="dialog" aria-modal="true" class="fi-modal-window" style="position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:rgba(0,0,0,.45);padding:1rem">
+                <div style="width:min(36rem,100%);border-radius:0.75rem;background:white;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.25)">
+                    <h2 style="font-size:1.1rem;font-weight:700">
+                        {{ match ($reviewAction) { 'approve' => 'Схвалити artifact', 'reject' => 'Відхилити artifact', 'revoke' => 'Відкликати схвалення', default => 'Review artifact' } }}
+                    </h2>
+                    <p style="margin-top:0.4rem">Code: <strong>{{ $reviewingArtifactCode }}</strong></p>
+                    <label style="display:block;margin-top:1rem;font-weight:600" for="review-note">
+                        {{ $reviewAction === 'reject' ? 'Причина відхилення' : 'Review note (необов’язково)' }}
+                    </label>
+                    <textarea id="review-note" wire:model="reviewNote" maxlength="2000" rows="4" style="margin-top:0.35rem;width:100%;border:1px solid #d1d5db;border-radius:0.5rem;padding:0.65rem"></textarea>
+                    @error('reviewNote') <p style="color:#b91c1c;font-size:0.8rem">{{ $message }}</p> @enderror
+                    <p style="margin-top:0.75rem;font-size:0.8rem;color:#92400e">Artifact не буде встановлено, розпаковано або виконано.</p>
+                    <div style="margin-top:1rem;display:flex;justify-content:flex-end;gap:0.5rem">
+                        <x-filament::button wire:click="closeReviewModal" color="gray">Скасувати</x-filament::button>
+                        @if ($reviewAction === 'approve')
+                            <x-filament::button wire:click="approveArtifact" color="success">Підтвердити схвалення</x-filament::button>
+                        @elseif ($reviewAction === 'reject')
+                            <x-filament::button wire:click="rejectArtifact" color="danger">Підтвердити відхилення</x-filament::button>
+                        @elseif ($reviewAction === 'revoke')
+                            <x-filament::button wire:click="revokeArtifactApproval" color="warning">Підтвердити відкликання</x-filament::button>
+                        @endif
+                    </div>
+                </div>
+            </div>
+        @endif
     </div>
 </x-filament-panels::page>

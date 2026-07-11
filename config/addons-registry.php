@@ -84,4 +84,29 @@ return [
         'allowed_extensions' => ['zip'],
     ],
 
+    /*
+     |--------------------------------------------------------------------------
+     | Review policy
+     |--------------------------------------------------------------------------
+     |
+     | Manual quarantine review workflow for remote artifacts (Phase 3.3).
+     |
+     | - enabled: master switch for the review workflow.
+     | - require_trusted: approve is only allowed for artifacts with
+     |   trust_status = trusted (verified signature + valid manifest + checksum).
+     | - require_note_on_reject: reject requires a non-empty reason.
+     | - allow_revoke: previously approved artifacts can have approval revoked.
+     |
+     | Review is administrative metadata only. It never unpacks, installs, or
+     | executes artifact code. Approving does NOT make the addon installable;
+     | a later unpack/install phase is still required.
+     */
+
+    'review' => [
+        'enabled' => env('ADDONS_REGISTRY_REVIEW_ENABLED', true),
+        'require_trusted' => env('ADDONS_REGISTRY_REVIEW_REQUIRE_TRUSTED', true),
+        'require_note_on_reject' => env('ADDONS_REGISTRY_REVIEW_REQUIRE_NOTE_ON_REJECT', true),
+        'allow_revoke' => env('ADDONS_REGISTRY_REVIEW_ALLOW_REVOKE', true),
+    ],
+
 ];
