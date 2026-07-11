@@ -205,6 +205,22 @@ class DoctorAddons extends Command
                     ]);
                 }
 
+                $stagingEnabled = (bool) config('addons-registry.staging.enabled', false);
+                $stagingStatus = $artifactMetadata['staging_status'] ?? 'not_staged';
+                if (! $stagingEnabled) {
+                    $info[] = $this->diagnostic('artifact_staging_disabled', 'Artifact staging is disabled.', [$code]);
+                } elseif ($stagingStatus === 'staged') {
+                    $info[] = $this->diagnostic('artifact_staged', 'Artifact has a staged copy; it is not installed.', [$code]);
+                } elseif (($artifactMetadata['staging_is_stale'] ?? false) || $stagingStatus === 'stale') {
+                    $issues[] = $this->diagnostic('artifact_staging_stale', 'Artifact staging fingerprint is stale.', [$code]);
+                } elseif ($reviewStatus === 'approved' && $trustStatus === 'trusted') {
+                    $info[] = $this->diagnostic('artifact_ready_for_staging', 'Artifact is trusted and approved for staging.', [$code]);
+                } elseif ($reviewStatus !== 'approved') {
+                    $warnings[] = $this->diagnostic('artifact_staging_blocked_review', 'Artifact staging is blocked by review status.', [$code]);
+                } elseif ($trustStatus !== 'trusted') {
+                    $issues[] = $this->diagnostic('artifact_staging_blocked_trust', 'Artifact staging is blocked by trust status.', [$code]);
+                }
+
                 if ($signatureStatus === 'missing' && $requireSignature) {
                     $warnings[] = $this->diagnostic('addon_artifact_unsigned_required', 'Quarantined artifact has no signature while signatures are required.', [
                         $code.' artifact is unsigned; installs will be blocked until signed.',

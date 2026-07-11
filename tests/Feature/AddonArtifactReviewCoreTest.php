@@ -9,6 +9,7 @@ use App\Support\Addons\Registry\ArtifactReviewActor;
 use App\Support\Addons\Registry\ArtifactReviewManager;
 use App\Support\Addons\Registry\ArtifactReviewStatus;
 use App\Support\Addons\Registry\ArtifactSignatureVerifier;
+use App\Support\Addons\Registry\ArtifactStagingManager;
 use App\Support\Addons\Registry\ArtifactTrustEvaluator;
 use App\Support\Addons\Registry\QuarantinedArtifactInspector;
 use App\Support\Addons\Registry\RegistryCatalog;
@@ -248,6 +249,30 @@ class AddonArtifactReviewCoreTest extends TestCase
     {
         $this->assertInstanceOf(ArtifactReviewManager::class, app(ArtifactReviewManager::class));
         $this->assertInstanceOf(MarketplaceManager::class, app(MarketplaceManager::class));
+    }
+
+    public function test_approved_artifact_can_be_staged_idempotently_and_unstaged_safely(): void
+    {
+        $review = $this->prepareArtifact();
+        $this->assertTrue($review->approve(self::CODE, 'stage', ArtifactReviewActor::cli('test'))->success);
+        config(['addons-registry.staging.enabled' => true]);
+
+        $manager = app(ArtifactStagingManager::class);
+        $first = $manager->stage(self::CODE, ArtifactReviewActor::cli('test'));
+        $this->assertTrue($first->success, implode(' ', $first->diagnostics));
+        $this->assertSame('staged', $this->metadata()['staging_status']);
+        $this->assertTrue(Storage::disk('addons')->exists($first->stagingPath.'/staging.json'));
+        $this->assertTrue(Storage::disk('addons')->exists($this->metadataPath));
+
+        $second = $manager->stage(self::CODE, ArtifactReviewActor::cli('test'));
+        $this->assertTrue($second->success);
+        $this->assertSame($first->stagingPath, $second->stagingPath);
+
+        $unstaged = $manager->unstage(self::CODE, 'cleanup', ArtifactReviewActor::cli('test'));
+        $this->assertTrue($unstaged->success);
+        $this->assertFalse(Storage::disk('addons')->exists($first->stagingPath));
+        $this->assertTrue(Storage::disk('addons')->exists($this->metadataPath));
+        $this->assertSame('approved', $this->metadata()['review_status']);
     }
 
     private function prepareArtifact(bool $trusted = true): ArtifactReviewManager

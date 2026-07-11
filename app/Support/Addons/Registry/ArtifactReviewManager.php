@@ -127,6 +127,7 @@ final class ArtifactReviewManager
         $metadata['reviewed_by'] = $actor->id;
         $metadata['reviewed_by_name'] = $actor->name;
         $metadata['review_note'] = $note;
+        $this->markStagingStale($metadata);
         $metadata['review_history'] = $this->appendHistory(
             $metadata['review_history'] ?? null,
             'rejected',
@@ -189,6 +190,7 @@ final class ArtifactReviewManager
         $metadata['approval_revoked_by'] = $actor->id;
         $metadata['approval_revoked_by_name'] = $actor->name;
         $metadata['approval_revoke_note'] = $note;
+        $this->markStagingStale($metadata);
         $metadata['review_history'] = $this->appendHistory(
             $metadata['review_history'] ?? null,
             'revoked',
@@ -518,6 +520,15 @@ final class ArtifactReviewManager
             $metadataPath,
             json_encode($metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         );
+    }
+
+    /** @param array<string, mixed> $metadata */
+    private function markStagingStale(array &$metadata): void
+    {
+        if (($metadata['staging_status'] ?? null) === ArtifactStagingStatus::STAGED) {
+            $metadata['staging_status'] = ArtifactStagingStatus::STALE;
+            $metadata['staging_is_stale'] = true;
+        }
     }
 
     /**

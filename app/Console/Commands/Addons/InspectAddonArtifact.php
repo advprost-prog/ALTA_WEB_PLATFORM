@@ -3,6 +3,7 @@
 namespace App\Console\Commands\Addons;
 
 use App\Support\Addons\Marketplace\MarketplaceManager;
+use App\Support\Addons\Registry\ArtifactStagingManager;
 use Illuminate\Console\Command;
 
 class InspectAddonArtifact extends Command
@@ -45,6 +46,12 @@ class InspectAddonArtifact extends Command
         $this->line('  review_note:     '.($review['review_note'] ?? '—'));
         $this->line('  approval_stale:  '.(($review['approval_is_stale'] ?? false) ? 'yes' : 'no'));
         $this->line('  review_history:  '.count($review['review_history'] ?? []));
+        $staging = app(ArtifactStagingManager::class)->getStagingReport($code)['review'] ?? [];
+        $this->line('  staging_status:  '.($staging['staging_status'] ?? 'not_staged'));
+        $this->line('  staging_path:    '.($staging['staging_path'] ?? '—'));
+        $this->line('  staging_stale:   '.(($staging['staging_is_stale'] ?? false) ? 'yes' : 'no'));
+        $this->line('  staged_at:       '.($staging['staged_at'] ?? '—'));
+        $this->line('  staged_by:       '.($staging['staged_by_name'] ?? '—'));
 
         if ($report['diagnostics'] !== []) {
             $this->warn('Diagnostics:');

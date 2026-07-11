@@ -109,4 +109,18 @@ return [
         'allow_revoke' => env('ADDONS_REGISTRY_REVIEW_ALLOW_REVOKE', true),
     ],
 
+    'staging' => [
+        'enabled' => env('ADDONS_REGISTRY_STAGING_ENABLED', false),
+        'disk' => env('ADDONS_REGISTRY_STAGING_DISK', 'addons'),
+        'path' => env('ADDONS_REGISTRY_STAGING_PATH', 'addons/staging'),
+        'require_trusted' => env('ADDONS_REGISTRY_STAGING_REQUIRE_TRUSTED', true),
+        'require_approved' => env('ADDONS_REGISTRY_STAGING_REQUIRE_APPROVED', true),
+        'block_stale_approval' => env('ADDONS_REGISTRY_STAGING_BLOCK_STALE', true),
+        'max_entries' => (int) env('ADDONS_REGISTRY_STAGING_MAX_ENTRIES', 2000),
+        'max_uncompressed_size' => (int) env('ADDONS_REGISTRY_STAGING_MAX_UNCOMPRESSED_SIZE', 104857600),
+        'max_single_file_size' => (int) env('ADDONS_REGISTRY_STAGING_MAX_FILE_SIZE', 20971520),
+        'max_compression_ratio' => (int) env('ADDONS_REGISTRY_STAGING_MAX_COMPRESSION_RATIO', 100),
+        'max_path_length' => (int) env('ADDONS_REGISTRY_STAGING_MAX_PATH_LENGTH', 240),
+    ],
+
 ];
