@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\UserRole;
 use App\Filament\Pages\Marketplace;
+use App\Policies\AddonArtifactStagingPolicy;
 use App\Support\Addons\Marketplace\MarketplaceManager;
 use App\Support\Addons\Registry\ArtifactReviewActor;
 use App\Support\Addons\Registry\ArtifactReviewManager;
@@ -272,6 +273,46 @@ class AddonArtifactReviewCoreTest extends TestCase
         $this->assertTrue($unstaged->success);
         $this->assertFalse(Storage::disk('addons')->exists($first->stagingPath));
         $this->assertTrue(Storage::disk('addons')->exists($this->metadataPath));
+        $this->assertSame('approved', $this->metadata()['review_status']);
+    }
+
+    public function test_staging_policy_and_livewire_workflow_are_authorized(): void
+    {
+        $review = $this->prepareArtifact();
+        $admin = $this->createUserWithRole(UserRole::Admin);
+        $managerUser = $this->createUserWithRole(UserRole::Manager);
+        $this->assertTrue(AddonArtifactStagingPolicy::canManage($admin));
+        $this->assertFalse(AddonArtifactStagingPolicy::canManage($managerUser));
+        $this->assertTrue($admin->can('stage-addon-artifacts'));
+        $this->assertFalse($managerUser->can('stage-addon-artifacts'));
+
+        $this->assertTrue($review->approve(self::CODE, 'stage UI', ArtifactReviewActor::cli('test'))->success);
+        config(['addons-registry.staging.enabled' => true]);
+        $this->actingAs($admin);
+
+        Livewire::test(Marketplace::class)
+            ->call('openStageArtifactModal', self::CODE)
+            ->assertSet('stagingModalOpen', true)
+            ->assertSee('Staging не встановлює addon')
+            ->call('stageArtifact')
+            ->assertSet('stagingModalOpen', false);
+        $metadata = $this->metadata();
+        $this->assertSame('staged', $metadata['staging_status']);
+
+        $before = Storage::disk('addons')->get($this->metadataPath);
+        $this->actingAs($managerUser);
+        Livewire::test(Marketplace::class)
+            ->set('stagingArtifactCode', self::CODE)
+            ->call('unstageArtifact');
+        $this->assertSame($before, Storage::disk('addons')->get($this->metadataPath));
+
+        $this->actingAs($admin);
+        Livewire::test(Marketplace::class)
+            ->call('openUnstageArtifactModal', self::CODE)
+            ->assertSet('stagingModalOpen', true)
+            ->assertSee('Quarantine ZIP')
+            ->call('unstageArtifact')
+            ->assertSet('stagingModalOpen', false);
         $this->assertSame('approved', $this->metadata()['review_status']);
     }
 

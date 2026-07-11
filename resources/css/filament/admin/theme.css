@@ -22,6 +22,97 @@
     gap: 0.5rem;
 }
 
+.addon-marketplace-staging {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+    flex-direction: column;
+    gap: 0.5rem;
+    border-top: 1px solid var(--gray-200);
+    padding-top: 0.625rem;
+    overflow-wrap: anywhere;
+}
+
+.addon-marketplace-staging__header,
+.addon-marketplace-staging__actions,
+.addon-marketplace-staging-modal__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.addon-marketplace-staging__header {
+    justify-content: space-between;
+}
+
+.addon-marketplace-staging__meta {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.25rem 0.625rem;
+    font-size: 0.8rem;
+}
+
+.addon-marketplace-staging__meta dt {
+    color: var(--gray-500);
+}
+
+.addon-marketplace-staging__danger {
+    color: var(--danger-600);
+}
+
+.addon-marketplace-staging ul {
+    padding-left: 1rem;
+    color: var(--warning-700);
+    font-size: 0.78rem;
+    list-style: disc;
+}
+
+.addon-marketplace-staging-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgb(0 0 0 / 45%);
+}
+
+.addon-marketplace-staging-modal__window {
+    display: flex;
+    width: min(40rem, calc(100vw - 2rem));
+    max-height: calc(100vh - 3rem);
+    flex-direction: column;
+    gap: 0.75rem;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+    border-radius: 0.75rem;
+    background: white;
+    padding: 1.25rem;
+    box-shadow: 0 20px 50px rgb(0 0 0 / 25%);
+}
+
+.dark .addon-marketplace-staging-modal__window {
+    background: var(--gray-900);
+}
+
+.addon-marketplace-staging-modal__window h2 {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.addon-marketplace-staging-modal__window textarea {
+    width: 100%;
+    max-width: 100%;
+    border: 1px solid var(--gray-300);
+    border-radius: 0.5rem;
+    padding: 0.65rem;
+}
+
+.addon-marketplace-staging-modal__actions {
+    justify-content: flex-end;
+}
+
 .addon-marketplace__grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));

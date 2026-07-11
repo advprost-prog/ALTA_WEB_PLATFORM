@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Enums\UserRole;
 use App\Models\Category;
 use App\Models\User;
+use App\Policies\AddonArtifactStagingPolicy;
 use App\Services\Commerce\ProductPricingService;
 use App\Services\Themes\ThemeResolver;
 use Illuminate\Support\Facades\Gate;
@@ -33,6 +34,8 @@ class AppServiceProvider extends ServiceProvider
 
             return $user->role === UserRole::Admin;
         });
+
+        Gate::define('stage-addon-artifacts', static fn (User $user): bool => AddonArtifactStagingPolicy::canManage($user));
 
         View::composer(['layouts.storefront', 'storefront.*'], function ($view): void {
             $request = request();

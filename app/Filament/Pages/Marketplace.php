@@ -15,6 +15,7 @@ use App\Support\Addons\Registry\RegistryCatalog;
 use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Support\Facades\Gate;
 use RuntimeException;
 use UnitEnum;
 
@@ -53,6 +54,14 @@ class Marketplace extends Page
 
     public bool $reviewModalOpen = false;
 
+    public ?string $stagingArtifactCode = null;
+
+    public ?string $stagingAction = null;
+
+    public ?string $stagingNote = null;
+
+    public bool $stagingModalOpen = false;
+
     public function mount(): void
     {
         //
@@ -61,6 +70,11 @@ class Marketplace extends Page
     public function canReviewArtifacts(): bool
     {
         return AddonArtifactReviewPolicy::canReviewAddonArtifacts(auth()->user());
+    }
+
+    public function canManageStaging(): bool
+    {
+        return Gate::allows('stage-addon-artifacts');
     }
 
     /**
@@ -92,6 +106,7 @@ class Marketplace extends Page
             'reviewLabels' => ArtifactReviewStatus::LABELS,
             'reviewColors' => ArtifactReviewStatus::COLORS,
             'canReview' => $this->canReviewArtifacts(),
+            'canManageStaging' => $this->canManageStaging(),
         ];
     }
 
@@ -413,6 +428,71 @@ class Marketplace extends Page
         $this->reviewingArtifactCode = null;
         $this->reviewAction = null;
         $this->reviewNote = null;
+    }
+
+    public function openStageArtifactModal(string $code): void
+    {
+        $this->openStagingModal($code, 'stage');
+    }
+
+    public function openUnstageArtifactModal(string $code): void
+    {
+        $this->openStagingModal($code, 'unstage');
+    }
+
+    private function openStagingModal(string $code, string $action): void
+    {
+        $this->guardCode($code);
+        if (! $this->canManageStaging()) {
+            Notification::make()->title('Дія заборонена')->body('Тільки адміністратори можуть керувати staging artifact.')->danger()->send();
+
+            return;
+        }
+        $this->stagingArtifactCode = $code;
+        $this->stagingAction = $action;
+        $this->stagingNote = null;
+        $this->stagingModalOpen = true;
+    }
+
+    public function closeStagingModal(): void
+    {
+        $this->stagingArtifactCode = null;
+        $this->stagingAction = null;
+        $this->stagingNote = null;
+        $this->stagingModalOpen = false;
+    }
+
+    public function stageArtifact(): void
+    {
+        $this->submitStaging('stage');
+    }
+
+    public function unstageArtifact(): void
+    {
+        $this->submitStaging('unstage');
+    }
+
+    private function submitStaging(string $action): void
+    {
+        $code = (string) $this->stagingArtifactCode;
+        $this->guardCode($code);
+        if (! $this->canManageStaging()) {
+            Notification::make()->title('Дія заборонена')->body('Staging metadata не змінено.')->danger()->send();
+
+            return;
+        }
+        $actor = ArtifactReviewActor::fromUser(auth()->user());
+        $manager = app(MarketplaceManager::class);
+        $result = $action === 'stage'
+            ? $manager->stageArtifact($code, $actor)
+            : $manager->unstageArtifact($code, trim((string) $this->stagingNote) ?: null, $actor);
+        if (! $result->success) {
+            Notification::make()->title('Staging operation не виконано')->body(implode(' ', $result->blockedReasons ?: $result->diagnostics) ?: $result->message)->danger()->send();
+
+            return;
+        }
+        Notification::make()->title($action === 'stage' ? 'Artifact підготовлено у staging' : 'Staging-копію видалено')->body($result->message)->success()->send();
+        $this->closeStagingModal();
     }
 
     public function approveArtifact(): void

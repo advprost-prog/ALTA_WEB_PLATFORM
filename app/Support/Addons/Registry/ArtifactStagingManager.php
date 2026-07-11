@@ -106,7 +106,36 @@ final class ArtifactStagingManager
 
     public function getStagingReport(string $code): array
     {
-        return $this->resolve($code) ?? ['code' => $code, 'status' => ArtifactStagingStatus::NOT_STAGED];
+        $resolved = $this->resolve($code);
+        if ($resolved === null) {
+            return ['success' => false, 'code' => $code, 'staging_status' => ArtifactStagingStatus::NOT_STAGED];
+        }
+        $summary = $resolved['review'];
+        $staging = [];
+        $path = $summary['staging_path'] ?? null;
+        if (is_string($path) && Storage::disk($resolved['disk'])->exists($path.'/staging.json')) {
+            $decoded = json_decode(Storage::disk($resolved['disk'])->get($path.'/staging.json'), true);
+            $staging = is_array($decoded) ? $decoded : [];
+        }
+
+        return [
+            'success' => true, 'code' => $code, 'version' => $resolved['version'],
+            'staging_enabled' => (bool) Config::get('addons-registry.staging.enabled', false),
+            'staging_status' => $summary['staging_status'] ?? ArtifactStagingStatus::NOT_STAGED,
+            'staging_path' => $path, 'staged_at' => $summary['staged_at'] ?? null,
+            'staged_by' => $summary['staged_by'] ?? null, 'staged_by_name' => $summary['staged_by_name'] ?? null,
+            'staging_file_count' => $staging['file_count'] ?? 0,
+            'staging_total_size' => $staging['total_uncompressed_size'] ?? 0,
+            'staging_inventory_hash' => $summary['staging_inventory_hash'] ?? null,
+            'staging_artifact_sha256' => $summary['staging_artifact_sha256'] ?? null,
+            'approval_snapshot_hash' => $staging['fingerprint']['approval_snapshot_hash'] ?? null,
+            'staging_is_stale' => (bool) ($summary['staging_is_stale'] ?? false),
+            'staging_diagnostics' => is_array($summary['staging_diagnostics'] ?? null) ? $summary['staging_diagnostics'] : [],
+            'stage_blocked_reasons' => $this->blockedReasons($resolved),
+            'can_stage' => $this->blockedReasons($resolved) === [] && ($summary['staging_status'] ?? ArtifactStagingStatus::NOT_STAGED) === ArtifactStagingStatus::NOT_STAGED,
+            'can_unstage' => $this->canUnstage($code),
+            'security' => $resolved['report'],
+        ];
     }
 
     public function canStage(string $code): bool
@@ -114,6 +143,19 @@ final class ArtifactStagingManager
         $r = $this->resolve($code);
 
         return $r !== null && $this->blockedReasons($r) === [];
+    }
+
+    public function canUnstage(string $code): bool
+    {
+        $resolved = $this->resolve($code);
+        if ($resolved === null) {
+            return false;
+        }
+        $status = $resolved['review']['staging_status'] ?? ArtifactStagingStatus::NOT_STAGED;
+        $path = $resolved['review']['staging_path'] ?? null;
+
+        return in_array($status, [ArtifactStagingStatus::STAGED, ArtifactStagingStatus::STALE], true)
+            && is_string($path) && Storage::disk($resolved['disk'])->exists($path.'/staging.json');
     }
 
     public function getStageBlockedReasons(string $code): array
@@ -209,7 +251,7 @@ final class ArtifactStagingManager
             }
         }
 
-return json_encode($value, JSON_UNESCAPED_SLASHES);
+        return json_encode($value, JSON_UNESCAPED_SLASHES);
     }
 
     private function deleteDirectory(string $path): void

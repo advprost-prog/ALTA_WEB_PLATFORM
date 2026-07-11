@@ -384,6 +384,41 @@
                                                     </div>
                                                 </div>
                                             @endif
+                                            <div class="addon-marketplace-staging">
+                                                <div class="addon-marketplace-staging__header">
+                                                    <strong>Staging</strong>
+                                                    <x-filament::badge :color="$row['staging_color'] ?? 'gray'">{{ $row['staging_label'] ?? 'Не підготовлено' }}</x-filament::badge>
+                                                </div>
+                                                @if (! ($row['staging_enabled'] ?? false))
+                                                    <p>Staging вимкнено в конфігурації.</p>
+                                                @elseif ($row['staging_is_stale'] ?? false)
+                                                    <p class="addon-marketplace-staging__danger">Artifact, review або integrity snapshot змінилися після підготовки. Використання staging-копії заблоковане.</p>
+                                                @elseif (($row['staging_status'] ?? 'not_staged') === 'staged')
+                                                    <dl class="addon-marketplace-staging__meta">
+                                                        <dt>Файлів</dt><dd>{{ $row['staging_file_count'] ?? 0 }}</dd>
+                                                        <dt>Розмір</dt><dd>{{ number_format($row['staging_total_size'] ?? 0) }} байт</dd>
+                                                        <dt>Підготував</dt><dd>{{ $row['staged_by_name'] ?? '—' }}</dd>
+                                                        <dt>Дата</dt><dd>{{ $row['staged_at'] ?? '—' }}</dd>
+                                                    </dl>
+                                                @elseif ($row['can_stage'] ?? false)
+                                                    <p>Artifact відповідає вимогам для staging.</p>
+                                                @endif
+                                                @if (! empty($row['stage_blocked_reasons']) && ! ($row['can_stage'] ?? false))
+                                                    <ul>
+                                                        @foreach ($row['stage_blocked_reasons'] as $reason)<li>{{ $reason }}</li>@endforeach
+                                                    </ul>
+                                                @endif
+                                                @if ($canManageStaging)
+                                                    <div class="addon-marketplace-staging__actions">
+                                                        @if (($row['staging_enabled'] ?? false) && ($row['can_stage'] ?? false))
+                                                            <x-filament::button wire:click="openStageArtifactModal('{{ e($item->code) }}')" color="success" size="sm">Підготувати у staging</x-filament::button>
+                                                        @endif
+                                                        @if ($row['can_unstage'] ?? false)
+                                                            <x-filament::button wire:click="openUnstageArtifactModal('{{ e($item->code) }}')" color="danger" size="sm">Видалити зі staging</x-filament::button>
+                                                        @endif
+                                                    </div>
+                                                @endif
+                                            </div>
                                             <div class="addon-marketplace-artifact__actions">
                                                 <x-filament::button
                                                     wire:click="inspectArtifact('{{ e($item->code) }}')"
@@ -403,6 +438,10 @@
                                                     <dt>Key</dt><dd>{{ $signatureKeyId ?: '—' }}</dd>
                                                     <dt>SHA-256</dt><dd>{{ $artifactMetadata['sha256'] ?? ($artifact['sha256'] ?? '—') }}</dd>
                                                     <dt>Quarantine</dt><dd>{{ $artifactMetadata['path'] ?? '—' }}</dd>
+                                                    <dt>Staging path</dt><dd>{{ $row['staging_path'] ?? '—' }}</dd>
+                                                    <dt>Inventory hash</dt><dd>{{ $row['staging_inventory_hash'] ?? '—' }}</dd>
+                                                    <dt>Staging SHA-256</dt><dd>{{ $row['staging_artifact_sha256'] ?? '—' }}</dd>
+                                                    <dt>Approval snapshot</dt><dd>{{ $row['approval_snapshot_hash'] ?? '—' }}</dd>
                                                 </dl>
                                             </details>
                                         @endif
@@ -546,6 +585,30 @@
                             <x-filament::button wire:click="rejectArtifact" color="danger">Підтвердити відхилення</x-filament::button>
                         @elseif ($reviewAction === 'revoke')
                             <x-filament::button wire:click="revokeArtifactApproval" color="warning">Підтвердити відкликання</x-filament::button>
+                        @endif
+                    </div>
+                </div>
+            </div>
+        @endif
+
+        @if ($stagingModalOpen)
+            <div role="dialog" aria-modal="true" class="addon-marketplace-staging-modal">
+                <div class="addon-marketplace-staging-modal__window">
+                    <h2>{{ $stagingAction === 'stage' ? 'Підготувати artifact у staging' : 'Видалити artifact зі staging' }}</h2>
+                    <p>Code: <strong>{{ $stagingArtifactCode }}</strong></p>
+                    @if ($stagingAction === 'stage')
+                        <p>Staging не встановлює addon і не змінює modules/extensions. Файли будуть розпаковані лише у захищену staging-директорію.</p>
+                    @else
+                        <p>Буде видалена лише staging-копія. Quarantine ZIP, trust, review status та review history залишаться без змін.</p>
+                        <label for="staging-note">Примітка</label>
+                        <textarea id="staging-note" wire:model="stagingNote" maxlength="2000" rows="3"></textarea>
+                    @endif
+                    <div class="addon-marketplace-staging-modal__actions">
+                        <x-filament::button wire:click="closeStagingModal" color="gray">Скасувати</x-filament::button>
+                        @if ($stagingAction === 'stage')
+                            <x-filament::button wire:click="stageArtifact" color="success">Підготувати у staging</x-filament::button>
+                        @else
+                            <x-filament::button wire:click="unstageArtifact" color="danger">Видалити зі staging</x-filament::button>
                         @endif
                     </div>
                 </div>

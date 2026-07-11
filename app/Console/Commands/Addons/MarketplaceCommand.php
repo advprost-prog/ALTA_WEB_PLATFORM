@@ -42,6 +42,12 @@ class MarketplaceCommand extends Command
                     'manifest_status' => $row['manifest_status'] ?? null,
                     'trust_status' => $row['trust_status'] ?? null,
                     'review_status' => $row['review_status'] ?? null,
+                    'staging_status' => $row['staging_status'] ?? 'not_staged',
+                    'staging_path' => $row['staging_path'] ?? null,
+                    'staging_is_stale' => $row['staging_is_stale'] ?? false,
+                    'can_stage' => $row['can_stage'] ?? false,
+                    'can_unstage' => $row['can_unstage'] ?? false,
+                    'stage_blocked_reasons' => $row['stage_blocked_reasons'] ?? [],
                     'vendor' => $row['item']->vendor,
                     'status' => $row['status'],
                     'valid' => $row['item']->isValid(),
@@ -65,7 +71,7 @@ class MarketplaceCommand extends Command
         }
 
         $this->table(
-            ['Code', 'Type', 'Src', 'Avail', 'Installed', 'Remote', 'Update', 'Compat', 'Status', 'Artifact', 'Trust', 'Featured', 'Dependencies', 'DepState', 'Warnings'],
+            ['Code', 'Type', 'Src', 'Avail', 'Installed', 'Remote', 'Update', 'Compat', 'Status', 'Artifact', 'Trust', 'Staging', 'Featured', 'Dependencies', 'DepState', 'Warnings'],
             array_map(static fn (array $row): array => [
                 $row['item']->code,
                 $row['item']->type,
@@ -78,6 +84,7 @@ class MarketplaceCommand extends Command
                 $row['status'],
                 $row['artifact_status'] ?? '-',
                 $row['trust_status'] ?? '-',
+                $row['staging_status'] ?? 'not_staged',
                 $row['item']->isFeatured ? 'yes' : 'no',
                 $row['item']->getDependencyCodes() === [] ? '-' : implode(', ', $row['item']->getDependencyCodes()),
                 self::dependencyState($row),

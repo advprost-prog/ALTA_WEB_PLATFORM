@@ -14,6 +14,9 @@ use App\Support\Addons\Registry\ArtifactReviewManager;
 use App\Support\Addons\Registry\ArtifactReviewResult;
 use App\Support\Addons\Registry\ArtifactReviewStatus;
 use App\Support\Addons\Registry\ArtifactSignatureVerifier;
+use App\Support\Addons\Registry\ArtifactStagingManager;
+use App\Support\Addons\Registry\ArtifactStagingResult;
+use App\Support\Addons\Registry\ArtifactStagingStatus;
 use App\Support\Addons\Registry\ArtifactTrustEvaluator;
 use App\Support\Addons\Registry\QuarantinedArtifactInspector;
 use App\Support\Addons\Registry\RegistryCatalog;
@@ -190,6 +193,7 @@ final class MarketplaceManager
             'trust_status' => $artifactStatus['metadata']['trust_status'] ?? null,
             'review_status' => $artifactStatus['metadata']['review_status'] ?? null,
             ...$this->reviewData($item->code),
+            ...$this->stagingData($item->code),
         ];
     }
 
@@ -264,6 +268,7 @@ final class MarketplaceManager
             'trust_status' => $artifactStatus['metadata']['trust_status'] ?? null,
             'review_status' => $artifactStatus['metadata']['review_status'] ?? null,
             ...$this->reviewData($remoteItem->code),
+            ...$this->stagingData($remoteItem->code),
         ];
     }
 
@@ -630,6 +635,36 @@ final class MarketplaceManager
         return $this->reviewManager()->getReviewBlockedReasons($code);
     }
 
+    public function stageArtifact(string $code, ArtifactReviewActor $actor): ArtifactStagingResult
+    {
+        return app(ArtifactStagingManager::class)->stage($code, $actor);
+    }
+
+    public function unstageArtifact(string $code, ?string $note, ArtifactReviewActor $actor): ArtifactStagingResult
+    {
+        return app(ArtifactStagingManager::class)->unstage($code, $note, $actor);
+    }
+
+    public function getArtifactStagingReport(string $code): array
+    {
+        return app(ArtifactStagingManager::class)->getStagingReport($code);
+    }
+
+    public function canStageArtifact(string $code): bool
+    {
+        return app(ArtifactStagingManager::class)->canStage($code);
+    }
+
+    public function canUnstageArtifact(string $code): bool
+    {
+        return app(ArtifactStagingManager::class)->canUnstage($code);
+    }
+
+    public function getStageBlockedReasons(string $code): array
+    {
+        return app(ArtifactStagingManager::class)->getStageBlockedReasons($code);
+    }
+
     private function reviewManager(): ArtifactReviewManager
     {
         return $this->reviewManager ?? app(ArtifactReviewManager::class);
@@ -685,6 +720,33 @@ final class MarketplaceManager
             'can_reject' => $report['can_reject'],
             'can_revoke' => $report['can_revoke'],
             'review_blocked_reasons' => $report['review_blocked_reasons'],
+        ];
+    }
+
+    private function stagingData(string $code): array
+    {
+        $report = app(ArtifactStagingManager::class)->getStagingReport($code);
+        $status = $report['staging_status'] ?? ArtifactStagingStatus::NOT_STAGED;
+
+        return [
+            'staging_enabled' => $report['staging_enabled'] ?? (bool) config('addons-registry.staging.enabled', false),
+            'staging_status' => $status,
+            'staging_label' => ArtifactStagingStatus::LABELS[$status] ?? $status,
+            'staging_color' => ArtifactStagingStatus::COLORS[$status] ?? 'gray',
+            'staging_path' => $report['staging_path'] ?? null,
+            'staged_at' => $report['staged_at'] ?? null,
+            'staged_by' => $report['staged_by'] ?? null,
+            'staged_by_name' => $report['staged_by_name'] ?? null,
+            'staging_file_count' => $report['staging_file_count'] ?? 0,
+            'staging_total_size' => $report['staging_total_size'] ?? 0,
+            'staging_inventory_hash' => $report['staging_inventory_hash'] ?? null,
+            'staging_artifact_sha256' => $report['staging_artifact_sha256'] ?? null,
+            'approval_snapshot_hash' => $report['approval_snapshot_hash'] ?? null,
+            'staging_is_stale' => $report['staging_is_stale'] ?? false,
+            'staging_diagnostics' => $report['staging_diagnostics'] ?? [],
+            'can_stage' => $report['can_stage'] ?? false,
+            'can_unstage' => $report['can_unstage'] ?? false,
+            'stage_blocked_reasons' => $report['stage_blocked_reasons'] ?? [],
         ];
     }
 
