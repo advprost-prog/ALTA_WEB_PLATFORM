@@ -160,6 +160,33 @@
                         $downloadsEnabled = (bool) (config('addons-registry.downloads.enabled') ?? false);
                         $platformConstraint = $row['platform_constraint'] ?? null;
                         $isIncompatible = $compat === 'incompatible';
+                        $promotionStatus = $row['promotion_status'] ?? 'not_promoted';
+                        $promotionLabel = $row['promotion_label'] ?? ($promotionLabels[$promotionStatus] ?? $promotionStatus);
+                        $promotionColor = $row['promotion_color'] ?? 'gray';
+                        $promotionBlockedReasons = $row['promotion_blocked_reasons'] ?? [];
+                        $hasPromotionSnapshot = in_array($promotionStatus, ['promoted', 'stale', 'rollback_available'], true);
+                        $hasLiveMismatch = $hasPromotionSnapshot && (
+                            ($row['promotion_is_stale'] ?? false)
+                            || ! ($row['live_inventory_matches'] ?? true)
+                            || collect($row['promotion_diagnostics'] ?? [])->contains(function ($diagnostic): bool {
+                                return is_array($diagnostic) && (($diagnostic['code'] ?? null) === 'artifact_promotion_live_fingerprint_mismatch');
+                            })
+                        );
+                        $idempotentReady = ($row['idempotent_ready'] ?? false) && ($row['live_inventory_matches'] ?? false) && $promotionStatus === 'promoted';
+                        $canRenderPromoteAction = ($row['promotion_enabled'] ?? false)
+                            && $canManagePromotion
+                            && ($row['can_promote'] ?? false)
+                            && ($row['staging_status'] ?? 'not_staged') === 'staged'
+                            && (($row['trust_status'] ?? null) === 'trusted')
+                            && (($row['review_status'] ?? null) === 'approved')
+                            && ! ($row['approval_is_stale'] ?? false)
+                            && ! ($row['staging_is_stale'] ?? false)
+                            && ! $idempotentReady
+                            && ! $hasLiveMismatch;
+                        $canRenderRollbackAction = $canManagePromotion
+                            && ($row['can_rollback'] ?? false)
+                            && ($row['rollback_available'] ?? false)
+                            && in_array($promotionStatus, ['promoted', 'stale', 'rollback_available'], true);
                         $actionConfig = [
                             'discover' => ['label' => 'Discover', 'color' => 'gray', 'icon' => 'heroicon-o-magnifying-glass'],
                             'install' => ['label' => 'Install', 'color' => 'primary', 'icon' => 'heroicon-o-plus-circle'],
@@ -419,6 +446,78 @@
                                                     </div>
                                                 @endif
                                             </div>
+                                            <div class="addon-marketplace-promotion">
+                                                <div class="addon-marketplace-promotion__header">
+                                                    <strong>Promotion</strong>
+                                                    <x-filament::badge :color="$promotionColor">{{ $promotionLabel }}</x-filament::badge>
+                                                </div>
+
+                                                <div class="addon-marketplace-promotion__summary">
+                                                    @if ($promotionStatus === 'not_promoted')
+                                                        <div>Live directory: Не перенесено</div>
+                                                    @elseif ($promotionStatus === 'ready')
+                                                        <div>Artifact готовий до безпечного перенесення.</div>
+                                                    @elseif ($promotionStatus === 'rolled_back')
+                                                        <div>Live directory: Відкочено</div>
+                                                    @elseif ($hasLiveMismatch)
+                                                        <div>Live directory: Live-копія змінена</div>
+                                                    @else
+                                                        <div>Live directory: Файли перенесено</div>
+                                                    @endif
+                                                    <div class="addon-marketplace-promotion__meta">
+                                                        <span>Version: {{ $row['promoted_version'] ?? '—' }}</span>
+                                                        <span>Transaction: {{ $row['promotion_transaction_id'] ? Str::limit($row['promotion_transaction_id'], 12, '…') : '—' }}</span>
+                                                        <span>Переніс: {{ $row['promoted_by_name'] ?? '—' }}</span>
+                                                        <span>Дата: {{ $row['promoted_at'] ?? '—' }}</span>
+                                                        <span>Rollback: {{ ($row['rollback_available'] ?? false) ? 'доступний' : 'недоступний' }}</span>
+                                                    </div>
+                                                </div>
+
+                                                @if ($idempotentReady)
+                                                    <div class="addon-marketplace-promotion__warnings addon-marketplace-promotion__warnings--info">
+                                                        <p>Ця версія вже перенесена у live directory. Повторна операція не потрібна.</p>
+                                                    </div>
+                                                @endif
+
+                                                @if ($hasLiveMismatch)
+                                                    <div class="addon-marketplace-promotion__warnings addon-marketplace-promotion__warnings--danger">
+                                                        <p>Live directory була змінена після перенесення. Автоматичне повторне перенесення заблоковане, щоб не затерти ручні зміни.</p>
+                                                        <div class="addon-marketplace-promotion__meta">
+                                                            <span>Expected inventory: {{ $row['promotion_inventory_hash'] ?? '—' }}</span>
+                                                            <span>Current live inventory: {{ $row['current_live_inventory_hash'] ?? '—' }}</span>
+                                                        </div>
+                                                    </div>
+                                                @endif
+
+                                                @if (! empty($promotionBlockedReasons))
+                                                    <div class="addon-marketplace-promotion__warnings">
+                                                        <ul>
+                                                            @foreach ($promotionBlockedReasons as $reason)
+                                                                <li>{{ $reason }}</li>
+                                                            @endforeach
+                                                        </ul>
+                                                    </div>
+                                                @endif
+
+                                                <div class="addon-marketplace-promotion__actions">
+                                                    @if ($canRenderPromoteAction)
+                                                        <x-filament::button wire:click="openPromoteArtifactModal('{{ e($item->code) }}')" color="success" size="sm">
+                                                            Перенести у live directory
+                                                        </x-filament::button>
+                                                    @endif
+                                                    @if ($canRenderRollbackAction)
+                                                        <x-filament::button wire:click="openRollbackArtifactModal('{{ e($item->code) }}')" color="danger" size="sm">
+                                                            Виконати rollback
+                                                        </x-filament::button>
+                                                    @endif
+                                                </div>
+
+                                                @if (($row['promotion_status'] ?? 'not_promoted') === 'promoted')
+                                                    <div class="addon-marketplace-promotion__warnings addon-marketplace-promotion__warnings--info">
+                                                        Файли присутні у live directory, але addon ще не зареєстрований і не активований.
+                                                    </div>
+                                                @endif
+                                            </div>
                                             <div class="addon-marketplace-artifact__actions">
                                                 <x-filament::button
                                                     wire:click="inspectArtifact('{{ e($item->code) }}')"
@@ -442,6 +541,14 @@
                                                     <dt>Inventory hash</dt><dd>{{ $row['staging_inventory_hash'] ?? '—' }}</dd>
                                                     <dt>Staging SHA-256</dt><dd>{{ $row['staging_artifact_sha256'] ?? '—' }}</dd>
                                                     <dt>Approval snapshot</dt><dd>{{ $row['approval_snapshot_hash'] ?? '—' }}</dd>
+                                                    <dt>Live path</dt><dd>{{ $row['promotion_live_path'] ?? '—' }}</dd>
+                                                    <dt>Backup path</dt><dd>{{ $row['promotion_backup_path'] ?? '—' }}</dd>
+                                                    <dt>Transaction ID</dt><dd>{{ $row['promotion_transaction_id'] ?? '—' }}</dd>
+                                                    <dt>Promotion inventory hash</dt><dd>{{ $row['promotion_inventory_hash'] ?? '—' }}</dd>
+                                                    <dt>Current live hash</dt><dd>{{ $row['current_live_inventory_hash'] ?? '—' }}</dd>
+                                                    <dt>Source artifact SHA</dt><dd>{{ $row['promotion_source_artifact_sha256'] ?? '—' }}</dd>
+                                                    <dt>Last rollback transaction</dt><dd>{{ $row['last_rollback_transaction_id'] ?? '—' }}</dd>
+                                                    <dt>Promotion diagnostics</dt><dd>{{ json_encode($row['promotion_diagnostics'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</dd>
                                                 </dl>
                                             </details>
                                         @endif
@@ -609,6 +716,67 @@
                             <x-filament::button wire:click="stageArtifact" color="success">Підготувати у staging</x-filament::button>
                         @else
                             <x-filament::button wire:click="unstageArtifact" color="danger">Видалити зі staging</x-filament::button>
+                        @endif
+                    </div>
+                </div>
+            </div>
+        @endif
+
+        @if ($promotionModalOpen)
+            <div role="dialog" aria-modal="true" class="addon-marketplace-promotion-modal">
+                <div class="addon-marketplace-promotion-modal__window">
+                    <h2>{{ $promotionAction === 'rollback' ? 'Відкотити перенесення artifact' : 'Перенести artifact у live directory' }}</h2>
+                    <div class="addon-marketplace-promotion__meta">
+                        <span>Code: {{ $promotionModalData['code'] ?? ($promotionArtifactCode ?: '—') }}</span>
+                        <span>Version: {{ $promotionModalData['version'] ?? '—' }}</span>
+                        <span>Type: {{ $promotionModalData['type'] ?? '—' }}</span>
+                        <span>Destination: {{ $promotionModalData['destination'] ?? '—' }}</span>
+                        <span>Trust: {{ $inspectionLabels[$promotionModalData['trust_status'] ?? 'not_required'] ?? ($promotionModalData['trust_status'] ?? '—') }}</span>
+                        <span>Review: {{ $reviewLabels[$promotionModalData['review_status'] ?? 'pending'] ?? ($promotionModalData['review_status'] ?? '—') }}</span>
+                        <span>Staging: {{ $promotionModalData['staging_label'] ?? ($promotionModalData['staging_status'] ?? '—') }}</span>
+                        <span>Stale flags: {{ ($promotionModalData['has_live_mismatch'] ?? false) ? 'live_mismatch' : 'none' }}</span>
+                        <span>Live path: {{ $promotionModalData['live_path'] ?? '—' }}</span>
+                        <span>Backup path: {{ $promotionModalData['backup_path'] ?? '—' }}</span>
+                    </div>
+
+                    @if ($promotionModalData['has_live_mismatch'] ?? false)
+                        <div class="addon-marketplace-promotion__warnings addon-marketplace-promotion__warnings--danger">
+                            <p>Live directory була змінена після перенесення. Автоматичне повторне перенесення заблоковане, щоб не затерти ручні зміни.</p>
+                        </div>
+                    @endif
+
+                    @if (! empty($promotionModalData['blocked_reasons'] ?? []))
+                        <div class="addon-marketplace-promotion__warnings">
+                            <ul>
+                                @foreach (($promotionModalData['blocked_reasons'] ?? []) as $reason)
+                                    <li>{{ $reason }}</li>
+                                @endforeach
+                            </ul>
+                        </div>
+                    @endif
+
+                    @if ($promotionAction === 'rollback')
+                        <p>Попередню live-версію буде відновлено з перевіреного backup. Quarantine, staging, trust і review history залишаться без змін.</p>
+                        <p>Rollback не запускає discover/install/enable, provider execution, migrations, composer або npm.</p>
+                        <div class="addon-marketplace-promotion__meta">
+                            <span>Transaction: {{ $promotionTransactionId ?: ($promotionModalData['transaction_id'] ?? '—') }}</span>
+                            <span>Rollback mode: {{ ($promotionModalData['backup_path'] ?? null) ? 'update' : 'first_install' }}</span>
+                            <span>Promoted by: {{ $promotionModalData['promoted_by_name'] ?? '—' }}</span>
+                            <span>Promoted at: {{ $promotionModalData['promoted_at'] ?? '—' }}</span>
+                            <span>Live inventory match: {{ ($promotionModalData['live_inventory_matches'] ?? false) ? 'yes' : 'no' }}</span>
+                        </div>
+                        <label for="promotion-note">Примітка до відкату</label>
+                        <textarea id="promotion-note" wire:model="promotionNote" maxlength="2000" rows="4"></textarea>
+                        @error('promotionNote') <p style="color:#b91c1c;font-size:0.8rem">{{ $message }}</p> @enderror
+                    @else
+                        <p>Ця операція лише переносить перевірені файли у live addon directory. Addon не буде автоматично discovered, installed або enabled. Provider і migrations не запускатимуться.</p>
+                    @endif
+                    <div class="addon-marketplace-promotion-modal__actions">
+                        <x-filament::button wire:click="closePromotionModal" color="gray">Скасувати</x-filament::button>
+                        @if ($promotionAction === 'rollback')
+                            <x-filament::button wire:click="rollbackArtifact" color="danger">Виконати відкат</x-filament::button>
+                        @else
+                            <x-filament::button wire:click="promoteArtifact" color="success">Перенести файли</x-filament::button>
                         @endif
                     </div>
                 </div>

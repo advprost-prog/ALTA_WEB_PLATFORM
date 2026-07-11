@@ -9,6 +9,9 @@ use App\Support\Addons\AddonRegistry;
 use App\Support\Addons\PlatformVersion;
 use App\Support\Addons\Registry\ArtifactDownloader;
 use App\Support\Addons\Registry\ArtifactDownloadResult;
+use App\Support\Addons\Registry\ArtifactPromotionManager;
+use App\Support\Addons\Registry\ArtifactPromotionResult;
+use App\Support\Addons\Registry\ArtifactPromotionStatus;
 use App\Support\Addons\Registry\ArtifactReviewActor;
 use App\Support\Addons\Registry\ArtifactReviewManager;
 use App\Support\Addons\Registry\ArtifactReviewResult;
@@ -39,6 +42,7 @@ final class MarketplaceManager
         private readonly PlatformVersion $platformVersion = new PlatformVersion,
         private readonly ?RegistryCatalog $registryCatalog = null,
         private readonly ?ArtifactReviewManager $reviewManager = null,
+        private readonly ?ArtifactPromotionManager $promotionManager = null,
     ) {}
 
     /**
@@ -194,6 +198,7 @@ final class MarketplaceManager
             'review_status' => $artifactStatus['metadata']['review_status'] ?? null,
             ...$this->reviewData($item->code),
             ...$this->stagingData($item->code),
+            ...$this->promotionData($item->code),
         ];
     }
 
@@ -269,6 +274,7 @@ final class MarketplaceManager
             'review_status' => $artifactStatus['metadata']['review_status'] ?? null,
             ...$this->reviewData($remoteItem->code),
             ...$this->stagingData($remoteItem->code),
+            ...$this->promotionData($remoteItem->code),
         ];
     }
 
@@ -665,9 +671,47 @@ final class MarketplaceManager
         return app(ArtifactStagingManager::class)->getStageBlockedReasons($code);
     }
 
+    public function promoteArtifact(string $code, ArtifactReviewActor $actor): ArtifactPromotionResult
+    {
+        return $this->promotionManager()->promote($code, $actor);
+    }
+
+    public function rollbackArtifact(string $code, ?string $transactionId, ?string $note, ArtifactReviewActor $actor): ArtifactPromotionResult
+    {
+        return $this->promotionManager()->rollback($code, $transactionId, $note, $actor);
+    }
+
+    public function getArtifactPromotionReport(string $code): array
+    {
+        return $this->promotionManager()->getPromotionReport($code);
+    }
+
+    public function canPromoteArtifact(string $code): bool
+    {
+        return $this->promotionManager()->canPromote($code);
+    }
+
+    public function canRollbackArtifact(string $code): bool
+    {
+        return $this->promotionManager()->canRollback($code);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function getPromotionBlockedReasons(string $code): array
+    {
+        return $this->promotionManager()->getPromotionBlockedReasons($code);
+    }
+
     private function reviewManager(): ArtifactReviewManager
     {
         return $this->reviewManager ?? app(ArtifactReviewManager::class);
+    }
+
+    private function promotionManager(): ArtifactPromotionManager
+    {
+        return $this->promotionManager ?? app(ArtifactPromotionManager::class);
     }
 
     private function toActor(mixed $actor): ArtifactReviewActor
@@ -747,6 +791,42 @@ final class MarketplaceManager
             'can_stage' => $report['can_stage'] ?? false,
             'can_unstage' => $report['can_unstage'] ?? false,
             'stage_blocked_reasons' => $report['stage_blocked_reasons'] ?? [],
+        ];
+    }
+
+    private function promotionData(string $code): array
+    {
+        $report = $this->promotionManager()->getPromotionReport($code);
+        $status = (string) ($report['status'] ?? ArtifactPromotionStatus::NOT_PROMOTED);
+        $metadata = is_array($report['metadata'] ?? null) ? $report['metadata'] : [];
+
+        return [
+            'promotion_enabled' => (bool) config('addons-registry.promotion.enabled', false),
+            'promotion_status' => $status,
+            'promotion_label' => ArtifactPromotionStatus::label($status),
+            'promotion_color' => ArtifactPromotionStatus::color($status),
+            'promotion_transaction_id' => $report['transaction_id'] ?? null,
+            'promotion_live_path' => $report['live_path'] ?? null,
+            'promotion_backup_path' => $report['backup_path'] ?? null,
+            'promoted_version' => $report['promoted_version'] ?? null,
+            'promoted_at' => $report['promoted_at'] ?? null,
+            'promoted_by' => $report['promoted_by'] ?? null,
+            'promoted_by_name' => $report['promoted_by_name'] ?? null,
+            'promoted_by_type' => $report['promoted_by_type'] ?? null,
+            'promotion_inventory_hash' => $report['promotion_inventory_hash'] ?? null,
+            'promotion_source_artifact_sha256' => $metadata['promotion_source_artifact_sha256'] ?? null,
+            'promotion_is_stale' => (bool) ($report['promotion_is_stale'] ?? false),
+            'rollback_available' => (bool) ($report['rollback_available'] ?? false),
+            'last_rollback_transaction_id' => $metadata['last_rollback_transaction_id'] ?? null,
+            'live_inventory_matches' => (bool) ($report['live_inventory_matches'] ?? false),
+            'idempotent_ready' => (bool) ($report['idempotent_ready'] ?? false),
+            'current_live_inventory_hash' => $report['live_inventory_hash'] ?? null,
+            'promotion_diagnostics' => is_array($report['diagnostics'] ?? null)
+                ? $report['diagnostics']
+                : (is_array($report['promotion_diagnostics'] ?? null) ? $report['promotion_diagnostics'] : []),
+            'can_promote' => $this->canPromoteArtifact($code),
+            'can_rollback' => $this->canRollbackArtifact($code),
+            'promotion_blocked_reasons' => $this->getPromotionBlockedReasons($code),
         ];
     }
 

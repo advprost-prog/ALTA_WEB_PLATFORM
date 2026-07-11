@@ -48,6 +48,20 @@ class MarketplaceCommand extends Command
                     'can_stage' => $row['can_stage'] ?? false,
                     'can_unstage' => $row['can_unstage'] ?? false,
                     'stage_blocked_reasons' => $row['stage_blocked_reasons'] ?? [],
+                    'promotion_status' => $row['promotion_status'] ?? null,
+                    'promotion_transaction_id' => $row['promotion_transaction_id'] ?? null,
+                    'promotion_live_path' => $row['promotion_live_path'] ?? null,
+                    'promotion_backup_path' => $row['promotion_backup_path'] ?? null,
+                    'promoted_version' => $row['promoted_version'] ?? null,
+                    'promoted_at' => $row['promoted_at'] ?? null,
+                    'promoted_by_name' => $row['promoted_by_name'] ?? null,
+                    'promotion_is_stale' => $row['promotion_is_stale'] ?? false,
+                    'rollback_available' => $row['rollback_available'] ?? false,
+                    'live_inventory_matches' => $row['live_inventory_matches'] ?? false,
+                    'idempotent_ready' => $row['idempotent_ready'] ?? false,
+                    'can_promote' => $row['can_promote'] ?? false,
+                    'can_rollback' => $row['can_rollback'] ?? false,
+                    'promotion_blocked_reasons' => $row['promotion_blocked_reasons'] ?? [],
                     'vendor' => $row['item']->vendor,
                     'status' => $row['status'],
                     'valid' => $row['item']->isValid(),
@@ -71,7 +85,7 @@ class MarketplaceCommand extends Command
         }
 
         $this->table(
-            ['Code', 'Type', 'Src', 'Avail', 'Installed', 'Remote', 'Update', 'Compat', 'Status', 'Artifact', 'Trust', 'Staging', 'Featured', 'Dependencies', 'DepState', 'Warnings'],
+            ['Code', 'Type', 'Src', 'Avail', 'Installed', 'Remote', 'Update', 'Compat', 'Status', 'Artifact', 'Trust', 'Staging', 'Promotion', 'Featured', 'Dependencies', 'DepState', 'Warnings'],
             array_map(static fn (array $row): array => [
                 $row['item']->code,
                 $row['item']->type,
@@ -85,6 +99,7 @@ class MarketplaceCommand extends Command
                 $row['artifact_status'] ?? '-',
                 $row['trust_status'] ?? '-',
                 $row['staging_status'] ?? 'not_staged',
+                self::promotionState($row),
                 $row['item']->isFeatured ? 'yes' : 'no',
                 $row['item']->getDependencyCodes() === [] ? '-' : implode(', ', $row['item']->getDependencyCodes()),
                 self::dependencyState($row),
@@ -124,5 +139,20 @@ class MarketplaceCommand extends Command
         }
 
         return 'warn';
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private static function promotionState(array $row): string
+    {
+        return match ((string) ($row['promotion_status'] ?? 'not_promoted')) {
+            'ready' => 'Ready',
+            'promoted' => 'Promoted',
+            'stale' => 'Stale',
+            'rolled_back' => 'Rolled back',
+            'blocked' => 'Blocked',
+            default => 'Not promoted',
+        };
     }
 }

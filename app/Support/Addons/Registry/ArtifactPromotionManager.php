@@ -413,8 +413,9 @@ final class ArtifactPromotionManager
         $stale = ! $stagingVerification['success']
             || ((string) ($promotion['promotion_status'] ?? '') === ArtifactPromotionStatus::PROMOTED && (bool) ($stagingVerification['staging_is_stale'] ?? false))
             || (bool) ($identity['live_fingerprint_mismatch'] ?? false);
+        $previousStale = (bool) ($promotion['promotion_is_stale'] ?? false);
         $promotion['promotion_is_stale'] = $stale;
-        if ($promotion !== []) {
+        if ($promotion !== [] && $previousStale !== $stale) {
             $this->persistMetadata($state['metadata_path'], $promotion);
         }
 

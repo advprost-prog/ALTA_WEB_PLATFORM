@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Enums\UserRole;
 use App\Models\Category;
 use App\Models\User;
+use App\Policies\AddonArtifactPromotionPolicy;
 use App\Policies\AddonArtifactStagingPolicy;
 use App\Services\Commerce\ProductPricingService;
 use App\Services\Themes\ThemeResolver;
@@ -36,6 +37,9 @@ class AppServiceProvider extends ServiceProvider
         });
 
         Gate::define('stage-addon-artifacts', static fn (User $user): bool => AddonArtifactStagingPolicy::canManage($user));
+
+        Gate::define('promote-addon-artifacts', static fn (User $user): bool => AddonArtifactPromotionPolicy::canPromote($user));
+        Gate::define('rollback-addon-artifacts', static fn (User $user): bool => AddonArtifactPromotionPolicy::canRollback($user));
 
         View::composer(['layouts.storefront', 'storefront.*'], function ($view): void {
             $request = request();

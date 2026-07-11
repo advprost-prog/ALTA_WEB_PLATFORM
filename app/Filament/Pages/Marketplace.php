@@ -8,6 +8,8 @@ use App\Support\Addons\Marketplace\MarketplaceItem;
 use App\Support\Addons\Marketplace\MarketplaceManager;
 use App\Support\Addons\Marketplace\MarketplaceStatus;
 use App\Support\Addons\Marketplace\UpdateStatus;
+use App\Support\Addons\Registry\AddonLivePathResolver;
+use App\Support\Addons\Registry\ArtifactPromotionStatus;
 use App\Support\Addons\Registry\ArtifactReviewActor;
 use App\Support\Addons\Registry\ArtifactReviewResult;
 use App\Support\Addons\Registry\ArtifactReviewStatus;
@@ -62,6 +64,21 @@ class Marketplace extends Page
 
     public bool $stagingModalOpen = false;
 
+    public ?string $promotionArtifactCode = null;
+
+    public ?string $promotionAction = null;
+
+    public ?string $promotionNote = null;
+
+    public ?string $promotionTransactionId = null;
+
+    public bool $promotionModalOpen = false;
+
+    /**
+     * @var array<string, mixed>
+     */
+    public array $promotionModalData = [];
+
     public function mount(): void
     {
         //
@@ -75,6 +92,16 @@ class Marketplace extends Page
     public function canManageStaging(): bool
     {
         return Gate::allows('stage-addon-artifacts');
+    }
+
+    public function canPromoteArtifacts(): bool
+    {
+        return Gate::allows('promote-addon-artifacts');
+    }
+
+    public function canRollbackArtifacts(): bool
+    {
+        return Gate::allows('rollback-addon-artifacts');
     }
 
     /**
@@ -107,7 +134,206 @@ class Marketplace extends Page
             'reviewColors' => ArtifactReviewStatus::COLORS,
             'canReview' => $this->canReviewArtifacts(),
             'canManageStaging' => $this->canManageStaging(),
+            'canManagePromotion' => $this->canPromoteArtifacts() || $this->canRollbackArtifacts(),
+            'promotionLabels' => ArtifactPromotionStatus::LABELS,
         ];
+    }
+
+    public function openPromoteArtifactModal(string $code): void
+    {
+        $this->guardCode($code);
+
+        if (! Gate::allows('promote-addon-artifacts')) {
+            Notification::make()
+                ->title('Дія заборонена')
+                ->body('Немає прав для перенесення artifact у live directory.')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $row = $this->resolveRowByCode($code);
+        $this->promotionArtifactCode = $code;
+        $this->promotionAction = 'promote';
+        $this->promotionNote = null;
+        $this->promotionTransactionId = (string) ($row['promotion_transaction_id'] ?? '');
+        $this->promotionModalData = $this->buildPromotionModalData($row);
+        $this->promotionModalOpen = true;
+    }
+
+    public function openRollbackArtifactModal(string $code): void
+    {
+        $this->guardCode($code);
+
+        if (! Gate::allows('rollback-addon-artifacts')) {
+            Notification::make()
+                ->title('Дія заборонена')
+                ->body('Немає прав для відкату перенесення artifact.')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $row = $this->resolveRowByCode($code);
+        $this->promotionArtifactCode = $code;
+        $this->promotionAction = 'rollback';
+        $this->promotionNote = null;
+        $this->promotionTransactionId = (string) ($row['promotion_transaction_id'] ?? '');
+        $this->promotionModalData = $this->buildPromotionModalData($row);
+        $this->promotionModalOpen = true;
+    }
+
+    public function closePromotionModal(): void
+    {
+        $this->promotionArtifactCode = null;
+        $this->promotionAction = null;
+        $this->promotionNote = null;
+        $this->promotionTransactionId = null;
+        $this->promotionModalData = [];
+        $this->promotionModalOpen = false;
+    }
+
+    public function promoteArtifact(): void
+    {
+        $code = trim((string) $this->promotionArtifactCode);
+
+        if ($code === '') {
+            Notification::make()
+                ->title('Перенесення не виконано')
+                ->body('Оберіть artifact для перенесення у live directory.')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $this->guardCode($code);
+
+        if (! Gate::allows('promote-addon-artifacts')) {
+            Notification::make()
+                ->title('Дія заборонена')
+                ->body('Promotion metadata не змінено.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        $manager = app(MarketplaceManager::class);
+        $actor = ArtifactReviewActor::fromUser(auth()->user());
+        try {
+            $result = $manager->promoteArtifact($code, $actor);
+        } catch (RuntimeException $exception) {
+            Notification::make()
+                ->title('Перенесення не виконано')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        if (! $result->success) {
+            Notification::make()
+                ->title('Перенесення не виконано')
+                ->body($this->formatDiagnostics($result->diagnostics, $result->blockedReasons))
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        if ($result->idempotent) {
+            Notification::make()
+                ->title('Artifact уже перенесено')
+                ->body('Файлова система не змінювалась.')
+                ->warning()
+                ->send();
+
+            $this->closePromotionModal();
+
+            return;
+        }
+
+        Notification::make()
+            ->title('Файли перенесено')
+            ->body('Artifact перенесено у live directory. Addon ще не зареєстрований і не активований.')
+            ->success()
+            ->send();
+
+        $this->closePromotionModal();
+    }
+
+    public function rollbackArtifact(): void
+    {
+        $code = trim((string) $this->promotionArtifactCode);
+
+        if ($code === '') {
+            Notification::make()
+                ->title('Відкат не виконано')
+                ->body('Оберіть artifact для відкату перенесення.')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $this->guardCode($code);
+
+        if (! Gate::allows('rollback-addon-artifacts')) {
+            Notification::make()
+                ->title('Дія заборонена')
+                ->body('Rollback metadata не змінено.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        $this->validate([
+            'promotionNote' => ['nullable', 'string', 'max:2000'],
+        ], [
+            'promotionNote.max' => 'Примітка до відкату не може перевищувати 2000 символів.',
+        ]);
+
+        $manager = app(MarketplaceManager::class);
+        $actor = ArtifactReviewActor::fromUser(auth()->user());
+        try {
+            $result = $manager->rollbackArtifact(
+                $code,
+                $this->promotionTransactionId,
+                trim((string) $this->promotionNote) ?: null,
+                $actor,
+            );
+        } catch (RuntimeException $exception) {
+            Notification::make()
+                ->title('Відкат не виконано')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        if (! $result->success) {
+            Notification::make()
+                ->title('Відкат не виконано')
+                ->body($this->formatDiagnostics($result->diagnostics, $result->blockedReasons))
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        Notification::make()
+            ->title('Відкат виконано')
+            ->body('Live directory оновлено без discover/install/enable.')
+            ->success()
+            ->send();
+
+        $this->closePromotionModal();
     }
 
     /**
@@ -583,6 +809,105 @@ class Marketplace extends Page
         if ($code === '' || ! preg_match('/^[a-z0-9._-]+$/i', $code)) {
             throw new RuntimeException("Некоректний код модуля: [{$code}].");
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolveRowByCode(string $code): array
+    {
+        $resolved = app(MarketplaceManager::class)->resolve();
+        $row = collect($resolved['rows'])->first(static fn (array $candidate): bool => $candidate['item']->code === $code);
+
+        if (! is_array($row)) {
+            throw new RuntimeException("Addon [{$code}] не знайдено у Marketplace.");
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param  array<int, mixed>  $diagnostics
+     * @param  array<int, string>  $fallback
+     */
+    private function formatDiagnostics(array $diagnostics, array $fallback): string
+    {
+        if ($diagnostics === [] && $fallback === []) {
+            return 'Операцію заблоковано.';
+        }
+
+        $lines = [];
+
+        foreach (($diagnostics !== [] ? $diagnostics : $fallback) as $diagnostic) {
+            if (is_array($diagnostic)) {
+                $message = (string) ($diagnostic['message'] ?? '');
+                $code = (string) ($diagnostic['code'] ?? 'diagnostic');
+                $lines[] = trim($code.': '.$message);
+
+                continue;
+            }
+
+            $lines[] = (string) $diagnostic;
+        }
+
+        return implode(' ', array_filter($lines, static fn (string $line): bool => trim($line) !== ''));
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @return array<string, mixed>
+     */
+    private function buildPromotionModalData(array $row): array
+    {
+        $item = $row['item'] ?? null;
+        $diagnostics = is_array($row['promotion_diagnostics'] ?? null) ? $row['promotion_diagnostics'] : [];
+        $resolvedLivePath = null;
+
+        if ($item instanceof MarketplaceItem) {
+            try {
+                $resolved = app(AddonLivePathResolver::class)->resolve([
+                    'type' => $item->type,
+                    'code' => $item->code,
+                    'vendor' => $item->vendor,
+                ]);
+                $resolvedLivePath = (string) ($resolved['live_path'] ?? '');
+            } catch (\Throwable) {
+                $resolvedLivePath = null;
+            }
+        }
+
+        $hasPromotionSnapshot = in_array((string) ($row['promotion_status'] ?? ''), ['promoted', 'stale', 'rollback_available'], true);
+
+        $hasFingerprintMismatch = false;
+        foreach ($diagnostics as $diagnostic) {
+            if (is_array($diagnostic) && (($diagnostic['code'] ?? null) === 'artifact_promotion_live_fingerprint_mismatch')) {
+                $hasFingerprintMismatch = true;
+                break;
+            }
+        }
+
+        return [
+            'code' => $item instanceof MarketplaceItem ? $item->code : ($row['code'] ?? null),
+            'version' => $row['promoted_version'] ?? ($item instanceof MarketplaceItem ? $item->version : null),
+            'type' => $item instanceof MarketplaceItem ? $item->type : null,
+            'destination' => $row['promotion_live_path'] ?? $resolvedLivePath,
+            'trust_status' => $row['trust_status'] ?? null,
+            'review_status' => $row['review_status'] ?? null,
+            'staging_status' => $row['staging_status'] ?? null,
+            'staging_label' => $row['staging_label'] ?? null,
+            'transaction_id' => $row['promotion_transaction_id'] ?? null,
+            'live_path' => $row['promotion_live_path'] ?? $resolvedLivePath,
+            'backup_path' => $row['promotion_backup_path'] ?? null,
+            'promoted_by_name' => $row['promoted_by_name'] ?? null,
+            'promoted_at' => $row['promoted_at'] ?? null,
+            'live_inventory_matches' => (bool) ($row['live_inventory_matches'] ?? false),
+            'has_live_mismatch' => $hasPromotionSnapshot && (
+                (bool) ($row['promotion_is_stale'] ?? false)
+                || ! (bool) ($row['live_inventory_matches'] ?? true)
+                || $hasFingerprintMismatch
+            ),
+            'blocked_reasons' => is_array($row['promotion_blocked_reasons'] ?? null) ? $row['promotion_blocked_reasons'] : [],
+        ];
     }
 
     private function runLifecycle(string $method, string $code, string $label, string $done): void

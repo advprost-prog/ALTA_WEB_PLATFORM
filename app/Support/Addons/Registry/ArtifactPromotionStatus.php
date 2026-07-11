@@ -5,15 +5,25 @@ namespace App\Support\Addons\Registry;
 final class ArtifactPromotionStatus
 {
     public const NOT_PROMOTED = 'not_promoted';
+
     public const READY = 'ready';
+
     public const PROMOTING = 'promoting';
+
     public const PROMOTED = 'promoted';
+
     public const BLOCKED = 'blocked';
+
     public const FAILED = 'failed';
+
     public const ROLLBACK_AVAILABLE = 'rollback_available';
+
     public const ROLLING_BACK = 'rolling_back';
+
     public const ROLLED_BACK = 'rolled_back';
+
     public const ROLLBACK_FAILED = 'rollback_failed';
+
     public const STALE = 'stale';
 
     public const LABELS = [
@@ -27,7 +37,7 @@ final class ArtifactPromotionStatus
         self::ROLLING_BACK => 'Відкат',
         self::ROLLED_BACK => 'Відкочено',
         self::ROLLBACK_FAILED => 'Помилка відкату',
-        self::STALE => 'Promotion застарів',
+        self::STALE => 'Live-копія змінена або застаріла',
     ];
 
     public const COLORS = [
