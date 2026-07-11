@@ -84,8 +84,14 @@ class AddonArtifactPromotionTest extends TestCase
             'code' => 'core.theme-maker',
         ]);
 
+        $fallback = $resolver->resolve([
+            'type' => 'module',
+            'code' => 'core.analytics',
+        ]);
+
         $this->assertSame($this->testModulesPath.'/Core/Analytics', $module['live_path']);
         $this->assertSame($this->testExtensionsPath.'/Core/ThemeMaker', $extension['live_path']);
+        $this->assertSame($this->testModulesPath.'/Core/Analytics', $fallback['live_path']);
     }
 
     public function test_live_path_resolver_blocks_traversal_absolute_and_invalid_vendor(): void
@@ -201,7 +207,73 @@ class AddonArtifactPromotionTest extends TestCase
 
         $this->assertFalse($result->success);
         $this->assertSame('blocked', $result->status);
-        $this->assertContains('Staging integrity validation failed.', $result->blockedReasons);
+        $this->assertContains('artifact_staging_file_modified', $this->diagnosticCodes($result->diagnostics));
+    }
+
+    public function test_extra_staged_file_reports_specific_diagnostic_code(): void
+    {
+        $state = $this->preparePromotableArtifact();
+        Config::set('addons-registry.promotion.enabled', true);
+
+        Storage::disk('addons')->put($state['staging_path'].'/payload/extra.txt', 'extra');
+
+        $result = app(ArtifactPromotionManager::class)->promote(self::CODE, ArtifactReviewActor::cli('test'));
+
+        $this->assertFalse($result->success);
+        $this->assertSame('blocked', $result->status);
+        $this->assertContains('artifact_staging_file_extra', $this->diagnosticCodes($result->diagnostics));
+    }
+
+    public function test_missing_staged_file_reports_specific_diagnostic_code(): void
+    {
+        $state = $this->preparePromotableArtifact();
+        Config::set('addons-registry.promotion.enabled', true);
+
+        Storage::disk('addons')->delete($state['staging_path'].'/payload/README.md');
+
+        $result = app(ArtifactPromotionManager::class)->promote(self::CODE, ArtifactReviewActor::cli('test'));
+
+        $this->assertFalse($result->success);
+        $this->assertSame('blocked', $result->status);
+        $this->assertContains('artifact_staging_file_missing', $this->diagnosticCodes($result->diagnostics));
+    }
+
+    public function test_malformed_staging_metadata_reports_specific_diagnostic_code(): void
+    {
+        $state = $this->preparePromotableArtifact();
+        Config::set('addons-registry.promotion.enabled', true);
+
+        Storage::disk('addons')->put($state['staging_path'].'/staging.json', '{broken json');
+
+        $result = app(ArtifactPromotionManager::class)->promote(self::CODE, ArtifactReviewActor::cli('test'));
+
+        $this->assertFalse($result->success);
+        $this->assertSame('blocked', $result->status);
+        $this->assertContains('artifact_staging_metadata_invalid', $this->diagnosticCodes($result->diagnostics));
+    }
+
+    public function test_promotion_cli_reports_specific_integrity_diagnostic_code(): void
+    {
+        $state = $this->preparePromotableArtifact();
+        Config::set('addons-registry.promotion.enabled', true);
+
+        Storage::disk('addons')->put($state['staging_path'].'/payload/README.md', 'tampered');
+
+        $this->artisan('addons:promote-artifact', ['code' => self::CODE])
+            ->expectsOutputToContain('artifact_staging_file_modified')
+            ->assertExitCode(1);
+    }
+
+    public function test_doctor_reports_specific_integrity_diagnostic_code(): void
+    {
+        $state = $this->preparePromotableArtifact();
+        Config::set('addons-registry.promotion.enabled', true);
+
+        Storage::disk('addons')->put($state['staging_path'].'/payload/README.md', 'tampered');
+
+        $this->artisan('addons:doctor')
+            ->expectsOutputToContain('artifact_staging_file_modified')
+            ->assertExitCode(1);
     }
 
     public function test_rollback_blocks_if_live_tree_changes_manually(): void
@@ -406,6 +478,15 @@ PHP);
     private function artifactUrlFor(string $version): string
     {
         return 'http://127.0.0.1:9001/core.analytics-'.$version.'.zip';
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $diagnostics
+     * @return array<int, string>
+     */
+    private function diagnosticCodes(array $diagnostics): array
+    {
+        return array_values(array_filter(array_map(static fn (array $diagnostic): string => (string) ($diagnostic['code'] ?? ''), $diagnostics)));
     }
 
 }

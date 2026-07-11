@@ -65,6 +65,22 @@ class InspectAddonArtifact extends Command
         $this->line('  promotion_stale:  '.(($promotion['promotion_is_stale'] ?? false) ? 'yes' : 'no'));
         $this->line('  transaction_id:   '.($promotion['transaction_id'] ?? '—'));
 
+        if (is_array($promotion['diagnostics'] ?? null) && $promotion['diagnostics'] !== []) {
+            $this->warn('Promotion diagnostics:');
+            foreach ($promotion['diagnostics'] as $diagnostic) {
+                if (! is_array($diagnostic)) {
+                    continue;
+                }
+
+                $line = '  - '.(($diagnostic['code'] ?? 'diagnostic')).': '.($diagnostic['message'] ?? '');
+                if (! empty($diagnostic['details'] ?? [])) {
+                    $line .= ' ['.implode('; ', array_map('strval', (array) $diagnostic['details'])).']';
+                }
+
+                $this->line($line);
+            }
+        }
+
         if ($report['diagnostics'] !== []) {
             $this->warn('Diagnostics:');
             foreach ($report['diagnostics'] as $diagnostic) {

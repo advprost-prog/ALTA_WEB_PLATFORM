@@ -19,7 +19,17 @@ class RollbackAddonPromotion extends Command
 
         if (! $result->success) {
             $this->error($result->message);
-            foreach ($result->blockedReasons ?: $result->diagnostics as $reason) {
+            $diagnostics = is_array($result->diagnostics) && $result->diagnostics !== [] ? $result->diagnostics : $result->blockedReasons;
+            foreach ($diagnostics as $reason) {
+                if (is_array($reason)) {
+                    $line = ($reason['code'] ?? 'diagnostic').': '.($reason['message'] ?? '');
+                    if (! empty($reason['details'] ?? [])) {
+                        $line .= ' ['.implode('; ', array_map('strval', (array) $reason['details'])).']';
+                    }
+                    $this->line('  - '.$line);
+                    continue;
+                }
+
                 $this->line('  - '.$reason);
             }
 

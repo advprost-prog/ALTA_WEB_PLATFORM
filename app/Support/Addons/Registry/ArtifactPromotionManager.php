@@ -31,7 +31,13 @@ final class ArtifactPromotionManager
 
         $reasons = $this->getPromotionBlockedReasons($code);
         if ($reasons !== []) {
-            return ArtifactPromotionResult::failure($code, $state['version'], ArtifactPromotionStatus::BLOCKED, 'Promotion заблоковано.', $reasons, ['metadata' => $state['metadata']]);
+            $diagnostics = $this->stagingDiagnostics($state);
+            $data = ['metadata' => $state['metadata']];
+            if ($diagnostics !== []) {
+                $data['diagnostics'] = $diagnostics;
+            }
+
+            return ArtifactPromotionResult::failure($code, $state['version'], ArtifactPromotionStatus::BLOCKED, 'Promotion заблоковано.', $reasons, $data);
         }
 
         $lock = Cache::lock($this->lockKey($code), (int) Config::get('addons-registry.promotion.lock_timeout', 30));
@@ -49,9 +55,10 @@ final class ArtifactPromotionManager
                 $this->journalStarted($journalPath, $state, $transactionId, $actor, 'promote', null, null);
                 $this->journalFailed($journalPath, $verification['diagnostics']);
 
-                return ArtifactPromotionResult::failure($code, $state['version'], ArtifactPromotionStatus::STALE, 'Staging не пройшов повторну перевірку.', $verification['diagnostics'], [
+                return ArtifactPromotionResult::failure($code, $state['version'], ArtifactPromotionStatus::STALE, 'Staging не пройшов повторну перевірку.', $this->diagnosticMessages($verification['diagnostics']), [
                     'transaction_id' => $transactionId,
                     'metadata' => $this->refreshMetadata($state),
+                    'diagnostics' => $verification['diagnostics'],
                 ]);
             }
 
@@ -373,7 +380,7 @@ final class ArtifactPromotionManager
         $stagingPath = $this->absoluteStagingPath($state, false);
         $stagingVerification = $stagingPath !== null
             ? $this->verifier->verify($stagingPath)
-            : ['success' => false, 'diagnostics' => ['Staging path is missing.'], 'staging_is_stale' => false];
+            : ['success' => false, 'diagnostics' => [$this->diagnostic('artifact_staging_metadata_invalid', 'Staging path is missing.', ['staging_path missing'])], 'staging_is_stale' => false];
         $stale = ! $stagingVerification['success'] || ((string) ($promotion['promotion_status'] ?? '') === ArtifactPromotionStatus::PROMOTED && (bool) ($stagingVerification['staging_is_stale'] ?? false));
         $promotion['promotion_is_stale'] = $stale;
         if ($promotion !== []) {
@@ -405,7 +412,7 @@ final class ArtifactPromotionManager
             'promotion_diagnostics' => $promotion['promotion_diagnostics'] ?? [],
             'promotion_is_stale' => $stale,
             'metadata' => $promotion,
-            'diagnostics' => array_values(array_unique($stagingVerification['diagnostics'])),
+            'diagnostics' => array_values($this->uniqueDiagnostics($stagingVerification['diagnostics'])),
         ];
     }
 
@@ -777,6 +784,77 @@ final class ArtifactPromotionManager
         }
 
         return [];
+    }
+
+    /**
+     * @param  array<int, array{code: string, message: string, details?: array<int, string>}>  $diagnostics
+     * @return array<int, string>
+     */
+    private function diagnosticMessages(array $diagnostics): array
+    {
+        $messages = [];
+
+        foreach ($diagnostics as $diagnostic) {
+            if (! is_array($diagnostic)) {
+                continue;
+            }
+
+            $messages[] = (string) ($diagnostic['code'] ?? 'diagnostic').': '.(string) ($diagnostic['message'] ?? '');
+        }
+
+        return array_values(array_filter(array_unique($messages), static fn (string $message): bool => $message !== ''));
+    }
+
+    /**
+     * @param  array<int, array{code: string, message: string, details?: array<int, string>}>  $diagnostics
+     * @return array<int, array{code: string, message: string, details: array<int, string>}>
+     */
+    private function uniqueDiagnostics(array $diagnostics): array
+    {
+        $unique = [];
+
+        foreach ($diagnostics as $diagnostic) {
+            if (! is_array($diagnostic) || ! isset($diagnostic['code'], $diagnostic['message'])) {
+                continue;
+            }
+
+            $key = $diagnostic['code'].'|'.$diagnostic['message'].'|'.json_encode($diagnostic['details'] ?? [], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $unique[$key] = [
+                'code' => (string) $diagnostic['code'],
+                'message' => (string) $diagnostic['message'],
+                'details' => array_values(array_map('strval', (array) ($diagnostic['details'] ?? []))),
+            ];
+        }
+
+        return array_values($unique);
+    }
+
+    /**
+     * @return array{code: string, message: string, details: array<int, string>}
+     */
+    private function diagnostic(string $code, string $message, array $details = []): array
+    {
+        return [
+            'code' => $code,
+            'message' => $message,
+            'details' => array_values(array_map('strval', $details)),
+        ];
+    }
+
+    /**
+     * @return array<int, array{code: string, message: string, details: array<int, string>}>
+     */
+    private function stagingDiagnostics(array $state): array
+    {
+        $stagingPath = $this->absoluteStagingPath($state, false);
+
+        if ($stagingPath === null) {
+            return [$this->diagnostic('artifact_staging_metadata_invalid', 'Staging path is missing.', ['staging_path missing'])];
+        }
+
+        $verification = $this->verifier->verify($stagingPath);
+
+        return array_values($this->uniqueDiagnostics(is_array($verification['diagnostics'] ?? null) ? $verification['diagnostics'] : []));
     }
 
     /**

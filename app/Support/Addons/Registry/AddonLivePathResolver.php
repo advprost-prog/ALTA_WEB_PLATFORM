@@ -21,8 +21,13 @@ final class AddonLivePathResolver
             throw new RuntimeException('Unsupported addon type.');
         }
 
-        $vendor = $this->normalizeSegment((string) ($manifest['vendor'] ?? ''), 'vendor');
         $code = (string) ($manifest['code'] ?? '');
+        $vendorSource = trim((string) ($manifest['vendor'] ?? ''));
+        if ($vendorSource === '') {
+            $vendorSource = (string) Str::before($code, '.');
+        }
+
+        $vendor = $this->normalizeSegment($vendorSource, 'vendor');
         $codeSegment = $this->normalizeCodeSegment($code);
         $root = $this->rootForType($type);
         $livePath = $root.'/'.$vendor.'/'.$codeSegment;

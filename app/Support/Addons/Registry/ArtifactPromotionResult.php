@@ -27,7 +27,7 @@ final class ArtifactPromotionResult
 
     public static function failure(string $code, ?string $version, string $status, string $message, array $reasons = [], array $data = []): self
     {
-        return new self(false, $code, $version, $status, $message, $data['addon_type'] ?? null, $data['live_path'] ?? null, $data['backup_path'] ?? null, $data['transaction_id'] ?? null, $reasons, $reasons, $data['metadata'] ?? [], (bool) ($data['rollback_available'] ?? false));
+        return new self(false, $code, $version, $status, $message, $data['addon_type'] ?? null, $data['live_path'] ?? null, $data['backup_path'] ?? null, $data['transaction_id'] ?? null, $data['diagnostics'] ?? $reasons, $reasons, $data['metadata'] ?? [], (bool) ($data['rollback_available'] ?? false));
     }
 
     public function toArray(): array

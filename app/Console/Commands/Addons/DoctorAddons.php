@@ -73,6 +73,18 @@ class DoctorAddons extends Command
                 }
             }
 
+            foreach (is_array($promotion['diagnostics'] ?? null) ? $promotion['diagnostics'] : [] as $diagnostic) {
+                if (! is_array($diagnostic)) {
+                    continue;
+                }
+
+                $issues[] = $this->diagnostic(
+                    (string) ($diagnostic['code'] ?? 'artifact_promotion_diagnostic'),
+                    (string) ($diagnostic['message'] ?? 'Promotion diagnostic.'),
+                    array_values(array_map('strval', (array) ($diagnostic['details'] ?? []))),
+                );
+            }
+
             if (($promotion['promotion_is_stale'] ?? false) === true || ($promotion['status'] ?? null) === ArtifactPromotionStatus::STALE) {
                 $issues[] = $this->diagnostic('artifact_promotion_stale', 'Promotion metadata is stale.', [$code]);
             }

@@ -13,22 +13,30 @@ final class StagingIntegrityVerifier
         $staging = $this->readJson($stagingPath.'/staging.json');
 
         if ($staging === null) {
-            return $this->failure('Staging metadata відсутня.', ['staging.json не знайдено.']);
+            return $this->failure('artifact_staging_metadata_invalid', 'Staging metadata is invalid.', [
+                $this->diagnostic('artifact_staging_metadata_invalid', 'Staging metadata file is missing.', ['staging.json was not found.']),
+            ]);
         }
 
         if (($staging['schema_version'] ?? null) !== 1) {
-            $diagnostics[] = 'Unsupported staging schema_version.';
+            $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Unsupported staging schema version.', ['schema_version must be 1.']);
         }
 
         foreach (['code', 'version', 'manifest_path'] as $field) {
             if (! is_string($staging[$field] ?? null) || trim((string) $staging[$field]) === '') {
-                $diagnostics[] = "Staging metadata field [{$field}] is missing.";
+                $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Staging metadata field is missing.', ["field={$field}"]);
             }
+        }
+
+        if ($diagnostics !== []) {
+            return $this->failure('artifact_staging_metadata_invalid', 'Staging metadata is invalid.', $diagnostics);
         }
 
         $payloadRoot = $stagingPath.'/payload';
         if (! is_dir($payloadRoot)) {
-            return $this->failure('Staging payload is missing.', ['payload directory not found.']);
+            return $this->failure('artifact_staging_file_missing', 'Staging payload is missing.', [
+                $this->diagnostic('artifact_staging_file_missing', 'Staging payload directory is missing.', ['payload directory not found.']),
+            ]);
         }
 
         $disk = (string) Config::get('addons-registry.downloads.disk', 'addons');
@@ -46,16 +54,25 @@ final class StagingIntegrityVerifier
 
         $manifest = $this->readJson($manifestFile);
         if ($manifest === null) {
-            $diagnostics[] = 'Staging manifest JSON is invalid or missing.';
+            $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Staging manifest JSON is invalid or missing.', ['manifest.json could not be parsed.']);
         } else {
             if (($manifest['code'] ?? null) !== ($staging['code'] ?? null)) {
-                $diagnostics[] = 'Manifest code does not match staging code.';
+                $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Manifest code does not match staging code.', [
+                    'manifest_code='.($manifest['code'] ?? 'null'),
+                    'staging_code='.$staging['code'],
+                ]);
             }
             if (($manifest['version'] ?? null) !== ($staging['version'] ?? null)) {
-                $diagnostics[] = 'Manifest version does not match staging version.';
+                $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Manifest version does not match staging version.', [
+                    'manifest_version='.($manifest['version'] ?? 'null'),
+                    'staging_version='.$staging['version'],
+                ]);
             }
             if (array_key_exists('addon_type', $staging) && ($manifest['type'] ?? null) !== ($staging['addon_type'] ?? null)) {
-                $diagnostics[] = 'Manifest type does not match staging addon type.';
+                $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Manifest type does not match staging addon type.', [
+                    'manifest_type='.($manifest['type'] ?? 'null'),
+                    'staging_addon_type='.($staging['addon_type'] ?? 'null'),
+                ]);
             }
         }
 
@@ -63,57 +80,100 @@ final class StagingIntegrityVerifier
         $expected = is_array($staging['inventory'] ?? null) ? $staging['inventory'] : [];
 
         if ($expected === []) {
-            $diagnostics[] = 'Staging inventory metadata is missing or invalid.';
+            return $this->failure('artifact_staging_metadata_invalid', 'Staging inventory metadata is invalid.', [
+                $this->diagnostic('artifact_staging_metadata_invalid', 'Staging inventory metadata is missing or invalid.', []),
+            ]);
         }
 
-        if ($this->sortInventory($expected) !== $this->sortInventory($actual['inventory'])) {
-            $diagnostics[] = 'Staging inventory does not match payload tree.';
+        $expectedMap = $this->inventoryMap($expected);
+        $actualMap = $this->inventoryMap($actual['inventory']);
+        $inventoryMismatch = false;
+
+        foreach ($expectedMap as $path => $expectedEntry) {
+            if (! array_key_exists($path, $actualMap)) {
+                $diagnostics[] = $this->diagnostic('artifact_staging_file_missing', 'Staged file is missing.', ["path={$path}"]);
+                $inventoryMismatch = true;
+                continue;
+            }
+
+            $actualEntry = $actualMap[$path];
+            if ($this->entriesDiffer($expectedEntry, $actualEntry)) {
+                $diagnostics[] = $this->diagnostic('artifact_staging_file_modified', 'Staged file was modified.', ["path={$path}"]);
+                $inventoryMismatch = true;
+            }
+        }
+
+        foreach ($actualMap as $path => $actualEntry) {
+            if (! array_key_exists($path, $expectedMap)) {
+                $diagnostics[] = $this->diagnostic('artifact_staging_file_extra', 'Unexpected staged file found.', ["path={$path}"]);
+                $inventoryMismatch = true;
+            }
         }
 
         if (($staging['file_count'] ?? null) !== $actual['file_count']) {
-            $diagnostics[] = 'Staging file_count does not match actual payload files.';
+            $inventoryMismatch = true;
         }
 
         if (($staging['total_uncompressed_size'] ?? null) !== $actual['total_size']) {
-            $diagnostics[] = 'Staging total size does not match actual payload size.';
+            $inventoryMismatch = true;
         }
 
         $inventoryHash = hash('sha256', $this->canonical($this->sortInventory($actual['inventory'])));
         if (($staging['fingerprint']['inventory_hash'] ?? null) !== $inventoryHash) {
-            $diagnostics[] = 'Staging inventory fingerprint mismatch.';
+            $diagnostics[] = $this->diagnostic('artifact_staging_inventory_mismatch', 'Staging inventory fingerprint mismatch.', [
+                'expected='.($staging['fingerprint']['inventory_hash'] ?? 'null'),
+                'actual='.$inventoryHash,
+            ]);
+        }
+
+        if ($inventoryMismatch) {
+            $diagnostics[] = $this->diagnostic('artifact_staging_inventory_mismatch', 'Staging inventory does not match payload tree.', [
+                'expected_count='.(string) count($expectedMap),
+                'actual_count='.(string) count($actualMap),
+            ]);
         }
 
         $approvalSnapshotHash = hash('sha256', $this->canonical($sourceMetadata['approved_integrity_snapshot'] ?? []));
         if (($staging['fingerprint']['approval_snapshot_hash'] ?? null) !== $approvalSnapshotHash) {
-            $diagnostics[] = 'Staging approval snapshot fingerprint mismatch.';
+            $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Staging approval snapshot fingerprint mismatch.', [
+                'expected='.($staging['fingerprint']['approval_snapshot_hash'] ?? 'null'),
+                'actual='.$approvalSnapshotHash,
+            ]);
         }
 
         $stale = false;
         if (($sourceMetadata['status'] ?? null) !== 'quarantined') {
-            $diagnostics[] = 'Quarantine artifact is no longer quarantined.';
+            $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Quarantine artifact is no longer quarantined.', []);
             $stale = true;
         }
 
         if (($sourceMetadata['review_status'] ?? null) !== ArtifactReviewStatus::APPROVED) {
-            $diagnostics[] = 'Promotion source review status is not approved.';
+            $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Promotion source review status is not approved.', []);
             $stale = true;
         }
 
         if ((bool) ($sourceMetadata['approval_is_stale'] ?? false) || (bool) ($sourceMetadata['staging_is_stale'] ?? false)) {
-            $diagnostics[] = 'Promotion source review/staging is stale.';
+            $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Promotion source review/staging is stale.', []);
             $stale = true;
         }
 
         if (($sourceMetadata['staging_status'] ?? null) !== ArtifactStagingStatus::STAGED) {
-            $diagnostics[] = 'Promotion source staging status is not staged.';
+            $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Promotion source staging status is not staged.', []);
             $stale = true;
         }
 
         if ($sourceAbsolutePath !== null && is_file($sourceAbsolutePath)) {
             $actualSha = hash_file('sha256', $sourceAbsolutePath) ?: null;
             if ($actualSha !== ($staging['source']['artifact_sha256'] ?? null)) {
-                $diagnostics[] = 'Quarantine artifact SHA-256 mismatch.';
+                $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Quarantine artifact SHA-256 mismatch.', [
+                    'expected='.($staging['source']['artifact_sha256'] ?? 'null'),
+                    'actual='.$actualSha,
+                ]);
             }
+        }
+
+        if ($inventoryMismatch && ! array_filter($diagnostics, static fn (array $diagnostic): bool => $diagnostic['code'] === 'artifact_staging_inventory_mismatch')) {
+            $diagnostics[] = $this->diagnostic('artifact_staging_inventory_mismatch', 'Staging inventory mismatch detected.', []);
         }
 
         return [
@@ -127,7 +187,7 @@ final class StagingIntegrityVerifier
             'total_size' => $actual['total_size'],
             'source_metadata' => $sourceMetadata,
             'staging_is_stale' => $stale,
-            'diagnostics' => array_values(array_unique($diagnostics)),
+            'diagnostics' => array_values($this->uniqueDiagnostics($diagnostics)),
         ];
     }
 
@@ -154,12 +214,12 @@ final class StagingIntegrityVerifier
             }
 
             if ($entry->isLink()) {
-                $diagnostics[] = 'Symlink is forbidden in staging payload: '.$relative;
+                $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Symlink is forbidden in staging payload.', ["path={$relative}"]);
                 continue;
             }
 
             if (! $entry->isDir() && ! $entry->isFile()) {
-                $diagnostics[] = 'Special file is forbidden in staging payload: '.$relative;
+                $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Special file is forbidden in staging payload.', ["path={$relative}"]);
                 continue;
             }
 
@@ -223,9 +283,80 @@ final class StagingIntegrityVerifier
     }
 
     /**
+     * @param  array<int, array{path: string, type: string, size: int, sha256: ?string}>  $inventory
+     * @return array<string, array{path: string, type: string, size: int, sha256: ?string}>
+     */
+    private function inventoryMap(array $inventory): array
+    {
+        $map = [];
+
+        foreach ($inventory as $entry) {
+            if (! is_array($entry) || ! is_string($entry['path'] ?? null)) {
+                continue;
+            }
+
+            $map[(string) $entry['path']] = [
+                'path' => (string) $entry['path'],
+                'type' => (string) ($entry['type'] ?? 'file'),
+                'size' => (int) ($entry['size'] ?? 0),
+                'sha256' => isset($entry['sha256']) ? (string) $entry['sha256'] : null,
+            ];
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param  array{path: string, type: string, size: int, sha256: ?string}  $expected
+     * @param  array{path: string, type: string, size: int, sha256: ?string}  $actual
+     */
+    private function entriesDiffer(array $expected, array $actual): bool
+    {
+        return $expected['type'] !== $actual['type']
+            || $expected['size'] !== $actual['size']
+            || $expected['sha256'] !== $actual['sha256'];
+    }
+
+    /**
+     * @param  array<int, array{code: string, message: string, details: array<int, string>}>  $diagnostics
+     * @return array<int, array{code: string, message: string, details: array<int, string>}>
+     */
+    private function uniqueDiagnostics(array $diagnostics): array
+    {
+        $unique = [];
+
+        foreach ($diagnostics as $diagnostic) {
+            if (! is_array($diagnostic) || ! isset($diagnostic['code'], $diagnostic['message'])) {
+                continue;
+            }
+
+            $key = $diagnostic['code'].'|'.$diagnostic['message'].'|'.json_encode($diagnostic['details'] ?? [], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $unique[$key] = [
+                'code' => (string) $diagnostic['code'],
+                'message' => (string) $diagnostic['message'],
+                'details' => array_values(array_map('strval', (array) ($diagnostic['details'] ?? []))),
+            ];
+        }
+
+        return array_values($unique);
+    }
+
+    /**
+     * @return array{code: string, message: string, details: array<int, string>}
+     */
+    private function diagnostic(string $code, string $message, array $details = []): array
+    {
+        return [
+            'code' => $code,
+            'message' => $message,
+            'details' => array_values(array_map('strval', $details)),
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
-    private function failure(string $message, array $diagnostics): array
+    private function failure(string $code, string $message, array $diagnostics): array
     {
         return [
             'success' => false,
@@ -238,7 +369,10 @@ final class StagingIntegrityVerifier
             'total_size' => 0,
             'source_metadata' => null,
             'staging_is_stale' => true,
-            'diagnostics' => array_values(array_unique([$message, ...$diagnostics])),
+            'diagnostics' => array_values($this->uniqueDiagnostics([
+                $this->diagnostic($code, $message),
+                ...$diagnostics,
+            ])),
         ];
     }
 }
