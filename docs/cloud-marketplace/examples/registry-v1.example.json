@@ -1,0 +1,79 @@
+{
+  "registry": {
+    "name": "ALTA Cloud Marketplace",
+    "version": "1.0.0",
+    "schema_version": "1",
+    "generated_at": "2026-07-11T00:00:00Z"
+  },
+  "items": [
+    {
+      "code": "core.products",
+      "type": "module",
+      "vendor": "Core",
+      "name": "Каталог товарів",
+      "description": "Base catalog module. Illustrative example item.",
+      "version": "1.0.0",
+      "category": "Каталог",
+      "tags": ["catalog", "products", "core"],
+      "requires_platform": ">=1.0.0",
+      "dependencies": [],
+      "is_featured": true,
+      "homepage_url": null,
+      "documentation_url": null,
+      "deprecated": false,
+      "published_at": "2026-07-10T12:00:00Z",
+      "publisher": {
+        "public_id": "pub_example_core",
+        "name": "Core Team (example)"
+      },
+      "artifact": {
+        "url": "https://marketplace.example.com/api/v1/artifacts/art_example_products_100/download",
+        "type": "zip",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 2048,
+        "signature": {
+          "type": "ed25519",
+          "value": "QUxUQV9FWEFNUExFX1NJR05BVFVSRV9OT1RfQ1JZUFRPR1JBUEhJQ0FMTFlfVkFMSURfMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+          "key_id": "alta-marketplace-example-key-1",
+          "payload_version": "raw-zip-v1"
+        }
+      }
+    },
+    {
+      "code": "core.theme-maker",
+      "type": "extension",
+      "vendor": "Core",
+      "name": "Theme Maker",
+      "description": "Design extension. Illustrative example item showing the dependency object form.",
+      "version": "0.3.0",
+      "category": "Дизайн",
+      "tags": ["theme", "design"],
+      "requires_platform": ">=1.0.0",
+      "dependencies": [
+        "core.products",
+        { "code": "core.seo", "constraint": ">=1.0.0" }
+      ],
+      "is_featured": false,
+      "homepage_url": "https://marketplace.example.com/addons/core.theme-maker",
+      "documentation_url": null,
+      "deprecated": false,
+      "published_at": "2026-07-10T12:30:00Z",
+      "publisher": {
+        "public_id": "pub_example_core",
+        "name": "Core Team (example)"
+      },
+      "artifact": {
+        "url": "https://marketplace.example.com/api/v1/artifacts/art_example_thememaker_030/download",
+        "type": "zip",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "size": 4096,
+        "signature": {
+          "type": "ed25519",
+          "value": "QUxUQV9FWEFNUExFX1NJR05BVFVSRV9GT1JfVEhFTUVfTUFLRVJfTk9UX1ZBTElEXzExMTExMTExMTExMTExMTExMTE=",
+          "key_id": "alta-marketplace-example-key-1",
+          "payload_version": "raw-zip-v1"
+        }
+      }
+    }
+  ]
+}

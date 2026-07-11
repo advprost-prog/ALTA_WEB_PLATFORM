@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://marketplace.example.com/api/v1/registry-v1.schema.json",
+  "title": "ALTA Cloud Marketplace Registry v1",
+  "description": "Schema for the public registry document served by GET /api/v1/registry. Backward compatible with the ALTA client contract; server-side rules are stricter than the client (e.g. lowercase-hex SHA-256). Unknown additive fields are permitted so future additive fields do not break validation.",
+  "type": "object",
+  "required": ["registry", "items"],
+  "additionalProperties": true,
+  "properties": {
+    "registry": {
+      "type": "object",
+      "description": "Registry-level metadata. 'version' is retained for backward compatibility with the demo contract and is decorative. 'schema_version' is an additive field the current client ignores.",
+      "required": ["schema_version"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string", "description": "Decorative; retained for demo backward compatibility." },
+        "schema_version": { "type": "string", "const": "1", "description": "Additive; value is '1' for Registry API v1." },
+        "generated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "Current-public-release projection: at most one item per addon code.",
+      "items": { "$ref": "#/$defs/item" }
+    }
+  },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "description": "A single published addon (one current public release).",
+      "required": ["code", "type", "version", "artifact"],
+      "additionalProperties": true,
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$",
+          "description": "Stable slug-like identifier, e.g. core.products."
+        },
+        "type": { "$ref": "#/$defs/addonType" },
+        "vendor": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Semantic version major.minor.patch."
+        },
+        "category": { "type": ["string", "null"] },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "requires_platform": {
+          "type": ["string", "null"],
+          "description": "Platform version constraint, e.g. >=1.0.0."
+        },
+        "dependencies": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/dependency" }
+        },
+        "is_featured": { "type": "boolean" },
+        "homepage_url": { "type": ["string", "null"], "format": "uri" },
+        "documentation_url": { "type": ["string", "null"], "format": "uri" },
+        "deprecated": {
+          "type": "boolean",
+          "description": "Additive v1 field; ignored by the current client."
+        },
+        "published_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Additive v1 field; ignored by the current client."
+        },
+        "publisher": {
+          "type": ["object", "null"],
+          "description": "Additive v1 field; publisher display metadata (not signed).",
+          "additionalProperties": true,
+          "properties": {
+            "public_id": { "type": "string" },
+            "name": { "type": "string" }
+          }
+        },
+        "artifact": { "$ref": "#/$defs/artifact" }
+      }
+    },
+    "addonType": {
+      "type": "string",
+      "enum": ["module", "extension"]
+    },
+    "dependency": {
+      "description": "Two backward-compatible forms: a plain code string, or an object with a code and an optional constraint.",
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$"
+        },
+        {
+          "type": "object",
+          "required": ["code"],
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$"
+            },
+            "constraint": {
+              "type": ["string", "null"],
+              "description": "Version constraint, e.g. >=1.0.0. Null or '*' means any."
+            }
+          }
+        }
+      ]
+    },
+    "artifact": {
+      "type": "object",
+      "description": "Immutable artifact metadata. Required for every published cloud item.",
+      "required": ["url", "type", "sha256", "size", "signature"],
+      "additionalProperties": true,
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^https://",
+          "format": "uri",
+          "description": "Absolute HTTPS URL on the Marketplace-controlled host. Never a presigned object-storage URL."
+        },
+        "type": { "type": "string", "const": "zip" },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Lowercase hex, exactly 64 chars. Stricter than the current client validator (which checks length only). Server-side strengthening; does not break client contract."
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Artifact size in bytes; must be > 0."
+        },
+        "signature": { "$ref": "#/$defs/signature" }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "description": "Ed25519 detached signature over the exact raw ZIP bytes.",
+      "required": ["type", "value", "key_id"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "type": "string", "const": "ed25519" },
+        "value": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+          "description": "Standard base64 of the 64-byte detached signature."
+        },
+        "key_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable public-key identifier, looked up in the client's trusted_keys."
+        },
+        "payload_version": {
+          "type": "string",
+          "const": "raw-zip-v1",
+          "description": "Additive v1 field; documents that raw ZIP bytes were signed. Ignored by the current client."
+        }
+      }
+    }
+  }
+}
