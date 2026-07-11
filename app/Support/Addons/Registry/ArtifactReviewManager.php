@@ -516,9 +516,13 @@ final class ArtifactReviewManager
      */
     private function persist(string $metadataPath, array $metadata): void
     {
-        Storage::disk(Config::get('addons-registry.downloads.disk', 'addons'))->put(
+        $disk = Storage::disk(Config::get('addons-registry.downloads.disk', 'addons'));
+        $existing = $disk->exists($metadataPath) ? json_decode($disk->get($metadataPath), true) : [];
+        $existing = is_array($existing) ? $existing : [];
+
+        $disk->put(
             $metadataPath,
-            json_encode($metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            json_encode(array_replace($existing, $metadata), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         );
     }
 

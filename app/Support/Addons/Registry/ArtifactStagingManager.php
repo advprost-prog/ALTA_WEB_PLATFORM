@@ -222,7 +222,11 @@ final class ArtifactStagingManager
 
     private function updateSummary(array $r, ?string $path, array $staging, bool $stale): void
     {
-        $m = $r['review'];
+        $disk = Storage::disk($r['disk']);
+        $existing = $disk->exists($r['metadata_path']) ? json_decode($disk->get($r['metadata_path']), true) : [];
+        $existing = is_array($existing) ? $existing : [];
+
+        $m = array_replace($existing, $r['review']);
         $m['staging_status'] = $path ? ArtifactStagingStatus::STAGED : ArtifactStagingStatus::NOT_STAGED;
         $m['staging_path'] = $path;
         $m['staged_at'] = $staging['staged_at'] ?? null;
@@ -232,7 +236,7 @@ final class ArtifactStagingManager
         $m['staging_inventory_hash'] = $staging['fingerprint']['inventory_hash'] ?? null;
         $m['staging_diagnostics'] = [];
         $m['staging_is_stale'] = $stale;
-        Storage::disk($r['disk'])->put($r['metadata_path'], json_encode($m, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        $disk->put($r['metadata_path'], json_encode($m, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
 
     private function resultData(string $path, array $m): array

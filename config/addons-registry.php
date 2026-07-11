@@ -123,4 +123,25 @@ return [
         'max_path_length' => (int) env('ADDONS_REGISTRY_STAGING_MAX_PATH_LENGTH', 240),
     ],
 
+    'promotion' => [
+        'enabled' => env('ADDONS_REGISTRY_PROMOTION_ENABLED', false),
+        'require_trusted' => env('ADDONS_REGISTRY_PROMOTION_REQUIRE_TRUSTED', true),
+        'require_approved' => env('ADDONS_REGISTRY_PROMOTION_REQUIRE_APPROVED', true),
+        'require_staged' => env('ADDONS_REGISTRY_PROMOTION_REQUIRE_STAGED', true),
+        'block_stale_approval' => env('ADDONS_REGISTRY_PROMOTION_BLOCK_STALE_APPROVAL', true),
+        'block_stale_staging' => env('ADDONS_REGISTRY_PROMOTION_BLOCK_STALE_STAGING', true),
+        'backup_enabled' => env('ADDONS_REGISTRY_PROMOTION_BACKUP_ENABLED', true),
+        'backup_disk' => env('ADDONS_REGISTRY_PROMOTION_BACKUP_DISK', 'addons'),
+        'backup_path' => env('ADDONS_REGISTRY_PROMOTION_BACKUP_PATH', 'addons/backups'),
+        'journal_disk' => env('ADDONS_REGISTRY_PROMOTION_JOURNAL_DISK', 'addons'),
+        'journal_path' => env('ADDONS_REGISTRY_PROMOTION_JOURNAL_PATH', 'addons/promotion-journal'),
+        'lock_timeout' => (int) env('ADDONS_REGISTRY_PROMOTION_LOCK_TIMEOUT', 30),
+        'keep_backups' => (int) env('ADDONS_REGISTRY_PROMOTION_KEEP_BACKUPS', 5),
+    ],
+
+    'live_roots' => [
+        'modules_path' => env('ADDONS_REGISTRY_LIVE_MODULES_PATH', base_path('modules')),
+        'extensions_path' => env('ADDONS_REGISTRY_LIVE_EXTENSIONS_PATH', base_path('extensions')),
+    ],
+
 ];

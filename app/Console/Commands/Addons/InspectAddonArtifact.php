@@ -3,6 +3,7 @@
 namespace App\Console\Commands\Addons;
 
 use App\Support\Addons\Marketplace\MarketplaceManager;
+use App\Support\Addons\Registry\ArtifactPromotionManager;
 use App\Support\Addons\Registry\ArtifactStagingManager;
 use Illuminate\Console\Command;
 
@@ -12,7 +13,7 @@ class InspectAddonArtifact extends Command
 
     protected $description = 'Verify signature, manifest, and trust of a quarantined addon artifact without installing it.';
 
-    public function handle(MarketplaceManager $manager): int
+    public function handle(MarketplaceManager $manager, ArtifactPromotionManager $promotions): int
     {
         $code = (string) $this->argument('code');
 
@@ -52,6 +53,17 @@ class InspectAddonArtifact extends Command
         $this->line('  staging_stale:   '.(($staging['staging_is_stale'] ?? false) ? 'yes' : 'no'));
         $this->line('  staged_at:       '.($staging['staged_at'] ?? '—'));
         $this->line('  staged_by:       '.($staging['staged_by_name'] ?? '—'));
+
+        $promotion = $promotions->getPromotionReport($code);
+        $this->line('  promotion_status: '.($promotion['status'] ?? 'not_promoted'));
+        $this->line('  live_path:        '.($promotion['live_path'] ?? '—'));
+        $this->line('  promoted_version: '.($promotion['promoted_version'] ?? '—'));
+        $this->line('  promoted_at:      '.($promotion['promoted_at'] ?? '—'));
+        $this->line('  promoted_by:      '.($promotion['promoted_by_name'] ?? '—'));
+        $this->line('  backup_path:      '.($promotion['backup_path'] ?? '—'));
+        $this->line('  rollback_avail:   '.(($promotion['rollback_available'] ?? false) ? 'yes' : 'no'));
+        $this->line('  promotion_stale:  '.(($promotion['promotion_is_stale'] ?? false) ? 'yes' : 'no'));
+        $this->line('  transaction_id:   '.($promotion['transaction_id'] ?? '—'));
 
         if ($report['diagnostics'] !== []) {
             $this->warn('Diagnostics:');

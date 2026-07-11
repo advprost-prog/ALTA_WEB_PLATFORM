@@ -4,6 +4,8 @@ namespace App\Console\Commands\Addons;
 
 use App\Support\Addons\AddonHealthCheck;
 use App\Support\Addons\Marketplace\MarketplaceManager;
+use App\Support\Addons\Registry\ArtifactPromotionManager;
+use App\Support\Addons\Registry\ArtifactPromotionStatus;
 use Illuminate\Console\Command;
 
 class DoctorAddons extends Command
@@ -12,7 +14,7 @@ class DoctorAddons extends Command
 
     protected $description = 'Report addon manifest, dependency, compatibility, and lifecycle diagnostics.';
 
-    public function handle(AddonHealthCheck $healthCheck, MarketplaceManager $marketplace): int
+    public function handle(AddonHealthCheck $healthCheck, MarketplaceManager $marketplace, ArtifactPromotionManager $promotions): int
     {
         $diagnostics = $healthCheck->diagnostics();
         $issues = $diagnostics['issues'];
@@ -36,6 +38,7 @@ class DoctorAddons extends Command
         foreach ($resolved['rows'] as $row) {
             $code = $row['item']->code;
             $source = $row['source'] ?? 'local';
+            $promotion = $promotions->getPromotionReport($code);
 
             if ($source === 'remote' || $source === 'local_remote') {
                 $remoteVersion = $row['remote_version'] ?? null;
@@ -52,6 +55,26 @@ class DoctorAddons extends Command
                 $issues[] = $this->diagnostic('addon_incompatible', 'Addon is incompatible with the current platform version.', [
                     $code.' requires '.$row['platform_constraint'],
                 ]);
+            }
+
+            if ($promotion['status'] === ArtifactPromotionStatus::READY) {
+                $info[] = $this->diagnostic('artifact_ready_for_promotion', 'Artifact is ready for promotion.', [$code]);
+            }
+
+            if (($promotion['status'] ?? null) === ArtifactPromotionStatus::PROMOTED) {
+                $info[] = $this->diagnostic('artifact_promoted_not_discovered', 'Artifact files are promoted but addon is not discovered/installed/enabled.', [
+                    $code.' -> '.($promotion['live_path'] ?? '—'),
+                ]);
+                if (! is_string($promotion['live_path'] ?? null) || ! is_dir((string) $promotion['live_path'])) {
+                    $issues[] = $this->diagnostic('artifact_promotion_live_missing', 'Promoted live directory is missing.', [$code]);
+                }
+                if (($promotion['rollback_available'] ?? false) === true) {
+                    $info[] = $this->diagnostic('artifact_rollback_available', 'Promotion rollback is available.', [$code]);
+                }
+            }
+
+            if (($promotion['promotion_is_stale'] ?? false) === true || ($promotion['status'] ?? null) === ArtifactPromotionStatus::STALE) {
+                $issues[] = $this->diagnostic('artifact_promotion_stale', 'Promotion metadata is stale.', [$code]);
             }
 
             if ($row['update_status'] === 'installed_newer') {
@@ -215,10 +238,17 @@ class DoctorAddons extends Command
                     $issues[] = $this->diagnostic('artifact_staging_stale', 'Artifact staging fingerprint is stale.', [$code]);
                 } elseif ($reviewStatus === 'approved' && $trustStatus === 'trusted') {
                     $info[] = $this->diagnostic('artifact_ready_for_staging', 'Artifact is trusted and approved for staging.', [$code]);
+                    if (($promotion['status'] ?? null) !== ArtifactPromotionStatus::PROMOTED && (bool) ($promotion['rollback_available'] ?? false) === false) {
+                        $info[] = $this->diagnostic('artifact_promotion_disabled', 'Promotion is disabled or not yet available.', [$code]);
+                    }
                 } elseif ($reviewStatus !== 'approved') {
-                    $warnings[] = $this->diagnostic('artifact_staging_blocked_review', 'Artifact staging is blocked by review status.', [$code]);
+                    $warnings[] = $this->diagnostic('artifact_promotion_blocked_review', 'Promotion is blocked by review status.', [$code]);
                 } elseif ($trustStatus !== 'trusted') {
-                    $issues[] = $this->diagnostic('artifact_staging_blocked_trust', 'Artifact staging is blocked by trust status.', [$code]);
+                    $issues[] = $this->diagnostic('artifact_promotion_blocked_trust', 'Promotion is blocked by trust status.', [$code]);
+                } elseif (($artifactMetadata['staging_is_stale'] ?? false) || $stagingStatus === 'stale') {
+                    $issues[] = $this->diagnostic('artifact_promotion_blocked_staging', 'Promotion is blocked by staging status.', [$code]);
+                } elseif ($stagingStatus !== 'staged') {
+                    $warnings[] = $this->diagnostic('artifact_promotion_stale_staging', 'Promotion is blocked by stale or missing staging.', [$code]);
                 }
 
                 if ($signatureStatus === 'missing' && $requireSignature) {
