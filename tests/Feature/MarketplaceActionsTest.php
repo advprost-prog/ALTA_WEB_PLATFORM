@@ -378,8 +378,8 @@ class MarketplaceActionsTest extends TestCase
 
         $this->get('/admin/marketplace')
             ->assertOk()
-            ->assertSee('Встановлено: <strong>0.2.0</strong>', false)
-            ->assertSee('Доступно: <strong>0.2.0</strong>', false);
+            ->assertSee('<dt>Встановлено</dt><dd>0.2.0</dd>', false)
+            ->assertSee('<dt>Доступно</dt><dd>0.2.0</dd>', false);
     }
 
     public function test_marketplace_page_shows_different_available_version_when_update_available(): void
@@ -403,8 +403,8 @@ class MarketplaceActionsTest extends TestCase
 
             $this->get('/admin/marketplace')
                 ->assertOk()
-                ->assertSee('Встановлено: <strong>0.2.0</strong>', false)
-                ->assertSee('Доступно: <strong>0.3.0</strong>', false)
+                ->assertSee('<dt>Встановлено</dt><dd>0.2.0</dd>', false)
+                ->assertSee('<dt>Доступно</dt><dd>0.3.0</dd>', false)
                 ->assertSee('Доступне оновлення', false);
         } finally {
             config(['addons-marketplace.items' => $originalItems]);

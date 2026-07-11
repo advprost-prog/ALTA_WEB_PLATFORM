@@ -214,6 +214,33 @@ class AddonArtifactReviewCoreTest extends TestCase
         $this->assertSame($before, Storage::disk('addons')->get($this->metadataPath));
     }
 
+    public function test_marketplace_review_markup_is_compact_complete_and_safe(): void
+    {
+        $this->prepareArtifact();
+        $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+        $html = Livewire::test(Marketplace::class)->html();
+        $markup = file_get_contents(resource_path('views/filament/pages/marketplace.blade.php'));
+
+        $this->assertStringContainsString('addon-marketplace__grid', $html);
+        $this->assertStringContainsString('addon-marketplace-card__artifact', $html);
+        $this->assertStringContainsString('Підпис дійсний', $markup);
+        $this->assertStringContainsString("'valid' => 'валідний'", $markup);
+        $this->assertStringContainsString('Довірений', $markup);
+        $this->assertSame('Очікує перевірки', ArtifactReviewStatus::label(ArtifactReviewStatus::PENDING));
+        $this->assertStringContainsString('inspectArtifact', $markup);
+        $this->assertStringContainsString('openApproveArtifactModal', $markup);
+        $this->assertStringContainsString('openRejectArtifactModal', $markup);
+        $this->assertStringContainsString('openRevokeArtifactModal', $markup);
+        $this->assertStringNotContainsString('@js', $markup);
+        $this->assertStringNotContainsString('installAddon(\'core.analytics\')', $html);
+
+        Livewire::test(Marketplace::class)
+            ->call('openApproveArtifactModal', self::CODE)
+            ->assertSee('addon-marketplace-review-modal', false)
+            ->assertSee('Підтвердити схвалення');
+    }
+
     public function test_container_resolves_review_and_marketplace_services(): void
     {
         $this->assertInstanceOf(ArtifactReviewManager::class, app(ArtifactReviewManager::class));

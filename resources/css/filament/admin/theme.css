@@ -1,0 +1,180 @@
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+
+@source '../../../../app/Filament/**/*';
+@source '../../../../resources/views/filament/**/*';
+
+.addon-marketplace,
+.addon-marketplace * {
+    min-width: 0;
+}
+
+.addon-marketplace {
+    width: 100%;
+}
+
+.addon-marketplace__toolbar,
+.addon-marketplace-card__badges,
+.addon-marketplace-card__actions,
+.addon-marketplace-review-modal__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.addon-marketplace__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+    gap: 0.875rem;
+    margin-top: 0.875rem;
+}
+
+.addon-marketplace-card {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.addon-marketplace-card__body {
+    width: 100%;
+    min-width: 0;
+    font-size: 0.875rem;
+}
+
+.addon-marketplace-card__badges {
+    gap: 0.3rem;
+}
+
+.addon-marketplace-card__badges .fi-badge,
+.addon-marketplace-card__actions .fi-btn {
+    flex: 0 0 auto;
+    max-width: 100%;
+    white-space: nowrap;
+}
+
+.addon-marketplace-card__description {
+    display: -webkit-box;
+    margin-top: 0.5rem;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+}
+
+.addon-marketplace-card__meta {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.2rem 0.6rem;
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+}
+
+.addon-marketplace-card__meta dt {
+    color: var(--gray-500);
+}
+
+.addon-marketplace-card__meta dd,
+.addon-marketplace-card__technical,
+.addon-marketplace-card__details,
+.addon-marketplace-card li,
+.addon-marketplace-card p {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.addon-marketplace-card__tags {
+    max-height: 3.5rem;
+    margin-top: 0.5rem;
+    overflow: hidden;
+}
+
+.addon-marketplace-card__artifact {
+    margin-top: 0.5rem;
+    padding: 0.625rem;
+}
+
+.addon-marketplace-card__artifact-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+}
+
+.addon-marketplace-card__technical-summary,
+.addon-marketplace-card__security,
+.addon-marketplace-card__actions,
+.addon-marketplace-card__details {
+    margin-top: 0.5rem;
+}
+
+.addon-marketplace-card__details summary {
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.addon-marketplace-card__details ul {
+    margin-top: 0.35rem;
+    padding-left: 1rem;
+    font-size: 0.75rem;
+}
+
+.addon-marketplace-card__technical {
+    font-family: var(--mono-font-family), monospace;
+    font-size: 0.72rem;
+}
+
+.addon-marketplace-card__footer {
+    padding-top: 0.25rem;
+}
+
+.addon-marketplace-review-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgb(0 0 0 / 45%);
+}
+
+.addon-marketplace-review-modal__window {
+    width: min(36rem, calc(100vw - 2rem));
+    max-height: calc(100vh - 3rem);
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+    border-radius: 0.75rem;
+    background: white;
+    padding: 1.25rem;
+    box-shadow: 0 20px 50px rgb(0 0 0 / 25%);
+}
+
+.dark .addon-marketplace-review-modal__window {
+    background: var(--gray-900);
+}
+
+.addon-marketplace-review-modal__code {
+    margin-top: 0.4rem;
+    overflow-wrap: anywhere;
+}
+
+.addon-marketplace-review-modal__textarea {
+    width: 100%;
+    max-width: 100%;
+    margin-top: 0.35rem;
+    border: 1px solid var(--gray-300);
+    border-radius: 0.5rem;
+    padding: 0.65rem;
+}
+
+.addon-marketplace-review-modal__actions {
+    justify-content: flex-end;
+    margin-top: 1rem;
+}
+
+@media (max-width: 40rem) {
+    .addon-marketplace-review-modal__actions {
+        justify-content: stretch;
+    }
+}
