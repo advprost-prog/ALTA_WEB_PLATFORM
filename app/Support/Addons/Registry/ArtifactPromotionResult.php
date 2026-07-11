@@ -18,16 +18,18 @@ final class ArtifactPromotionResult
         public readonly array $blockedReasons = [],
         public readonly array $metadata = [],
         public readonly bool $rollbackAvailable = false,
+        public readonly bool $idempotent = false,
+        public readonly ?string $inventoryHash = null,
     ) {}
 
     public static function success(string $code, ?string $version, string $status, string $message, array $data = []): self
     {
-        return new self(true, $code, $version, $status, $message, $data['addon_type'] ?? null, $data['live_path'] ?? null, $data['backup_path'] ?? null, $data['transaction_id'] ?? null, [], [], $data['metadata'] ?? [], (bool) ($data['rollback_available'] ?? false));
+        return new self(true, $code, $version, $status, $message, $data['addon_type'] ?? null, $data['live_path'] ?? null, $data['backup_path'] ?? null, $data['transaction_id'] ?? null, [], [], $data['metadata'] ?? [], (bool) ($data['rollback_available'] ?? false), (bool) ($data['idempotent'] ?? false), $data['inventory_hash'] ?? null);
     }
 
     public static function failure(string $code, ?string $version, string $status, string $message, array $reasons = [], array $data = []): self
     {
-        return new self(false, $code, $version, $status, $message, $data['addon_type'] ?? null, $data['live_path'] ?? null, $data['backup_path'] ?? null, $data['transaction_id'] ?? null, $data['diagnostics'] ?? $reasons, $reasons, $data['metadata'] ?? [], (bool) ($data['rollback_available'] ?? false));
+        return new self(false, $code, $version, $status, $message, $data['addon_type'] ?? null, $data['live_path'] ?? null, $data['backup_path'] ?? null, $data['transaction_id'] ?? null, $data['diagnostics'] ?? $reasons, $reasons, $data['metadata'] ?? [], (bool) ($data['rollback_available'] ?? false), (bool) ($data['idempotent'] ?? false), $data['inventory_hash'] ?? null);
     }
 
     public function toArray(): array

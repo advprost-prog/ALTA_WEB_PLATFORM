@@ -65,11 +65,19 @@ class DoctorAddons extends Command
                 $info[] = $this->diagnostic('artifact_promoted_not_discovered', 'Artifact files are promoted but addon is not discovered/installed/enabled.', [
                     $code.' -> '.($promotion['live_path'] ?? '—'),
                 ]);
+                if (($promotion['idempotent_ready'] ?? false) === true) {
+                    $info[] = $this->diagnostic('artifact_promotion_idempotent_ready', 'Promoted artifact is idempotent-ready.', [$code]);
+                }
                 if (! is_string($promotion['live_path'] ?? null) || ! is_dir((string) $promotion['live_path'])) {
                     $issues[] = $this->diagnostic('artifact_promotion_live_missing', 'Promoted live directory is missing.', [$code]);
                 }
                 if (($promotion['rollback_available'] ?? false) === true) {
                     $info[] = $this->diagnostic('artifact_rollback_available', 'Promotion rollback is available.', [$code]);
+                }
+                if (($promotion['live_fingerprint_mismatch'] ?? false) === true) {
+                    $issues[] = $this->diagnostic('artifact_promotion_live_fingerprint_mismatch', 'Live tree does not match promoted inventory.', [
+                        $code.' -> '.($promotion['live_path'] ?? '—'),
+                    ]);
                 }
             }
 

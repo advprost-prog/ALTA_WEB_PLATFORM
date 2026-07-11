@@ -40,6 +40,31 @@ final class ArtifactPromotionManager
             return ArtifactPromotionResult::failure($code, $state['version'], ArtifactPromotionStatus::BLOCKED, 'Promotion заблоковано.', $reasons, $data);
         }
 
+        $preflight = $this->evaluatePromotionIdentity($state);
+        if (($preflight['same_artifact'] ?? false) === true && ($preflight['identical'] ?? false) === true) {
+            return ArtifactPromotionResult::success($code, $state['version'], ArtifactPromotionStatus::PROMOTED, 'Artifact уже перенесено у live addon directory.', [
+                'addon_type' => $state['type'],
+                'live_path' => $preflight['live_path'] ?? null,
+                'backup_path' => $preflight['backup_path'] ?? null,
+                'transaction_id' => $preflight['transaction_id'] ?? null,
+                'rollback_available' => (bool) ($preflight['rollback_available'] ?? false),
+                'idempotent' => true,
+                'inventory_hash' => $preflight['live_inventory_hash'] ?? null,
+                'metadata' => $this->refreshMetadata($state),
+            ]);
+        }
+
+        if (($preflight['same_artifact'] ?? false) === true && ($preflight['live_fingerprint_mismatch'] ?? false) === true) {
+            return ArtifactPromotionResult::failure($code, $state['version'], ArtifactPromotionStatus::STALE, 'Live fingerprint не збігається з останнім promotion.', [], [
+                'metadata' => $this->refreshMetadata($state),
+                'diagnostics' => [$this->diagnostic('artifact_promotion_live_fingerprint_mismatch', 'Live tree does not match promoted inventory.', [
+                    'live_path='.((string) ($preflight['live_path'] ?? '')),
+                    'expected_inventory_hash='.((string) ($preflight['promotion_inventory_hash'] ?? '')),
+                    'actual_inventory_hash='.((string) ($preflight['live_inventory_hash'] ?? '')),
+                ])],
+            ]);
+        }
+
         $lock = Cache::lock($this->lockKey($code), (int) Config::get('addons-registry.promotion.lock_timeout', 30));
         if (! $lock->get()) {
             return ArtifactPromotionResult::failure($code, $state['version'], ArtifactPromotionStatus::BLOCKED, 'Promotion lock зайнято.', ['Інша promotion transaction уже виконується.'], ['metadata' => $state['metadata']]);
@@ -159,6 +184,7 @@ final class ArtifactPromotionManager
             $promotion['promoted_by_name'] = $actor->name;
             $promotion['promoted_by_type'] = $actor->type;
             $promotion['promoted_version'] = $state['version'];
+            $promotion['promotion_source_artifact_sha256'] = $state['metadata']['sha256'] ?? null;
             $promotion['promotion_inventory_hash'] = $verification['inventory_hash'];
             $promotion['promotion_diagnostics'] = [];
             $promotion['promotion_is_stale'] = false;
@@ -183,6 +209,8 @@ final class ArtifactPromotionManager
                 'transaction_id' => $transactionId,
                 'rollback_available' => true,
                 'metadata' => $promotion,
+                'idempotent' => false,
+                'inventory_hash' => $verification['inventory_hash'],
             ]);
         } catch (\Throwable $exception) {
             $this->journalFailed($journalPath, [$exception->getMessage()]);
@@ -381,7 +409,10 @@ final class ArtifactPromotionManager
         $stagingVerification = $stagingPath !== null
             ? $this->verifier->verify($stagingPath)
             : ['success' => false, 'diagnostics' => [$this->diagnostic('artifact_staging_metadata_invalid', 'Staging path is missing.', ['staging_path missing'])], 'staging_is_stale' => false];
-        $stale = ! $stagingVerification['success'] || ((string) ($promotion['promotion_status'] ?? '') === ArtifactPromotionStatus::PROMOTED && (bool) ($stagingVerification['staging_is_stale'] ?? false));
+        $identity = $this->evaluatePromotionIdentity($state, $promotion, $stagingVerification);
+        $stale = ! $stagingVerification['success']
+            || ((string) ($promotion['promotion_status'] ?? '') === ArtifactPromotionStatus::PROMOTED && (bool) ($stagingVerification['staging_is_stale'] ?? false))
+            || (bool) ($identity['live_fingerprint_mismatch'] ?? false);
         $promotion['promotion_is_stale'] = $stale;
         if ($promotion !== []) {
             $this->persistMetadata($state['metadata_path'], $promotion);
@@ -411,8 +442,16 @@ final class ArtifactPromotionManager
             'promotion_inventory_hash' => $promotion['promotion_inventory_hash'] ?? null,
             'promotion_diagnostics' => $promotion['promotion_diagnostics'] ?? [],
             'promotion_is_stale' => $stale,
+            'idempotent_ready' => $identity['identical'] ?? false,
+            'live_inventory_matches' => $identity['live_inventory_matches'] ?? false,
+            'live_fingerprint_mismatch' => $identity['live_fingerprint_mismatch'] ?? false,
+            'last_promotion_transaction' => $promotion['promotion_transaction_id'] ?? null,
+            'live_inventory_hash' => $identity['live_inventory_hash'] ?? null,
             'metadata' => $promotion,
-            'diagnostics' => array_values($this->uniqueDiagnostics($stagingVerification['diagnostics'])),
+            'diagnostics' => array_values($this->uniqueDiagnostics(array_merge(
+                is_array($stagingVerification['diagnostics'] ?? null) ? $stagingVerification['diagnostics'] : [],
+                $identity['diagnostics'] ?? [],
+            ))),
         ];
     }
 
@@ -739,6 +778,7 @@ final class ArtifactPromotionManager
     private function journalPath(string $code, string $transactionId, string $action = 'promote'): string
     {
         $root = rtrim((string) Config::get('addons-registry.promotion.journal_path', 'addons/promotion-journal'), '/');
+
         return Storage::disk((string) Config::get('addons-registry.promotion.journal_disk', 'addons'))->path($root.'/'.$code.'/'.$transactionId.($action === 'rollback' ? '.rollback' : '').'.json');
     }
 
@@ -858,6 +898,153 @@ final class ArtifactPromotionManager
     }
 
     /**
+     * @param  array<string, mixed>  $state
+     * @param  array<string, mixed>|null  $promotion
+     * @param  array<string, mixed>|null  $verification
+     * @return array{same_artifact: bool, identical: bool, live_fingerprint_mismatch: bool, live_inventory_matches: bool, live_inventory_hash: ?string, live_path: ?string, backup_path: ?string, transaction_id: ?string, promotion_inventory_hash: ?string, rollback_available: bool, diagnostics: array<int, array{code: string, message: string, details: array<int, string>}>}
+     */
+    private function evaluatePromotionIdentity(array $state, ?array $promotion = null, ?array $verification = null): array
+    {
+        $promotion = $promotion ?? $this->promotionMetadata($state);
+        if (! is_array($promotion) || (string) ($promotion['promotion_status'] ?? '') !== ArtifactPromotionStatus::PROMOTED) {
+            return [
+                'same_artifact' => false,
+                'identical' => false,
+                'live_fingerprint_mismatch' => false,
+                'live_inventory_matches' => false,
+                'live_inventory_hash' => null,
+                'live_path' => null,
+                'backup_path' => null,
+                'transaction_id' => null,
+                'promotion_inventory_hash' => null,
+                'rollback_available' => false,
+                'diagnostics' => [],
+            ];
+        }
+
+        $stagingPath = $this->absoluteStagingPath($state, false);
+        if ($verification === null) {
+            $verification = $stagingPath !== null ? $this->verifier->verify($stagingPath) : null;
+        }
+
+        if (! is_array($verification) || ! ($verification['success'] ?? false)) {
+            return [
+                'same_artifact' => false,
+                'identical' => false,
+                'live_fingerprint_mismatch' => false,
+                'live_inventory_matches' => false,
+                'live_inventory_hash' => null,
+                'live_path' => $promotion['promotion_live_path'] ?? null,
+                'backup_path' => $promotion['promotion_backup_path'] ?? null,
+                'transaction_id' => $promotion['promotion_transaction_id'] ?? null,
+                'promotion_inventory_hash' => $promotion['promotion_inventory_hash'] ?? null,
+                'rollback_available' => (bool) ($promotion['rollback_available'] ?? false),
+                'diagnostics' => [],
+            ];
+        }
+
+        $live = $this->resolver->resolve($verification['manifest']);
+        $sameArtifact = $this->promotionSourceMatchesState($state, $promotion, $verification, $live);
+        if (! $sameArtifact) {
+            return [
+                'same_artifact' => false,
+                'identical' => false,
+                'live_fingerprint_mismatch' => false,
+                'live_inventory_matches' => false,
+                'live_inventory_hash' => null,
+                'live_path' => $live['live_path'] ?? null,
+                'backup_path' => $promotion['promotion_backup_path'] ?? null,
+                'transaction_id' => $promotion['promotion_transaction_id'] ?? null,
+                'promotion_inventory_hash' => $promotion['promotion_inventory_hash'] ?? null,
+                'rollback_available' => (bool) ($promotion['rollback_available'] ?? false),
+                'diagnostics' => [],
+            ];
+        }
+
+        $liveInventory = is_dir($live['live_path']) ? $this->inventoryForPath($live['live_path']) : null;
+        $liveManifest = is_dir($live['live_path']) ? $this->liveManifest($live['live_path']) : [];
+        $liveMatches = is_array($liveInventory)
+            && ($liveInventory['inventory_hash'] ?? null) === ($verification['inventory_hash'] ?? null)
+            && $this->liveManifestMatches($liveManifest, $verification['manifest']);
+
+        if (! $liveMatches) {
+            $actualHash = is_array($liveInventory) ? ($liveInventory['inventory_hash'] ?? null) : null;
+
+            return [
+                'same_artifact' => true,
+                'identical' => false,
+                'live_fingerprint_mismatch' => true,
+                'live_inventory_matches' => false,
+                'live_inventory_hash' => is_string($actualHash) ? $actualHash : null,
+                'live_path' => $live['live_path'] ?? null,
+                'backup_path' => $promotion['promotion_backup_path'] ?? null,
+                'transaction_id' => $promotion['promotion_transaction_id'] ?? null,
+                'promotion_inventory_hash' => $promotion['promotion_inventory_hash'] ?? null,
+                'rollback_available' => (bool) ($promotion['rollback_available'] ?? false),
+                'diagnostics' => [
+                    $this->diagnostic('artifact_promotion_live_fingerprint_mismatch', 'Live tree does not match promoted inventory.', [
+                        'live_path='.(string) ($live['live_path'] ?? ''),
+                        'expected_inventory_hash='.(string) ($promotion['promotion_inventory_hash'] ?? ''),
+                        'actual_inventory_hash='.(string) ($actualHash ?? ''),
+                    ]),
+                ],
+            ];
+        }
+
+        return [
+            'same_artifact' => true,
+            'identical' => true,
+            'live_fingerprint_mismatch' => false,
+            'live_inventory_matches' => true,
+            'live_inventory_hash' => $liveInventory['inventory_hash'] ?? null,
+            'live_path' => $live['live_path'] ?? null,
+            'backup_path' => $promotion['promotion_backup_path'] ?? null,
+            'transaction_id' => $promotion['promotion_transaction_id'] ?? null,
+            'promotion_inventory_hash' => $promotion['promotion_inventory_hash'] ?? null,
+            'rollback_available' => (bool) ($promotion['rollback_available'] ?? false),
+            'diagnostics' => [],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $state
+     * @param  array<string, mixed>  $promotion
+     * @param  array<string, mixed>  $verification
+     * @param  array<string, mixed>  $live
+     */
+    private function promotionSourceMatchesState(array $state, array $promotion, array $verification, array $live): bool
+    {
+        if (($promotion['promotion_live_path'] ?? null) !== ($live['live_path'] ?? null)) {
+            return false;
+        }
+
+        if (($promotion['promoted_version'] ?? null) !== ($state['version'] ?? null)) {
+            return false;
+        }
+
+        if (($promotion['promotion_inventory_hash'] ?? null) !== ($verification['inventory_hash'] ?? null)) {
+            return false;
+        }
+
+        if (($promotion['promotion_source_artifact_sha256'] ?? $state['metadata']['sha256'] ?? null) !== ($state['metadata']['sha256'] ?? null)) {
+            return false;
+        }
+
+        return $this->liveManifestMatches($this->liveManifest((string) ($live['live_path'] ?? '')), $verification['manifest']);
+    }
+
+    /**
+     * @param  array<string, mixed>  $liveManifest
+     * @param  array<string, mixed>  $expectedManifest
+     */
+    private function liveManifestMatches(array $liveManifest, array $expectedManifest): bool
+    {
+        return (string) ($liveManifest['code'] ?? '') === (string) ($expectedManifest['code'] ?? '')
+            && (string) ($liveManifest['version'] ?? '') === (string) ($expectedManifest['version'] ?? '')
+            && (string) ($liveManifest['type'] ?? '') === (string) ($expectedManifest['type'] ?? '');
+    }
+
+    /**
      * @return array{inventory: array<int, array<string, mixed>>, inventory_hash: string, file_count: int, total_size: int}
      */
     private function inventoryForPath(string $path): array
@@ -964,6 +1151,7 @@ final class ArtifactPromotionManager
             $entryPath = $entry->getPathname();
             if ($entry->isDir()) {
                 @rmdir($entryPath);
+
                 continue;
             }
 

@@ -56,13 +56,17 @@ class InspectAddonArtifact extends Command
 
         $promotion = $promotions->getPromotionReport($code);
         $this->line('  promotion_status: '.($promotion['status'] ?? 'not_promoted'));
+        $this->line('  last_promotion_transaction: '.($promotion['last_promotion_transaction'] ?? '—'));
         $this->line('  live_path:        '.($promotion['live_path'] ?? '—'));
+        $this->line('  live_inventory_matches: '.(($promotion['live_inventory_matches'] ?? false) ? 'yes' : 'no'));
+        $this->line('  idempotent_ready: '.(($promotion['idempotent_ready'] ?? false) ? 'yes' : 'no'));
         $this->line('  promoted_version: '.($promotion['promoted_version'] ?? '—'));
         $this->line('  promoted_at:      '.($promotion['promoted_at'] ?? '—'));
         $this->line('  promoted_by:      '.($promotion['promoted_by_name'] ?? '—'));
         $this->line('  backup_path:      '.($promotion['backup_path'] ?? '—'));
         $this->line('  rollback_avail:   '.(($promotion['rollback_available'] ?? false) ? 'yes' : 'no'));
         $this->line('  promotion_stale:  '.(($promotion['promotion_is_stale'] ?? false) ? 'yes' : 'no'));
+        $this->line('  current_inventory_hash: '.($promotion['live_inventory_hash'] ?? '—'));
         $this->line('  transaction_id:   '.($promotion['transaction_id'] ?? '—'));
 
         if (is_array($promotion['diagnostics'] ?? null) && $promotion['diagnostics'] !== []) {
@@ -84,6 +88,16 @@ class InspectAddonArtifact extends Command
         if ($report['diagnostics'] !== []) {
             $this->warn('Diagnostics:');
             foreach ($report['diagnostics'] as $diagnostic) {
+                if (is_array($diagnostic)) {
+                    $line = '  - '.(($diagnostic['code'] ?? 'diagnostic')).': '.($diagnostic['message'] ?? '');
+                    if (! empty($diagnostic['details'] ?? [])) {
+                        $line .= ' ['.implode('; ', array_map('strval', (array) $diagnostic['details'])).']';
+                    }
+                    $this->line($line);
+
+                    continue;
+                }
+
                 $this->line('  - '.$diagnostic);
             }
         }

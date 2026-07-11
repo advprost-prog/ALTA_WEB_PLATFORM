@@ -15,6 +15,7 @@ use App\Support\Addons\Registry\RegistryClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -141,42 +142,101 @@ class AddonArtifactPromotionTest extends TestCase
         $this->assertSame('promoted', $metadata['promotion_status']);
         $this->assertSame($result->livePath, $metadata['promotion_live_path']);
         $this->assertSame('1.0.0', $metadata['promoted_version']);
+        $this->assertFalse($result->idempotent);
+        $this->assertNotNull($result->inventoryHash);
         $this->assertTrue($result->rollbackAvailable);
         $this->assertTrue(Storage::disk('addons')->exists($state['metadata_path']));
+        $this->assertCount(1, Storage::disk('addons')->allFiles('addons/promotion-journal/core.analytics'));
+        $this->assertCount(0, Storage::disk('addons')->directories('addons/backups/core.analytics'));
     }
 
-    public function test_existing_live_addon_is_backed_up_and_rollback_restores_it(): void
+    public function test_repeat_identical_promotion_is_idempotent_without_side_effects(): void
     {
-        $state = $this->preparePromotableArtifact(version: '1.0.1', includeMarker: false);
+        $state = $this->preparePromotableArtifact();
         Config::set('addons-registry.promotion.enabled', true);
 
-        $livePath = $this->testModulesPath.'/Core/Analytics';
-        File::ensureDirectoryExists($livePath);
-        File::put($livePath.'/manifest.json', json_encode([
-            'code' => self::CODE,
-            'type' => 'module',
-            'vendor' => 'Core',
-            'version' => '1.0.0',
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
-        File::put($livePath.'/legacy.txt', 'old live');
+        $first = app(ArtifactPromotionManager::class)->promote(self::CODE, ArtifactReviewActor::cli('test'));
+        $metadataBefore = Storage::disk('addons')->get($state['metadata_path']);
+        $journalCountBefore = count(Storage::disk('addons')->allFiles('addons/promotion-journal/core.analytics'));
+        $backupCountBefore = count(Storage::disk('addons')->directories('addons/backups/core.analytics'));
+        $eventCountBefore = DB::table('system_addon_events')->where('addon_code', self::CODE)->count();
+
+        $repeat = app(ArtifactPromotionManager::class)->promote(self::CODE, ArtifactReviewActor::cli('test'));
+
+        $this->assertTrue($repeat->success);
+        $this->assertSame('promoted', $repeat->status);
+        $this->assertTrue($repeat->idempotent);
+        $this->assertSame($first->transactionId, $repeat->transactionId);
+        $this->assertSame($first->livePath, $repeat->livePath);
+        $this->assertSame($first->backupPath, $repeat->backupPath);
+        $this->assertSame($first->inventoryHash, $repeat->inventoryHash);
+        $this->assertSame($metadataBefore, Storage::disk('addons')->get($state['metadata_path']));
+        $this->assertSame($journalCountBefore, count(Storage::disk('addons')->allFiles('addons/promotion-journal/core.analytics')));
+        $this->assertSame($backupCountBefore, count(Storage::disk('addons')->directories('addons/backups/core.analytics')));
+        $this->assertSame($eventCountBefore, DB::table('system_addon_events')->where('addon_code', self::CODE)->count());
+        $this->assertEmpty(glob(dirname($first->livePath).'/.Analytics.promote-*'));
+        $this->assertEmpty(glob(dirname($first->livePath).'/.Analytics.rollback-*'));
+        $this->assertSame('Artifact уже перенесено у live addon directory.', $repeat->message);
+    }
+
+    public function test_live_tree_mismatch_blocks_identical_repeat_without_overwrite(): void
+    {
+        $state = $this->preparePromotableArtifact();
+        Config::set('addons-registry.promotion.enabled', true);
+
+        $first = app(ArtifactPromotionManager::class)->promote(self::CODE, ArtifactReviewActor::cli('test'));
+        $liveFile = $first->livePath.'/README.md';
+        File::put($liveFile, 'manual drift');
+
+        $journalCountBefore = count(Storage::disk('addons')->allFiles('addons/promotion-journal/core.analytics'));
+        $backupCountBefore = count(Storage::disk('addons')->directories('addons/backups/core.analytics'));
+
+        $repeat = app(ArtifactPromotionManager::class)->promote(self::CODE, ArtifactReviewActor::cli('test'));
+
+        $this->assertFalse($repeat->success);
+        $this->assertSame('stale', $repeat->status);
+        $this->assertFalse($repeat->idempotent);
+        $this->assertContains('artifact_promotion_live_fingerprint_mismatch', $this->diagnosticCodes($repeat->diagnostics));
+        $this->assertSame('manual drift', File::get($liveFile));
+        $this->assertSame($journalCountBefore, count(Storage::disk('addons')->allFiles('addons/promotion-journal/core.analytics')));
+        $this->assertSame($backupCountBefore, count(Storage::disk('addons')->directories('addons/backups/core.analytics')));
+        $this->assertFalse(file_exists(dirname($first->livePath).'/.Analytics.promote-'.$repeat->transactionId));
+    }
+
+    public function test_existing_live_addon_is_backed_up_and_update_promotion_restores_it(): void
+    {
+        $firstState = $this->preparePromotableArtifact(version: '1.0.0', includeMarker: false);
+        Config::set('addons-registry.promotion.enabled', true);
+
+        $firstPromote = app(ArtifactPromotionManager::class)->promote(self::CODE, ArtifactReviewActor::cli('test'));
+        $this->assertTrue($firstPromote->success);
+        $this->assertSame('promoted', $firstPromote->status);
+
+        $updateState = $this->preparePromotableArtifact(version: '1.1.0', includeMarker: false);
+        Config::set('addons-registry.promotion.enabled', true);
 
         $promote = app(ArtifactPromotionManager::class)->promote(self::CODE, ArtifactReviewActor::cli('test'));
         $this->assertTrue($promote->success, implode(' ', $promote->diagnostics));
+        $this->assertFalse($promote->idempotent);
         $this->assertNotNull($promote->backupPath);
-        $this->assertTrue(is_dir($promote->backupPath));
         $this->assertFileExists($promote->backupPath.'/backup.json');
+        $this->assertNotSame($firstPromote->transactionId, $promote->transactionId);
+        $this->assertSame('1.1.0', $promote->version);
+        $this->assertSame('1.1.0', json_decode(Storage::disk('addons')->get($updateState['metadata_path']), true)['promoted_version']);
+        $this->assertCount(2, Storage::disk('addons')->allFiles('addons/promotion-journal/core.analytics'));
+        $this->assertCount(1, Storage::disk('addons')->directories('addons/backups/core.analytics'));
 
         $backup = json_decode(File::get($promote->backupPath.'/backup.json'), true);
         $this->assertSame('1.0.0', $backup['old_version']);
-        $this->assertSame($livePath, $backup['source_live_path']);
+        $this->assertSame($firstPromote->livePath, $backup['source_live_path']);
 
         $rollback = app(ArtifactPromotionManager::class)->rollback(self::CODE, $promote->transactionId, 'test rollback', ArtifactReviewActor::cli('test'));
         $this->assertTrue($rollback->success, implode(' ', $rollback->diagnostics));
         $this->assertSame('rolled_back', $rollback->status);
-        $this->assertTrue(is_dir($livePath));
-        $this->assertSame('1.0.0', json_decode(File::get($livePath.'/manifest.json'), true)['version']);
-        $this->assertTrue(Storage::disk('addons')->exists($state['staging_path'].'/staging.json'));
-        $this->assertTrue(Storage::disk('addons')->exists($state['metadata_path']));
+        $this->assertTrue(is_dir($firstPromote->livePath));
+        $this->assertSame('1.0.0', json_decode(File::get($firstPromote->livePath.'/manifest.json'), true)['version']);
+        $this->assertTrue(Storage::disk('addons')->exists($firstState['staging_path'].'/staging.json'));
+        $this->assertTrue(Storage::disk('addons')->exists($updateState['metadata_path']));
     }
 
     public function test_promotion_blocks_when_lock_is_held(): void
@@ -429,7 +489,7 @@ class AddonArtifactPromotionTest extends TestCase
         }
         @unlink($zipPath);
 
-        $zip = new \ZipArchive();
+        $zip = new \ZipArchive;
         if ($zip->open($zipPath, \ZipArchive::CREATE) !== true) {
             $this->fail('Unable to create zip artifact.');
         }
@@ -488,5 +548,4 @@ PHP);
     {
         return array_values(array_filter(array_map(static fn (array $diagnostic): string => (string) ($diagnostic['code'] ?? ''), $diagnostics)));
     }
-
 }
