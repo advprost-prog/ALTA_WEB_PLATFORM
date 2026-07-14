@@ -91,6 +91,19 @@ class AddonArtifactDownloadTest extends TestCase
     {
         $registryPath = base_path('docs/examples/registry.example.json');
         $registry = json_decode((string) file_get_contents($registryPath), true);
+        $registry['registry'] += [
+            'application_version' => '1.0.0',
+            'build_version' => 'test-build',
+            'schema_version' => '1',
+        ];
+        $registry['registry']['version'] = 'test-build';
+        $registry['items'] = array_values(array_filter($registry['items'], fn (array $item) => $item['code'] === 'core.analytics'));
+        foreach ($registry['items'] as &$schemaItem) {
+            $schemaItem['publisher'] = ['public_id' => '11111111-1111-4111-8111-111111111111', 'name' => 'Test Publisher'];
+            $schemaItem['published_at'] = '2026-07-14T00:00:00+00:00';
+            $schemaItem['artifact']['signature']['payload_version'] = 'raw-zip-v1';
+        }
+        unset($schemaItem);
 
         if ($registrySha256 !== null) {
             foreach ($registry['items'] as &$item) {
@@ -240,12 +253,12 @@ class AddonArtifactDownloadTest extends TestCase
         $this->assertFalse(Storage::disk('addons')->exists($this->quarantineDir.'/core.analytics-1.0.0.zip'));
     }
 
-    public function test_downloader_rejects_wrong_extension(): void
+    public function test_downloader_accepts_production_download_url_and_uses_trusted_zip_filename(): void
     {
         $this->configureRegistry(true);
 
         Http::fake([
-            'http://127.0.0.1:9001/artifacts/core.analytics-1.0.0.tar' => Http::response($this->realArtifactBytes(), 200),
+            'http://127.0.0.1:9001/api/v1/artifacts/11111111-1111-4111-8111-111111111111/download' => Http::response($this->realArtifactBytes(), 200),
         ]);
 
         $item = RegistryItem::fromArray([
@@ -255,7 +268,7 @@ class AddonArtifactDownloadTest extends TestCase
             'name' => 'Analytics',
             'version' => '1.0.0',
             'artifact' => [
-                'url' => 'http://127.0.0.1:9001/artifacts/core.analytics-1.0.0.tar',
+                'url' => 'http://127.0.0.1:9001/api/v1/artifacts/11111111-1111-4111-8111-111111111111/download',
                 'type' => 'zip',
                 'sha256' => $this->realArtifactSha256(),
                 'size' => 358,
@@ -266,7 +279,17 @@ class AddonArtifactDownloadTest extends TestCase
         $downloader = new ArtifactDownloader(new RegistryClient(config('addons-registry')), config('addons-registry'));
         $result = $downloader->download($item);
 
-        $this->assertFalse($result->success);
+        $this->assertTrue($result->success);
+        $this->assertSame($this->quarantineDir.'/core.analytics-1.0.0.zip', $result->path);
+    }
+
+    public function test_trusted_filename_sanitizes_untrusted_path_characters(): void
+    {
+        $filename = ArtifactDownloader::safeFilename('../core/analytics', "1.0.0\0/../../escape");
+
+        $this->assertSame('core-analytics-1.0.0-..-..-escape.zip', $filename);
+        $this->assertStringNotContainsString('/', $filename);
+        $this->assertStringNotContainsString("\0", $filename);
     }
 
     public function test_downloader_blocks_when_disabled(): void

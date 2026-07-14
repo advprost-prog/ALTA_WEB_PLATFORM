@@ -13,54 +13,59 @@ class RegistryCatalogTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-
-        Cache::forget('addons.registry.catalog');
+        Cache::flush();
     }
 
-    public function test_disabled_registry_returns_empty_catalog(): void
+    private function config(): array
     {
-        $client = new RegistryClient(['enabled' => false, 'url' => 'http://example.test']);
-        $catalog = new RegistryCatalog($client, ['enabled' => false, 'cache_ttl' => 3600]);
-
-        $result = $catalog->load();
-
-        $this->assertEmpty($result['items']);
-        $this->assertEmpty($result['diagnostics']);
+        return ['enabled' => true, 'url' => 'https://registry.example.test/api/v1/registry', 'allowed_hosts' => ['registry.example.test'], 'verify_ssl' => true, 'cache_ttl' => 0, 'downloads' => ['max_size' => 10000]];
     }
 
-    public function test_valid_registry_payload_normalizes_items(): void
+    private function document(array $items = []): array
     {
-        Http::fake([
-            'http://example.test' => Http::response([
-                'registry' => ['name' => 'Test', 'version' => '1.0.0'],
-                'items' => [
-                    [
-                        'code' => 'core.theme-maker',
-                        'type' => 'extension',
-                        'vendor' => 'Core',
-                        'name' => 'Theme Maker',
-                        'description' => 'Demo',
-                        'version' => '0.3.0',
-                        'requires_platform' => '>=1.0.0',
-                        'dependencies' => [],
-                        'is_featured' => true,
-                    ],
-                ],
-            ], 200),
-        ]);
+        return ['registry' => ['name' => 'Test', 'version' => 'build-1', 'application_version' => '1.0.0', 'build_version' => 'build-1', 'schema_version' => '1', 'generated_at' => '1970-01-01T00:00:00+00:00'], 'items' => $items];
+    }
 
-        $client = new RegistryClient([
-            'enabled' => true,
-            'url' => 'http://example.test',
-            'allowed_hosts' => ['example.test'],
-            'cache_ttl' => 3600,
-        ]);
-        $catalog = new RegistryCatalog($client, ['enabled' => true, 'cache_ttl' => 3600]);
+    public function test_valid_empty_200_creates_fresh_snapshot_then_304_preserves_validation(): void
+    {
+        Http::fakeSequence()->push($this->document(), 200, ['Content-Type' => 'application/json', 'ETag' => '"one"', 'Last-Modified' => 'Tue, 14 Jul 2026 00:00:00 GMT'])->push('', 304, ['ETag' => '"one"']);
+        $catalog = new RegistryCatalog(new RegistryClient($this->config()), $this->config());
+        $first = $catalog->refresh();
+        $validatedAt = $first['meta']['validated_at'];
+        $second = $catalog->refresh();
+        $this->assertSame('fresh', $second['state']);
+        $this->assertSame([], $second['items']);
+        $this->assertSame(304, $second['meta']['last_http_status']);
+        $this->assertSame($validatedAt, $second['meta']['validated_at']);
+    }
 
-        $result = $catalog->load();
+    public function test_network_429_and_invalid_schema_preserve_last_valid_snapshot(): void
+    {
+        Http::fakeSequence()->push($this->document(), 200, ['Content-Type' => 'application/json'])->pushStatus(500)->push('', 429, ['Retry-After' => '60'])->push(['registry' => ['schema_version' => '2'], 'items' => []], 200, ['Content-Type' => 'application/json']);
+        $catalog = new RegistryCatalog(new RegistryClient($this->config()), $this->config());
+        $catalog->refresh();
+        $this->assertSame('offline', $catalog->refresh()['state']);
+        $this->assertSame('rate_limited', $catalog->refresh()['state']);
+        $invalid = $catalog->refresh();
+        $this->assertSame('stale', $invalid['state']);
+        $this->assertSame('1', $invalid['registry']['schema_version']);
+    }
 
-        $this->assertCount(1, $result['items']);
-        $this->assertSame('core.theme-maker', $result['items'][0]->code);
-        $this->assertSame('0.3.0', $result['items'][0]->version);
+    public function test_failure_without_snapshot_is_unavailable_and_does_not_create_trusted_empty_catalog(): void
+    {
+        Http::fake(['*' => Http::response('bad', 200, ['Content-Type' => 'application/json'])]);
+        $result = (new RegistryCatalog(new RegistryClient($this->config()), $this->config()))->refresh();
+        $this->assertSame('unavailable', $result['state']);
+        $this->assertNull(Cache::get('addons.registry.catalog.snapshot.v1'));
+    }
+
+    public function test_successful_200_atomically_replaces_prior_snapshot(): void
+    {
+        Http::fakeSequence()->push($this->document(), 200, ['Content-Type' => 'application/json'])->push($this->document(), 200, ['Content-Type' => 'application/json', 'ETag' => '"new"']);
+        $catalog = new RegistryCatalog(new RegistryClient($this->config()), $this->config());
+        $catalog->refresh();
+        $result = $catalog->refresh();
+        $this->assertSame('"new"', $result['meta']['etag']);
+        $this->assertSame('fresh', $result['state']);
     }
 }

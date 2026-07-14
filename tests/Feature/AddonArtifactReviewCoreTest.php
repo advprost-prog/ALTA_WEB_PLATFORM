@@ -331,10 +331,11 @@ class AddonArtifactReviewCoreTest extends TestCase
                 'type' => 'ed25519',
                 'value' => $signature,
                 'key_id' => $trusted ? 'review-key' : 'unknown-key',
+                'payload_version' => 'raw-zip-v1',
             ],
         ];
         $registry = [
-            'registry' => ['name' => 'review-test', 'version' => '1.0.0'],
+            'registry' => ['name' => 'review-test', 'version' => 'test-build', 'application_version' => '1.0.0', 'build_version' => 'test-build', 'schema_version' => '1', 'generated_at' => '2026-07-14T00:00:00+00:00'],
             'items' => [[
                 'code' => self::CODE,
                 'type' => 'module',
@@ -342,6 +343,10 @@ class AddonArtifactReviewCoreTest extends TestCase
                 'name' => 'Analytics',
                 'description' => 'Review test',
                 'version' => self::VERSION,
+                'category' => null, 'tags' => [], 'requires_platform' => null, 'dependencies' => [], 'is_featured' => false,
+                'homepage_url' => null, 'documentation_url' => null,
+                'publisher' => ['public_id' => '11111111-1111-4111-8111-111111111111', 'name' => 'Test'],
+                'published_at' => '2026-07-14T00:00:00+00:00',
                 'artifact' => $artifact,
             ]],
         ];

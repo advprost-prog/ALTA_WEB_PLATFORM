@@ -65,6 +65,7 @@ class ArtifactValidator
             'type' => (string) $signature['type'],
             'value' => (string) $signature['value'],
             'key_id' => isset($signature['key_id']) && is_string($signature['key_id']) ? $signature['key_id'] : null,
+            'payload_version' => isset($signature['payload_version']) && is_string($signature['payload_version']) ? $signature['payload_version'] : null,
         ];
     }
 }

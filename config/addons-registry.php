@@ -21,6 +21,12 @@ return [
 
     'timeout' => env('ADDONS_REGISTRY_TIMEOUT', 5),
 
+    'connect_timeout' => env('ADDONS_REGISTRY_CONNECT_TIMEOUT', 3),
+
+    'max_response_size' => (int) env('ADDONS_REGISTRY_MAX_RESPONSE_SIZE', 1048576),
+
+    'allow_redirects' => env('ADDONS_REGISTRY_ALLOW_REDIRECTS', false),
+
     'cache_ttl' => env('ADDONS_REGISTRY_CACHE_TTL', 3600),
 
     /*

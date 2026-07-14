@@ -85,9 +85,12 @@ class AddonArtifactTrustTest extends TestCase
     private function fakeRegistryWithArtifact(array $artifactOverride, string $body, ?string $sha256 = null): void
     {
         $sha256 ??= hash('sha256', $body);
+        if (is_array($artifactOverride['signature'] ?? null)) {
+            $artifactOverride['signature']['payload_version'] = 'raw-zip-v1';
+        }
 
         $registry = [
-            'registry' => ['name' => 'test', 'version' => '1.0.0'],
+            'registry' => ['name' => 'test', 'version' => 'test-build', 'application_version' => '1.0.0', 'build_version' => 'test-build', 'schema_version' => '1', 'generated_at' => '2026-07-14T00:00:00+00:00'],
             'items' => [
                 [
                     'code' => 'core.analytics',
@@ -96,11 +99,16 @@ class AddonArtifactTrustTest extends TestCase
                     'name' => 'Analytics',
                     'description' => 'Demo',
                     'version' => '1.0.0',
+                    'category' => null, 'tags' => [], 'requires_platform' => null, 'dependencies' => [], 'is_featured' => false,
+                    'homepage_url' => null, 'documentation_url' => null,
+                    'publisher' => ['public_id' => '11111111-1111-4111-8111-111111111111', 'name' => 'Test'],
+                    'published_at' => '2026-07-14T00:00:00+00:00',
                     'artifact' => array_merge([
                         'url' => $this->artifactUrl,
                         'type' => 'zip',
                         'sha256' => $sha256,
                         'size' => strlen($body),
+                        'signature' => ['type' => 'ed25519', 'value' => base64_encode('placeholder'), 'key_id' => 'placeholder', 'payload_version' => 'raw-zip-v1'],
                     ], $artifactOverride),
                 ],
             ],
@@ -423,18 +431,15 @@ class AddonArtifactTrustTest extends TestCase
         $this->assertSame('valid', $report['report']['manifest_status']);
     }
 
-    public function test_inspect_unsigned_untrusted(): void
+    public function test_unsigned_registry_item_fails_closed_before_download(): void
     {
         $this->configureRegistry(true, true, []);
         $this->fakeRegistryWithArtifact(['signature' => null], $this->realArtifactBytes());
 
         $manager = app(MarketplaceManager::class);
-        $manager->downloadArtifact('core.analytics');
-        $report = $manager->inspectArtifact('core.analytics');
-
-        $this->assertTrue($report['success']);
-        $this->assertSame('untrusted', $report['status']);
-        $this->assertSame('missing', $report['report']['signature_status']);
+        $download = $manager->downloadArtifact('core.analytics');
+        $this->assertFalse($download->success);
+        $this->assertSame('remote_state_untrusted', $download->status);
     }
 
     public function test_inspect_invalid_signature_rejected(): void
@@ -488,22 +493,21 @@ class AddonArtifactTrustTest extends TestCase
         $this->assertSame('identity_mismatch', $report['report']['manifest_status']);
     }
 
-    public function test_inspect_not_required_partially_trusted(): void
+    public function test_disabling_signature_requirement_does_not_allow_unsigned_registry_fallback(): void
     {
         $this->configureRegistry(true, false, []);
         $this->fakeRegistryWithArtifact(['signature' => null], $this->realArtifactBytes());
 
         $manager = app(MarketplaceManager::class);
-        $manager->downloadArtifact('core.analytics');
-        $report = $manager->inspectArtifact('core.analytics');
-
-        $this->assertSame('partially_trusted', $report['status']);
+        $download = $manager->downloadArtifact('core.analytics');
+        $this->assertFalse($download->success);
+        $this->assertSame('remote_state_untrusted', $download->status);
     }
 
     public function test_inspect_not_downloaded_fails(): void
     {
         $this->configureRegistry(true, true, []);
-        $this->fakeRegistryWithArtifact(['signature' => null], $this->realArtifactBytes());
+        $this->fakeRegistryWithArtifact([], $this->realArtifactBytes());
 
         $report = app(MarketplaceManager::class)->inspectArtifact('core.analytics');
 
@@ -561,15 +565,14 @@ class AddonArtifactTrustTest extends TestCase
      | Doctor diagnostics
      | ------------------------------------------------------------------ */
 
-    public function test_doctor_unsigned_warning(): void
+    public function test_doctor_does_not_accept_unsigned_registry_item(): void
     {
         $this->configureRegistry(true, true, []);
         $this->fakeRegistryWithArtifact(['signature' => null], $this->realArtifactBytes());
 
-        app(MarketplaceManager::class)->downloadArtifact('core.analytics');
-
-        $this->artisan('addons:doctor')
-            ->expectsOutputToContain('addon_artifact_unsigned_required');
+        $result = app(MarketplaceManager::class)->downloadArtifact('core.analytics');
+        $this->assertFalse($result->success);
+        $this->assertSame('remote_state_untrusted', $result->status);
     }
 
     public function test_doctor_invalid_signature_error(): void
@@ -609,7 +612,7 @@ class AddonArtifactTrustTest extends TestCase
     public function test_marketplace_html_has_inspect_artifact_wire_click(): void
     {
         $this->configureRegistry(true, true, []);
-        $this->fakeRegistryWithArtifact(['signature' => null], $this->realArtifactBytes());
+        $this->fakeRegistryWithArtifact([], $this->realArtifactBytes());
 
         app(MarketplaceManager::class)->downloadArtifact('core.analytics');
 

@@ -136,6 +136,9 @@ class Marketplace extends Page
             'canManageStaging' => $this->canManageStaging(),
             'canManagePromotion' => $this->canPromoteArtifacts() || $this->canRollbackArtifacts(),
             'promotionLabels' => ArtifactPromotionStatus::LABELS,
+            'registryState' => $resolved['registry_state'],
+            'registryMeta' => $resolved['registry_meta'],
+            'registryHeader' => $resolved['registry_header'],
         ];
     }
 
@@ -510,14 +513,12 @@ class Marketplace extends Page
     public function refreshRegistry(): void
     {
         try {
-            $manager = app(RegistryCatalog::class);
-            $manager->flush();
-            app(MarketplaceManager::class)->resolve();
+            $result = app(RegistryCatalog::class)->refresh();
 
             Notification::make()
-                ->title('Registry оновлено')
-                ->body('Каталог registry перечитано.')
-                ->success()
+                ->title(($result['state'] ?? null) === 'fresh' ? 'Registry оновлено' : 'Registry недоступний')
+                ->body(($result['meta']['last_http_status'] ?? null) === 304 ? 'Каталог не змінився.' : (implode(' ', $result['diagnostics']) ?: 'Каталог registry перевірено.'))
+                ->color(($result['state'] ?? null) === 'fresh' ? 'success' : 'warning')
                 ->send();
         } catch (\Throwable $exception) {
             Notification::make()

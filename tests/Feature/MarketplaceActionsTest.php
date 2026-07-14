@@ -6,8 +6,12 @@ use App\Enums\UserRole;
 use App\Filament\Pages\Marketplace;
 use App\Models\SystemAddon;
 use App\Support\Addons\Marketplace\MarketplaceManager;
+use App\Support\Addons\Registry\RegistryCatalog;
+use App\Support\Addons\Registry\RegistryClient;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 use Tests\Feature\Concerns\CreatesCommerceData;
@@ -32,6 +36,28 @@ class MarketplaceActionsTest extends TestCase
             ->assertOk()
             ->assertSee('Marketplace модулів')
             ->assertSee('core.theme-maker');
+    }
+
+    public function test_registry_diagnostics_and_conditional_refresh_survive_full_livewire_reload(): void
+    {
+        Cache::flush();
+        config(['addons-registry' => array_replace_recursive(config('addons-registry'), [
+            'enabled' => true, 'url' => 'https://registry.example.test/api/v1/registry',
+            'allowed_hosts' => ['registry.example.test'], 'cache_ttl' => 0,
+        ])]);
+        $document = ['registry' => ['name' => 'ALTA', 'version' => 'build-1', 'application_version' => '1.0.0', 'build_version' => 'build-1', 'schema_version' => '1', 'generated_at' => '1970-01-01T00:00:00+00:00'], 'items' => []];
+        Http::fake(fn ($request) => $request->hasHeader('If-None-Match')
+            ? Http::response('', 304, ['ETag' => '"one"'])
+            : Http::response($document, 200, ['Content-Type' => 'application/json', 'ETag' => '"one"']));
+        foreach ([RegistryClient::class, RegistryCatalog::class, MarketplaceManager::class] as $service) {
+            app()->forgetInstance($service);
+        }
+        $this->actingAs($this->createUserWithRole(UserRole::Admin));
+
+        $this->marketplace()->call('refreshRegistry')->assertHasNoErrors();
+        $this->marketplace()->call('refreshRegistry')->assertHasNoErrors()->assertSee('Registry: fresh')->assertSee('build-1')->assertSee('1.0.0');
+
+        $this->assertSame(304, app(RegistryCatalog::class)->snapshot()['last_http_status']);
     }
 
     public function test_rendered_html_has_install_addon_wire_click(): void

@@ -21,6 +21,8 @@ class RegistryItem
         public readonly bool $isFeatured,
         public readonly ?string $homepageUrl,
         public readonly ?string $documentationUrl,
+        public readonly ?array $publisher,
+        public readonly ?string $publishedAt,
         public readonly ?array $artifact,
         public readonly array $raw = [],
     ) {}
@@ -47,6 +49,8 @@ class RegistryItem
             isFeatured: (bool) ($data['is_featured'] ?? false),
             homepageUrl: isset($data['homepage_url']) && is_string($data['homepage_url']) && $data['homepage_url'] !== '' ? $data['homepage_url'] : null,
             documentationUrl: isset($data['documentation_url']) && is_string($data['documentation_url']) && $data['documentation_url'] !== '' ? $data['documentation_url'] : null,
+            publisher: is_array($data['publisher'] ?? null) ? $data['publisher'] : null,
+            publishedAt: is_string($data['published_at'] ?? null) ? $data['published_at'] : null,
             artifact: self::normalizeArtifact($data['artifact'] ?? null),
             raw: $data,
         );
@@ -54,7 +58,7 @@ class RegistryItem
 
     /**
      * @param  array<int, array<string, mixed>|string>  $dependencies
-     * @return array<int, array{code: string, constraint: string|null}>
+     * @return array<int, array{code: string, constraint: string|null, required: bool}>
      */
     private static function normalizeDependencies(array $dependencies): array
     {
@@ -76,6 +80,7 @@ class RegistryItem
             $normalized[] = [
                 'code' => $code,
                 'constraint' => $constraint,
+                'required' => is_array($dependency) ? (bool) ($dependency['required'] ?? true) : true,
             ];
         }
 
@@ -117,6 +122,7 @@ class RegistryItem
             'type' => (string) $signature['type'],
             'value' => (string) $signature['value'],
             'key_id' => isset($signature['key_id']) && is_string($signature['key_id']) ? $signature['key_id'] : null,
+            'payload_version' => isset($signature['payload_version']) && is_string($signature['payload_version']) ? $signature['payload_version'] : null,
         ];
     }
 }

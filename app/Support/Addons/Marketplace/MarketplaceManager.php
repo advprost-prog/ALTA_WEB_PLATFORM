@@ -96,6 +96,9 @@ final class MarketplaceManager
             'rows' => $rows,
             'diagnostics' => $diagnostics,
             'warnings' => $catalog['warnings'],
+            'registry_state' => $remoteCatalog['state'] ?? 'disabled',
+            'registry_meta' => $remoteCatalog['meta'] ?? [],
+            'registry_header' => $remoteCatalog['registry'] ?? [],
         ];
     }
 
@@ -403,7 +406,7 @@ final class MarketplaceManager
         $downloadsConfig = config('addons-registry.downloads', []);
         $disk = (string) ($downloadsConfig['disk'] ?? 'local');
         $quarantinePath = (string) ($downloadsConfig['quarantine_path'] ?? 'addons/quarantine');
-        $filename = basename(parse_url($url, PHP_URL_PATH) ?: $code.'.zip');
+        $filename = ArtifactDownloader::safeFilename($code, $version);
         $directory = rtrim($quarantinePath.'/'.$code.'/'.$version, '/');
         $path = $directory.'/'.$filename;
         $metadataPath = $directory.'/metadata.json';
@@ -1225,6 +1228,10 @@ final class MarketplaceManager
      */
     public function downloadArtifact(string $code): ArtifactDownloadResult
     {
+        $remoteState = $this->loadRemoteCatalog();
+        if (($remoteState['state'] ?? 'unavailable') !== 'fresh') {
+            return ArtifactDownloadResult::failed('remote_state_untrusted', ['Registry snapshot is not fresh; remote download is blocked.']);
+        }
         $item = $this->findItem($code);
 
         if ($item === null) {

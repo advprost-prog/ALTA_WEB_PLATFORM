@@ -32,7 +32,7 @@ class ArtifactDownloader
 
         $host = parse_url($artifact['url'], PHP_URL_HOST) ?: $artifact['url'];
 
-        if (! $this->client->isHostAllowed($host)) {
+        if (! $this->client->isUrlAllowed($artifact['url'])) {
             return ArtifactDownloadResult::failed('host_not_allowed', ["Registry host [{$host}] is not allowed."]);
         }
 
@@ -44,12 +44,7 @@ class ArtifactDownloader
             return ArtifactDownloadResult::failed('failed', ['Artifact size exceeds maximum allowed size.']);
         }
 
-        $filename = basename(parse_url($artifact['url'], PHP_URL_PATH) ?: $item->code.'.zip');
-        $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-
-        if ($extension !== 'zip') {
-            return ArtifactDownloadResult::failed('not_available', ['Unsupported artifact extension: '.$extension]);
-        }
+        $filename = $this->safeFilename($item->code, $item->version);
         $directory = rtrim($quarantinePath.'/'.$item->code.'/'.$item->version, '/');
         $path = $directory.'/'.$filename;
         $metadataPath = $directory.'/metadata.json';
@@ -171,5 +166,13 @@ class ArtifactDownloader
         $diskInstance->put($metadataPath, json_encode($metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
         return ArtifactDownloadResult::success($path, $metadataPath, $metadata);
+    }
+
+    public static function safeFilename(string $code, string $version): string
+    {
+        $safeCode = preg_replace('/[^a-z0-9._-]+/i', '-', $code) ?: 'addon';
+        $safeVersion = preg_replace('/[^a-z0-9._+-]+/i', '-', $version) ?: 'unknown';
+
+        return trim($safeCode, '.-').'-'.trim($safeVersion, '.-').'.zip';
     }
 }

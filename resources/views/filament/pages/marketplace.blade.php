@@ -24,6 +24,20 @@
             </div>
         </x-filament::section>
 
+        @if ($registryEnabled)
+            <x-filament::section heading="Registry: {{ $registryState }}" icon="heroicon-o-cloud" style="margin-top:1rem">
+                <div class="fi-in-text" style="font-size:0.875rem">
+                    <div><strong>Host:</strong> {{ $registryMeta['source_host'] ?? '—' }}</div>
+                    <div><strong>Last success:</strong> {{ $registryMeta['last_successful_refresh_at'] ?? '—' }}</div>
+                    <div><strong>Last check:</strong> {{ $registryMeta['checked_at'] ?? '—' }}</div>
+                    <div><strong>Application:</strong> {{ $registryHeader['application_version'] ?? '—' }}</div>
+                    <div><strong>Build:</strong> {{ $registryHeader['build_version'] ?? '—' }}</div>
+                    <div><strong>Schema:</strong> {{ $registryHeader['schema_version'] ?? '—' }}</div>
+                    @if (! empty($registryMeta['last_error']))<div><strong>Error:</strong> {{ $registryMeta['last_error'] }}</div>@endif
+                </div>
+            </x-filament::section>
+        @endif
+
         {{-- Summary --}}
         <div
             class="fi-grid lg:fi-grid-cols"

@@ -356,11 +356,12 @@ class AddonMarketplacePromotionWorkflowTest extends TestCase
                 'type' => 'ed25519',
                 'value' => $signature,
                 'key_id' => 'review-key',
+                'payload_version' => 'raw-zip-v1',
             ],
         ];
 
         Http::fake([$registryUrl => Http::response([
-            'registry' => ['name' => 'promotion-ui-test', 'version' => '1.0.0'],
+            'registry' => ['name' => 'promotion-ui-test', 'version' => 'test-build', 'application_version' => '1.0.0', 'build_version' => 'test-build', 'schema_version' => '1', 'generated_at' => '2026-07-14T00:00:00+00:00'],
             'items' => [[
                 'code' => self::CODE,
                 'type' => 'module',
@@ -368,6 +369,10 @@ class AddonMarketplacePromotionWorkflowTest extends TestCase
                 'name' => 'Analytics',
                 'description' => 'Promotion UI test',
                 'version' => $version,
+                'category' => null, 'tags' => [], 'requires_platform' => null, 'dependencies' => [], 'is_featured' => false,
+                'homepage_url' => null, 'documentation_url' => null,
+                'publisher' => ['public_id' => '11111111-1111-4111-8111-111111111111', 'name' => 'Test'],
+                'published_at' => '2026-07-14T00:00:00+00:00',
                 'artifact' => $artifact,
             ]],
         ])]);
