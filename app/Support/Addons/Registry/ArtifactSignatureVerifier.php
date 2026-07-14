@@ -126,4 +126,31 @@ class ArtifactSignatureVerifier
         return extension_loaded('sodium')
             && function_exists('sodium_crypto_sign_verify_detached');
     }
+
+    public function verifyFile(array $signature, string $path, string $publicKey, int $maximumBytes): ArtifactSignatureResult
+    {
+        $keyId = is_string($signature['key_id'] ?? null) ? $signature['key_id'] : null;
+        if (($signature['type'] ?? null) !== self::TYPE_ED25519) {
+            return new ArtifactSignatureResult(self::STATUS_UNSUPPORTED_TYPE, $keyId, ['Unsupported signature algorithm.']);
+        }
+        if (($signature['payload_version'] ?? null) !== 'raw-zip-v1') {
+            return new ArtifactSignatureResult(self::STATUS_INVALID, $keyId, ['Unsupported signature payload version.']);
+        }
+        $value = is_string($signature['value'] ?? null) ? base64_decode($signature['value'], true) : false;
+        if ($value === false || strlen($value) !== SODIUM_CRYPTO_SIGN_BYTES || strlen($publicKey) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
+            return new ArtifactSignatureResult(self::STATUS_INVALID, $keyId, ['Malformed detached signature.']);
+        }
+        $size = is_file($path) ? filesize($path) : false;
+        if ($size === false || $size > $maximumBytes) {
+            return new ArtifactSignatureResult(self::STATUS_ERROR, $keyId, ['Artifact exceeds signature verification memory limit.']);
+        }
+        $bytes = file_get_contents($path, false, null, 0, $maximumBytes + 1);
+        if (! is_string($bytes) || strlen($bytes) !== $size) {
+            return new ArtifactSignatureResult(self::STATUS_ERROR, $keyId, ['Artifact could not be read for signature verification.']);
+        }
+
+        return sodium_crypto_sign_verify_detached($value, $bytes, $publicKey)
+            ? new ArtifactSignatureResult(self::STATUS_VALID, $keyId, ['Detached signature verified.'])
+            : new ArtifactSignatureResult(self::STATUS_INVALID, $keyId, ['Detached signature is invalid.']);
+    }
 }

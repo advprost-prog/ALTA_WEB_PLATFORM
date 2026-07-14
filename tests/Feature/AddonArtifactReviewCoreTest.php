@@ -371,6 +371,7 @@ class AddonArtifactReviewCoreTest extends TestCase
         Storage::disk('addons')->put($directory.'/core.analytics-1.0.0.zip', $bytes);
         $this->writeMetadata([
             'status' => 'quarantined',
+            'verification_state' => 'verified',
             'sha256' => hash('sha256', $bytes),
             'size' => strlen($bytes),
         ]);

@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Http;
 
 class RegistryClient
 {
-    public function __construct(private readonly array $config) {}
+    public function __construct(private readonly array $config, private readonly ?MarketplaceHttpPolicy $httpPolicy = null) {}
 
     public function fetch(?string $etag = null, ?string $lastModified = null): RegistryHttpResult
     {
@@ -71,31 +71,12 @@ class RegistryClient
 
     public function isHostAllowed(string $host): bool
     {
-        $host = strtolower(rtrim($host, '.'));
-        if (in_array($host, ['localhost', '127.0.0.1', '::1'], true)) {
-            return (bool) ($this->config['allow_localhost'] ?? false) && app()->environment(['local', 'testing']);
-        }
-        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
-            return $this->isPublicIp($host) && in_array($host, $this->allowedHosts(), true);
-        }
-
-        return in_array($host, $this->allowedHosts(), true);
+        return ($this->httpPolicy ?? new MarketplaceHttpPolicy($this->config))->allowsHost($host);
     }
 
     public function isUrlAllowed(string $url): bool
     {
-        $parts = parse_url($url);
-        if (! is_array($parts) || ! isset($parts['scheme'], $parts['host']) || isset($parts['user']) || isset($parts['pass'])) {
-            return false;
-        }
-        if (! in_array(strtolower($parts['scheme']), ['http', 'https'], true)) {
-            return false;
-        }
-        if (! app()->environment(['local', 'testing']) && strtolower($parts['scheme']) !== 'https') {
-            return false;
-        }
-
-        return $this->isHostAllowed((string) $parts['host']);
+        return ($this->httpPolicy ?? new MarketplaceHttpPolicy($this->config))->allows($url);
     }
 
     private function validatedEndpoint(): array

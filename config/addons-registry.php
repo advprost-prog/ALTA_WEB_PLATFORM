@@ -75,9 +75,14 @@ return [
 
     'trust' => [
         'require_signature' => env('ADDONS_REGISTRY_REQUIRE_SIGNATURE', true),
+        'signature_verification_max_bytes' => (int) env('ADDONS_REGISTRY_SIGNATURE_MAX_BYTES', 20 * 1024 * 1024),
+        'keys' => [],
         'trusted_keys' => [
             // Insecure demo ed25519 public key for docs/examples/artifacts.
             'alta-demo-key-1' => 'mCWvikNz7pfcagq5odfFiCa1nhsa17D4Up02EkZ4alM=',
+        ],
+        'legacy_publishers' => [
+            'alta-demo-key-1' => '11111111-1111-4111-8111-111111111111',
         ],
     ],
 

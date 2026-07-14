@@ -207,6 +207,9 @@ final class ArtifactStagingManager
         if (($r['review']['status'] ?? '') !== 'quarantined') {
             $reasons[] = 'Artifact не перебуває у quarantine.';
         }
+        if (($r['review']['verification_state'] ?? '') !== 'verified') {
+            $reasons[] = 'Artifact не має current verified quarantine evidence.';
+        }
         if (($c['require_trusted'] ?? true) && $r['report']['trust_status'] !== 'trusted') {
             $reasons[] = 'Artifact не trusted.';
         }

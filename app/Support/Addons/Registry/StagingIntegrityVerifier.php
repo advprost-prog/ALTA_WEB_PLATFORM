@@ -93,6 +93,7 @@ final class StagingIntegrityVerifier
             if (! array_key_exists($path, $actualMap)) {
                 $diagnostics[] = $this->diagnostic('artifact_staging_file_missing', 'Staged file is missing.', ["path={$path}"]);
                 $inventoryMismatch = true;
+
                 continue;
             }
 
@@ -144,6 +145,10 @@ final class StagingIntegrityVerifier
         $stale = false;
         if (($sourceMetadata['status'] ?? null) !== 'quarantined') {
             $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Quarantine artifact is no longer quarantined.', []);
+            $stale = true;
+        }
+        if (($sourceMetadata['verification_state'] ?? null) !== 'verified') {
+            $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Quarantine artifact lacks verified acquisition evidence.', []);
             $stale = true;
         }
 
@@ -215,11 +220,13 @@ final class StagingIntegrityVerifier
 
             if ($entry->isLink()) {
                 $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Symlink is forbidden in staging payload.', ["path={$relative}"]);
+
                 continue;
             }
 
             if (! $entry->isDir() && ! $entry->isFile()) {
                 $diagnostics[] = $this->diagnostic('artifact_staging_metadata_invalid', 'Special file is forbidden in staging payload.', ["path={$relative}"]);
+
                 continue;
             }
 

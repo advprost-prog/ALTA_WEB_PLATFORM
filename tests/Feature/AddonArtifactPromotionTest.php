@@ -415,6 +415,7 @@ class AddonArtifactPromotionTest extends TestCase
             'size' => strlen($bytes),
             'downloaded_at' => now()->toIso8601String(),
             'status' => 'quarantined',
+            'verification_state' => 'verified',
             'signature_status' => 'valid',
             'signature_checked_at' => now()->toIso8601String(),
             'signature_key_id' => 'review-key',

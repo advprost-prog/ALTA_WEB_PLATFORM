@@ -303,6 +303,9 @@ final class ArtifactReviewManager
         if ((string) ($state['download_status'] ?? '') !== 'quarantined') {
             $reasons[] = 'Artifact не перебуває у quarantine (download_status='.(string) ($state['download_status'] ?? 'unknown').').';
         }
+        if ((string) ($state['metadata']['verification_state'] ?? '') !== 'verified') {
+            $reasons[] = 'Artifact не має current verified quarantine evidence.';
+        }
 
         if (! ($state['checksum_valid'] ?? false)) {
             $reasons[] = 'Checksum недійсний.';

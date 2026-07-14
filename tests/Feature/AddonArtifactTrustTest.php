@@ -116,7 +116,7 @@ class AddonArtifactTrustTest extends TestCase
 
         Http::fake([
             $this->registryUrl => Http::response($registry, 200, ['Content-Type' => 'application/json']),
-            $this->artifactUrl => Http::response($body, 200, ['Content-Type' => 'application/zip']),
+            $this->artifactUrl => Http::response($body, 200, ['Content-Type' => 'application/zip', 'Content-Length' => (string) strlen($body)]),
         ]);
     }
 
@@ -137,6 +137,8 @@ class AddonArtifactTrustTest extends TestCase
             'trust' => [
                 'require_signature' => $requireSignature,
                 'trusted_keys' => $trustedKeys,
+                'legacy_publishers' => array_fill_keys(array_keys($trustedKeys), '11111111-1111-4111-8111-111111111111'),
+                'signature_verification_max_bytes' => 20 * 1024 * 1024,
             ],
             'downloads' => [
                 'enabled' => $downloadsEnabled,
@@ -452,11 +454,12 @@ class AddonArtifactTrustTest extends TestCase
         $this->fakeRegistryWithArtifact(['signature' => $bad], $bytes);
 
         $manager = app(MarketplaceManager::class);
-        $manager->downloadArtifact('core.analytics');
+        $download = $manager->downloadArtifact('core.analytics');
         $report = $manager->inspectArtifact('core.analytics');
 
-        $this->assertTrue($report['success']);
-        $this->assertSame('rejected', $report['status']);
+        $this->assertFalse($download->success);
+        $this->assertSame('signature_invalid', $download->status);
+        $this->assertSame('not_downloaded', $report['status']);
     }
 
     public function test_inspect_unknown_key_untrusted(): void
@@ -469,11 +472,11 @@ class AddonArtifactTrustTest extends TestCase
         $this->fakeRegistryWithArtifact(['signature' => $signature], $bytes);
 
         $manager = app(MarketplaceManager::class);
-        $manager->downloadArtifact('core.analytics');
+        $download = $manager->downloadArtifact('core.analytics');
         $report = $manager->inspectArtifact('core.analytics');
 
-        $this->assertSame('untrusted', $report['status']);
-        $this->assertSame('unknown_key', $report['report']['signature_status']);
+        $this->assertSame('unknown_signing_key', $download->status);
+        $this->assertSame('not_downloaded', $report['status']);
     }
 
     public function test_inspect_manifest_mismatch_rejected(): void
@@ -486,11 +489,11 @@ class AddonArtifactTrustTest extends TestCase
         $this->fakeRegistryWithArtifact(['signature' => $signature], $manifestMismatchBytes);
 
         $manager = app(MarketplaceManager::class);
-        $manager->downloadArtifact('core.analytics');
+        $download = $manager->downloadArtifact('core.analytics');
         $report = $manager->inspectArtifact('core.analytics');
 
-        $this->assertSame('rejected', $report['status']);
-        $this->assertSame('identity_mismatch', $report['report']['manifest_status']);
+        $this->assertSame('manifest_identity_mismatch', $download->status);
+        $this->assertSame('not_downloaded', $report['status']);
     }
 
     public function test_disabling_signature_requirement_does_not_allow_unsigned_registry_fallback(): void
@@ -584,10 +587,10 @@ class AddonArtifactTrustTest extends TestCase
         $this->configureRegistry(true, true, ['k1' => $keypair['public_b64']]);
         $this->fakeRegistryWithArtifact(['signature' => $bad], $bytes);
 
-        app(MarketplaceManager::class)->downloadArtifact('core.analytics');
+        $result = app(MarketplaceManager::class)->downloadArtifact('core.analytics');
 
-        $this->artisan('addons:doctor')
-            ->expectsOutputToContain('addon_artifact_signature_invalid');
+        $this->assertSame('signature_invalid', $result->status);
+        $this->assertFalse(Storage::disk('addons')->exists($this->quarantineDir.'/metadata.json'));
     }
 
     public function test_doctor_manifest_mismatch_error(): void
@@ -599,10 +602,10 @@ class AddonArtifactTrustTest extends TestCase
         $this->configureRegistry(true, true, ['k1' => $keypair['public_b64']]);
         $this->fakeRegistryWithArtifact(['signature' => $signature], $mismatchBytes);
 
-        app(MarketplaceManager::class)->downloadArtifact('core.analytics');
+        $result = app(MarketplaceManager::class)->downloadArtifact('core.analytics');
 
-        $this->artisan('addons:doctor')
-            ->expectsOutputToContain('addon_artifact_manifest_mismatch');
+        $this->assertSame('manifest_identity_mismatch', $result->status);
+        $this->assertFalse(Storage::disk('addons')->exists($this->quarantineDir.'/metadata.json'));
     }
 
     /* ---------------------------------------------------------------------
@@ -611,8 +614,11 @@ class AddonArtifactTrustTest extends TestCase
 
     public function test_marketplace_html_has_inspect_artifact_wire_click(): void
     {
-        $this->configureRegistry(true, true, []);
-        $this->fakeRegistryWithArtifact([], $this->realArtifactBytes());
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+        $signature = ['type' => 'ed25519', 'value' => $this->sign($bytes, $keypair['secret']), 'key_id' => 'k1'];
+        $this->configureRegistry(true, true, ['k1' => $keypair['public_b64']]);
+        $this->fakeRegistryWithArtifact(['signature' => $signature], $bytes);
 
         app(MarketplaceManager::class)->downloadArtifact('core.analytics');
 

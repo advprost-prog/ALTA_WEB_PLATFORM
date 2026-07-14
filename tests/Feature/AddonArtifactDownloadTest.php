@@ -13,6 +13,7 @@ use App\Support\Addons\Registry\RegistryClient;
 use App\Support\Addons\Registry\RegistryItem;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
@@ -87,7 +88,7 @@ class AddonArtifactDownloadTest extends TestCase
         app(RegistryCatalog::class)->flush();
     }
 
-    private function fakeRegistryAndArtifact(string $artifactBody, ?string $registrySha256 = null): void
+    private function fakeRegistryAndArtifact(string $artifactBody, ?string $registrySha256 = null, array $artifactHeaders = [], int $artifactStatus = 200): void
     {
         $registryPath = base_path('docs/examples/registry.example.json');
         $registry = json_decode((string) file_get_contents($registryPath), true);
@@ -114,9 +115,10 @@ class AddonArtifactDownloadTest extends TestCase
             unset($item);
         }
 
+        Http::swap(new Factory);
         Http::fake([
             $this->registryUrl => Http::response($registry, 200, ['Content-Type' => 'application/json']),
-            $this->artifactUrl => Http::response($artifactBody, 200, ['Content-Type' => 'application/zip']),
+            $this->artifactUrl => Http::response($artifactBody, $artifactStatus, array_merge(['Content-Type' => 'application/zip', 'Content-Length' => (string) strlen($artifactBody)], $artifactHeaders)),
         ]);
     }
 
@@ -189,7 +191,7 @@ class AddonArtifactDownloadTest extends TestCase
         $bytes = $this->realArtifactBytes();
 
         Http::fake([
-            $this->artifactUrl => Http::response($bytes, 200, ['Content-Type' => 'application/zip']),
+            $this->artifactUrl => Http::response($bytes, 200, ['Content-Type' => 'application/zip', 'Content-Length' => (string) strlen($bytes)]),
         ]);
 
         $item = RegistryItem::fromArray([
@@ -210,24 +212,18 @@ class AddonArtifactDownloadTest extends TestCase
         $downloader = new ArtifactDownloader(new RegistryClient(config('addons-registry')), config('addons-registry'));
         $result = $downloader->download($item);
 
-        $this->assertTrue($result->success);
-        $this->assertSame('quarantined', $result->status);
-
-        $disk = Storage::disk('addons');
-        $this->assertTrue($disk->exists($this->quarantineDir.'/core.analytics-1.0.0.zip'));
-        $this->assertTrue($disk->exists($this->quarantineDir.'/metadata.json'));
-
-        $metadata = json_decode($disk->get($this->quarantineDir.'/metadata.json'), true);
-        $this->assertSame('quarantined', $metadata['status']);
-        $this->assertSame($this->realArtifactSha256(), $metadata['sha256']);
+        $this->assertFalse($result->success);
+        $this->assertSame('malformed_signature', $result->status);
+        $this->assertFalse(Storage::disk('addons')->exists($this->quarantineDir.'/core.analytics-1.0.0.zip'));
     }
 
     public function test_downloader_rejects_checksum_mismatch(): void
     {
         $this->configureRegistry(true);
 
+        $payload = str_repeat('x', 358);
         Http::fake([
-            $this->artifactUrl => Http::response('totally different payload', 200),
+            $this->artifactUrl => Http::response($payload, 200, ['Content-Type' => 'application/zip', 'Content-Length' => '358']),
         ]);
 
         $item = RegistryItem::fromArray([
@@ -249,7 +245,7 @@ class AddonArtifactDownloadTest extends TestCase
         $result = $downloader->download($item);
 
         $this->assertFalse($result->success);
-        $this->assertSame('rejected', $result->status);
+        $this->assertSame('sha256_mismatch', $result->status);
         $this->assertFalse(Storage::disk('addons')->exists($this->quarantineDir.'/core.analytics-1.0.0.zip'));
     }
 
@@ -258,7 +254,7 @@ class AddonArtifactDownloadTest extends TestCase
         $this->configureRegistry(true);
 
         Http::fake([
-            'http://127.0.0.1:9001/api/v1/artifacts/11111111-1111-4111-8111-111111111111/download' => Http::response($this->realArtifactBytes(), 200),
+            'http://127.0.0.1:9001/api/v1/artifacts/11111111-1111-4111-8111-111111111111/download' => Http::response($this->realArtifactBytes(), 200, ['Content-Type' => 'application/zip', 'Content-Length' => '358']),
         ]);
 
         $item = RegistryItem::fromArray([
@@ -279,8 +275,8 @@ class AddonArtifactDownloadTest extends TestCase
         $downloader = new ArtifactDownloader(new RegistryClient(config('addons-registry')), config('addons-registry'));
         $result = $downloader->download($item);
 
-        $this->assertTrue($result->success);
-        $this->assertSame($this->quarantineDir.'/core.analytics-1.0.0.zip', $result->path);
+        $this->assertFalse($result->success);
+        $this->assertSame('malformed_signature', $result->status);
     }
 
     public function test_trusted_filename_sanitizes_untrusted_path_characters(): void
@@ -348,7 +344,7 @@ class AddonArtifactDownloadTest extends TestCase
         $result = $downloader->download($item);
 
         $this->assertFalse($result->success);
-        $this->assertSame('host_not_allowed', $result->status);
+        $this->assertSame('unsafe_artifact_url', $result->status);
     }
 
     public function test_downloader_rejects_size_exceeding_max(): void
@@ -430,7 +426,7 @@ class AddonArtifactDownloadTest extends TestCase
         $result = app(MarketplaceManager::class)->downloadArtifact('core.analytics');
 
         $this->assertFalse($result->success);
-        $this->assertSame('rejected', $result->status);
+        $this->assertSame('invalid_content_length', $result->status);
     }
 
     public function test_marketplace_does_not_install_artifact_addon(): void
@@ -520,5 +516,59 @@ class AddonArtifactDownloadTest extends TestCase
 
         $this->artisan('addons:doctor')
             ->expectsOutputToContain('addon_artifact_quarantined_remote_only');
+    }
+
+    public function test_secure_pipeline_rejects_response_contract_mismatches_and_cleans_temp_files(): void
+    {
+        $this->configureRegistry(true);
+        $bytes = $this->realArtifactBytes();
+        $this->fakeRegistryAndArtifact($bytes, null, ['Content-Type' => 'text/html']);
+        $this->assertSame('invalid_content_type', app(MarketplaceManager::class)->downloadArtifact('core.analytics')->status);
+
+        $this->assertSame([], Storage::disk('addons')->files('addons/quarantine/.tmp'));
+    }
+
+    public function test_verified_artifact_is_reused_on_304_only_after_local_revalidation(): void
+    {
+        $this->configureRegistry(true);
+        $bytes = $this->realArtifactBytes();
+        $this->fakeRegistryAndArtifact($bytes, null, ['ETag' => '"'.$this->realArtifactSha256().'"']);
+        $manager = app(MarketplaceManager::class);
+        $this->assertTrue($manager->downloadArtifact('core.analytics')->success);
+
+        Http::swap(new Factory);
+        Http::fake([
+            $this->registryUrl => Http::response('', 304),
+            $this->artifactUrl => Http::response('', 304),
+        ]);
+        $reused = $manager->downloadArtifact('core.analytics');
+
+        $this->assertTrue($reused->success, $reused->status.': '.implode(' ', $reused->diagnostics));
+        $this->assertTrue($reused->metadata['reused_via_304']);
+        $this->assertSame($bytes, Storage::disk('addons')->get($reused->path));
+    }
+
+    public function test_304_with_modified_local_file_performs_one_unconditional_recovery(): void
+    {
+        $this->configureRegistry(true);
+        $bytes = $this->realArtifactBytes();
+        $this->fakeRegistryAndArtifact($bytes, null, ['ETag' => '"'.$this->realArtifactSha256().'"']);
+        $manager = app(MarketplaceManager::class);
+        $first = $manager->downloadArtifact('core.analytics');
+        Storage::disk('addons')->put($first->path, str_repeat('x', strlen($bytes)));
+
+        Http::swap(new Factory);
+        Http::fake([
+            $this->registryUrl => Http::response('', 304),
+            $this->artifactUrl => Http::sequence()->push('', 304)->push($bytes, 200, [
+                'Content-Type' => 'application/zip', 'Content-Length' => (string) strlen($bytes),
+                'ETag' => '"'.$this->realArtifactSha256().'"',
+            ]),
+        ]);
+        $recovered = $manager->downloadArtifact('core.analytics');
+
+        $this->assertFalse($recovered->success);
+        $this->assertSame('conditional_cache_inconsistent', $recovered->status);
+        Http::assertSentCount(2);
     }
 }

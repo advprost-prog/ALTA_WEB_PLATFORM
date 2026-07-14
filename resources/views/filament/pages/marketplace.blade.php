@@ -381,6 +381,18 @@
                                                 @if ($signatureKeyId)
                                                     <x-filament::badge class="addon-marketplace-artifact__badge" color="gray">Key: {{ $signatureKeyId }}</x-filament::badge>
                                                 @endif
+                                                @if (! empty($artifactMetadata['signing_key_fingerprint']))
+                                                    <x-filament::badge class="addon-marketplace-artifact__badge" color="gray">Fingerprint: {{ Str::substr($artifactMetadata['signing_key_fingerprint'], 0, 12) }}…</x-filament::badge>
+                                                @endif
+                                                @if (! empty($artifactMetadata['local_trust_status']))
+                                                    <x-filament::badge class="addon-marketplace-artifact__badge" color="gray">Key status: {{ $artifactMetadata['local_trust_status'] }}</x-filament::badge>
+                                                @endif
+                                            </div>
+                                            <div class="fi-in-text" style="font-size:0.75rem">
+                                                Verified: {{ $artifactMetadata['verified_at'] ?? '—' }} ·
+                                                Size: {{ number_format($artifactMetadata['actual_size'] ?? $artifactMetadata['size'] ?? 0) }} bytes ·
+                                                SHA-256: {{ Str::substr($artifactMetadata['actual_sha256'] ?? $artifactMetadata['sha256'] ?? '', 0, 12) }}…
+                                                @if ($artifactMetadata['reused_via_304'] ?? false) · reused via HTTP 304 @endif
                                             </div>
                                             @if ($reviewStatus)
                                                 <div class="addon-marketplace-artifact__review">
