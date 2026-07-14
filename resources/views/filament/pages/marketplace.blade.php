@@ -168,6 +168,8 @@
                         $availableVersion = $row['available_version'] ?? null;
                         $remoteVersion = $row['remote_version'] ?? null;
                         $source = $row['source'] ?? 'local';
+                        $assessment = $row['assessment'] ?? [];
+                        $actionPolicy = $assessment['actions'] ?? [];
                         $artifact = $row['artifact'] ?? null;
                         $artifactStatus = $row['artifact_status'] ?? 'not_available';
                         $artifactMetadata = $row['artifact_metadata'] ?? null;
@@ -235,7 +237,11 @@
                                     <x-filament::badge color="info">Local + Registry</x-filament::badge>
                                 @elseif ($source === 'remote')
                                     <x-filament::badge color="warning">Registry</x-filament::badge>
+                                @else
+                                    <x-filament::badge color="gray">Local</x-filament::badge>
                                 @endif
+                                <x-filament::badge color="gray">{{ $assessment['versionState'] ?? 'unknown' }}</x-filament::badge>
+                                <x-filament::badge :color="($assessment['dependencies']['blocking'] ?? []) === [] ? 'success' : 'danger'">deps: {{ $assessment['dependencies']['state'] ?? 'unknown' }}</x-filament::badge>
                                 @if ($item->isFeatured)
                                     <x-filament::badge color="warning">Рекомендовано</x-filament::badge>
                                 @endif
@@ -249,11 +255,13 @@
                                 @if ($installedVersion)
                                     <dt>Встановлено</dt><dd>{{ $installedVersion }}</dd>
                                 @endif
-                                @if ($availableVersion)
-                                    <dt>Доступно</dt><dd>{{ $availableVersion }}</dd>
-                                @endif
-                                @if ($remoteVersion && $remoteVersion !== $availableVersion)
-                                    <dt>Registry</dt><dd>{{ $remoteVersion }}</dd>
+                                <dt>Local catalog</dt><dd>{{ $assessment['localCatalogVersion'] ?? '—' }}</dd>
+                                <dt>Marketplace</dt><dd>{{ $assessment['remoteVersion'] ?? '—' }}</dd>
+                                @if (($assessment['remoteVersion'] ?? null) !== null)
+                                    <dt>Registry state</dt><dd>{{ $assessment['registryState'] }}</dd>
+                                    <dt>Publisher</dt><dd>{{ $assessment['publisher']['name'] ?? '—' }}</dd>
+                                    <dt>Publisher ID</dt><dd>{{ $assessment['publisher']['public_id'] ?? '—' }}</dd>
+                                    <dt>Signing key ID</dt><dd>{{ $assessment['signingKeyId'] ?? '—' }} (identifier only)</dd>
                                 @endif
                                 <dt>Категорія</dt><dd>{{ $item->category ?: '—' }}</dd>
                                 <dt>Платформа</dt><dd>{{ $platformConstraint ?: ($item->platformVersion ?: '—') }}</dd>
@@ -265,6 +273,18 @@
                                     @foreach ($item->tags as $tag)
                                         <x-filament::badge color="gray">{{ $tag }}</x-filament::badge>
                                     @endforeach
+                                </div>
+                            @endif
+                            @if (($assessment['dependencies']['nodes'] ?? []) !== [])
+                                <div class="fi-in-text" style="margin-top:0.5rem">
+                                    <strong>Dependency preflight:</strong>
+                                    @foreach ($assessment['dependencies']['nodes'] as $node)
+                                        <x-filament::badge :color="$node['blocking'] ? 'danger' : 'success'">{{ $node['code'] }}: {{ $node['state'] }}</x-filament::badge>
+                                    @endforeach
+                                    @if (($assessment['dependencies']['plan'] ?? []) !== [])
+                                        <div>Plan: {{ implode(' → ', $assessment['dependencies']['plan']) }}</div>
+                                    @endif
+                                    @foreach ($assessment['dependencies']['cycles'] ?? [] as $cycle)<div>Cycle: {{ $cycle }}</div>@endforeach
                                 </div>
                             @endif
 
@@ -550,13 +570,9 @@
                                                     <dt>Code</dt><dd>{{ $item->code }}</dd>
                                                     <dt>Key</dt><dd>{{ $signatureKeyId ?: '—' }}</dd>
                                                     <dt>SHA-256</dt><dd>{{ $artifactMetadata['sha256'] ?? ($artifact['sha256'] ?? '—') }}</dd>
-                                                    <dt>Quarantine</dt><dd>{{ $artifactMetadata['path'] ?? '—' }}</dd>
-                                                    <dt>Staging path</dt><dd>{{ $row['staging_path'] ?? '—' }}</dd>
                                                     <dt>Inventory hash</dt><dd>{{ $row['staging_inventory_hash'] ?? '—' }}</dd>
                                                     <dt>Staging SHA-256</dt><dd>{{ $row['staging_artifact_sha256'] ?? '—' }}</dd>
                                                     <dt>Approval snapshot</dt><dd>{{ $row['approval_snapshot_hash'] ?? '—' }}</dd>
-                                                    <dt>Live path</dt><dd>{{ $row['promotion_live_path'] ?? '—' }}</dd>
-                                                    <dt>Backup path</dt><dd>{{ $row['promotion_backup_path'] ?? '—' }}</dd>
                                                     <dt>Transaction ID</dt><dd>{{ $row['promotion_transaction_id'] ?? '—' }}</dd>
                                                     <dt>Promotion inventory hash</dt><dd>{{ $row['promotion_inventory_hash'] ?? '—' }}</dd>
                                                     <dt>Current live hash</dt><dd>{{ $row['current_live_inventory_hash'] ?? '—' }}</dd>
@@ -566,7 +582,7 @@
                                                 </dl>
                                             </details>
                                         @endif
-                                        @if ($downloadsEnabled && in_array($artifactStatus, ['not_downloaded', 'rejected', 'failed'], true))
+                                        @if (($actionPolicy['download']['allowed'] ?? false) && in_array($artifactStatus, ['not_downloaded', 'rejected', 'failed'], true))
                                             <div class="addon-marketplace-artifact__actions">
                                                 <x-filament::button
                                                     wire:click="downloadArtifact('{{ e($item->code) }}')"
@@ -579,6 +595,8 @@
                                                     aria-label="Завантажити artifact"
                                                 >Завантажити</x-filament::button>
                                             </div>
+                                        @elseif ($downloadsEnabled && ! ($actionPolicy['download']['allowed'] ?? false))
+                                            <div class="fi-in-text" style="font-size:0.8rem;color:#b91c1c">Download blocked: {{ $actionPolicy['download']['reason'] ?? 'Дію заблоковано.' }}</div>
                                         @endif
                                     @endif
                                 </div>
@@ -590,6 +608,11 @@
                                     @foreach ($row['warnings'] as $warning)
                                         <li>{{ $warning }}</li>
                                     @endforeach
+                                </ul>
+                            @endif
+                            @if (($assessment['diagnostics'] ?? []) !== [])
+                                <ul class="fi-in-text" style="margin-top:0.5rem;color:#b91c1c">
+                                    @foreach ($assessment['diagnostics'] as $diagnostic)<li>{{ $diagnostic }}</li>@endforeach
                                 </ul>
                             @endif
 
@@ -749,8 +772,6 @@
                         <span>Review: {{ $reviewLabels[$promotionModalData['review_status'] ?? 'pending'] ?? ($promotionModalData['review_status'] ?? '—') }}</span>
                         <span>Staging: {{ $promotionModalData['staging_label'] ?? ($promotionModalData['staging_status'] ?? '—') }}</span>
                         <span>Stale flags: {{ ($promotionModalData['has_live_mismatch'] ?? false) ? 'live_mismatch' : 'none' }}</span>
-                        <span>Live path: {{ $promotionModalData['live_path'] ?? '—' }}</span>
-                        <span>Backup path: {{ $promotionModalData['backup_path'] ?? '—' }}</span>
                     </div>
 
                     @if ($promotionModalData['has_live_mismatch'] ?? false)

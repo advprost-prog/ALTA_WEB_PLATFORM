@@ -14,6 +14,11 @@ namespace App\Support\Addons\Version;
  */
 final class VersionComparator
 {
+    public function isSupported(string $version): bool
+    {
+        return preg_match('/^v?\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/D', trim($version)) === 1;
+    }
+
     /**
      * Strip a leading "v" and keep only the leading numeric X.Y.Z prefix.
      */

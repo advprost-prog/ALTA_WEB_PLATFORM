@@ -40,6 +40,7 @@ final class MarketplaceManager
         private readonly DependencyResolver $resolver = new DependencyResolver,
         private readonly VersionComparator $versionComparator = new VersionComparator,
         private readonly PlatformVersion $platformVersion = new PlatformVersion,
+        private readonly MarketplaceActionPolicy $actionPolicy = new MarketplaceActionPolicy,
         private readonly ?RegistryCatalog $registryCatalog = null,
         private readonly ?ArtifactReviewManager $reviewManager = null,
         private readonly ?ArtifactPromotionManager $promotionManager = null,
@@ -58,6 +59,11 @@ final class MarketplaceManager
         $rows = [];
         $remoteCatalog = $this->loadRemoteCatalog();
         $remoteItems = [];
+        $localItems = [];
+
+        foreach ($catalog['items'] as $localItem) {
+            $localItems[$localItem->code] = $localItem;
+        }
 
         foreach ($remoteCatalog['items'] ?? [] as $item) {
             $remoteItems[$item->code] = $item;
@@ -90,6 +96,20 @@ final class MarketplaceManager
             $rows[] = $row;
         }
 
+        $identityConflicts = $this->identityConflicts($localItems, $remoteItems);
+        foreach ($rows as &$row) {
+            $code = $row['item']->code;
+            $row['assessment'] = $this->assess(
+                $localItems[$code] ?? null,
+                $remoteItems[$code] ?? null,
+                (string) ($remoteCatalog['state'] ?? 'unavailable'),
+                $localItems,
+                $remoteItems,
+                $identityConflicts,
+            )->toArray();
+        }
+        unset($row);
+
         $diagnostics = array_merge($catalog['diagnostics'], $remoteCatalog['diagnostics'] ?? []);
 
         return [
@@ -100,6 +120,114 @@ final class MarketplaceManager
             'registry_meta' => $remoteCatalog['meta'] ?? [],
             'registry_header' => $remoteCatalog['registry'] ?? [],
         ];
+    }
+
+    /** @param array<string, MarketplaceItem> $localItems @param array<string, RegistryItem> $remoteItems */
+    private function identityConflicts(array $localItems, array $remoteItems): array
+    {
+        $conflicts = [];
+        foreach ($localItems as $code => $local) {
+            $remote = $remoteItems[$code] ?? null;
+            if ($remote === null) {
+                continue;
+            }
+            $fields = [];
+            if ($local->type !== $remote->type) {
+                $fields[] = 'type';
+            }
+            if (strcasecmp($local->vendor, $remote->vendor) !== 0) {
+                $fields[] = 'vendor';
+            }
+            if (strtolower(trim($local->code)) !== strtolower(trim($remote->code))) {
+                $fields[] = 'code';
+            }
+            if ($fields !== []) {
+                $conflicts[$code] = $fields;
+            }
+        }
+
+        return $conflicts;
+    }
+
+    private function assess(?MarketplaceItem $local, ?RegistryItem $remote, string $registryState, array $localItems, array $remoteItems, array $identityConflicts): MarketplaceAssessment
+    {
+        $code = $local?->code ?? $remote?->code ?? '';
+        $addon = $this->registry->find($code);
+        $source = $local && $remote ? 'local_and_remote' : ($remote ? 'remote_only' : 'local_only');
+        $runtime = ! $addon?->is_installed ? 'not_installed' : ($addon->is_enabled ? 'installed_enabled' : ($addon->status === SystemAddon::STATUS_FAILED ? 'failed' : 'installed_disabled'));
+        $identityFields = $identityConflicts[$code] ?? [];
+        $versionState = $this->candidateVersionState($addon?->version, $remote?->version, $identityFields !== []);
+        $candidate = $remote ?? $local;
+        $constraint = $candidate instanceof RegistryItem ? $candidate->platformConstraint : $candidate?->getPlatformConstraint();
+        $compatibility = $this->candidateCompatibility($constraint, $remote ? 'remote' : 'local');
+        $dependency = $candidate === null ? ['state' => 'satisfied', 'nodes' => [], 'plan' => [], 'cycles' => [], 'blocking' => []]
+            : $this->resolver->preflight($candidate, $this->registry, $this->versionComparator, $localItems, $remoteItems, $registryState, $identityConflicts);
+        $actions = $this->actionPolicy->assess([
+            'has_remote' => $remote !== null, 'registry_state' => $registryState, 'identity_ok' => $identityFields === [],
+            'compatibility' => $compatibility['result'], 'dependencies_blocked' => $dependency['blocking'] !== [] || $dependency['cycles'] !== [],
+            'installed' => (bool) $addon?->is_installed, 'version_state' => $versionState,
+            'downloads_enabled' => (bool) config('addons-registry.downloads.enabled', false),
+        ]);
+        $diagnostics = [];
+        if ($identityFields !== []) {
+            $diagnostics[] = 'Identity conflict: '.implode(', ', $identityFields).'.';
+        }
+        if ($compatibility['result'] === 'incompatible') {
+            $diagnostics[] = $compatibility['reason'];
+        }
+        foreach ($dependency['blocking'] as $node) {
+            $diagnostics[] = $node['code'].': '.$node['reason'];
+        }
+
+        return new MarketplaceAssessment(
+            code: $code, source: $source, runtimeState: $runtime, installedVersion: $addon?->version,
+            localCatalogVersion: $local?->version, remoteVersion: $remote?->version, versionState: $versionState,
+            identity: ['consistent' => $identityFields === [], 'conflicting_fields' => $identityFields], compatibility: $compatibility,
+            dependencies: $dependency, registryState: $remote ? $registryState : 'not_applicable', publisher: $remote?->publisher,
+            signingKeyId: $remote?->artifact['signature']['key_id'] ?? null, publishedAt: $remote?->publishedAt,
+            artifact: $remote?->artifact, actions: $actions, diagnostics: array_values(array_unique($diagnostics)),
+        );
+    }
+
+    private function candidateVersionState(?string $installed, ?string $remote, bool $identityConflict): string
+    {
+        if ($identityConflict) {
+            return 'source_conflict';
+        }
+        if ($remote === null) {
+            return 'not_applicable';
+        }
+        if ($installed === null || $installed === '') {
+            return 'not_applicable';
+        }
+        if (! $this->versionComparator->isSupported($installed) || ! $this->versionComparator->isSupported($remote)) {
+            return 'unknown';
+        }
+
+        return match ($this->versionComparator->compare($installed, $remote)) {
+            -1 => 'update_available', 0 => 'up_to_date', 1 => 'local_newer'
+        };
+    }
+
+    private function candidateCompatibility(?string $constraint, string $source): array
+    {
+        if ($constraint === null || $constraint === '' || $constraint === '*') {
+            return ['platform_version' => $this->platformVersion->version(), 'constraint' => $constraint, 'source' => $source, 'result' => 'compatible', 'reason' => 'Candidate has no platform restriction.'];
+        }
+        $compatible = $this->versionComparator->satisfies($this->platformVersion->version(), $constraint);
+
+        return ['platform_version' => $this->platformVersion->version(), 'constraint' => $constraint, 'source' => $source, 'result' => $compatible ? 'compatible' : 'incompatible', 'reason' => $compatible ? 'Platform constraint is satisfied.' : 'Constraint ['.$constraint.'] does not match ALTA platform ['.$this->platformVersion->version().'].'];
+    }
+
+    public function assessment(string $code): ?array
+    {
+        foreach ($this->resolve()['rows'] as $row) {
+            if ($row['item']->code === $code) {
+                return $row['assessment'];
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -1228,20 +1356,29 @@ final class MarketplaceManager
      */
     public function downloadArtifact(string $code): ArtifactDownloadResult
     {
-        $remoteState = $this->loadRemoteCatalog();
-        if (($remoteState['state'] ?? 'unavailable') !== 'fresh') {
+        if (($this->loadRemoteCatalog()['state'] ?? 'unavailable') !== 'fresh') {
             return ArtifactDownloadResult::failed('remote_state_untrusted', ['Registry snapshot is not fresh; remote download is blocked.']);
         }
-        $item = $this->findItem($code);
+        $assessment = $this->assessment($code);
+        $decision = $assessment['actions']['download'] ?? null;
+        if (! is_array($decision) || ! $decision['allowed']) {
+            $reasonCode = (string) ($decision['reason_code'] ?? 'not_available');
+            $status = $reasonCode === 'registry_not_fresh' ? 'remote_state_untrusted' : $reasonCode;
 
-        if ($item === null) {
+            return ArtifactDownloadResult::failed($status, [(string) ($decision['reason'] ?? 'Remote download is blocked.')]);
+        }
+        $item = null;
+        foreach ($this->loadRemoteCatalog()['items'] ?? [] as $candidate) {
+            if ($candidate->code === $code) {
+                $item = $candidate;
+            }
+        }
+        if (! $item instanceof RegistryItem) {
             return ArtifactDownloadResult::failed('not_available', ["Addon [{$code}] не знайдено у каталозі marketplace."]);
         }
-
-        $registryItem = RegistryItem::fromArray($item->raw);
         $downloader = new ArtifactDownloader(new RegistryClient(config('addons-registry', [])), config('addons-registry', []));
 
-        return $downloader->download($registryItem);
+        return $downloader->download($item);
     }
 
     private function findItem(string $code): ?MarketplaceItem

@@ -4,6 +4,7 @@ namespace App\Support\Addons\Marketplace;
 
 use App\Support\Addons\AddonRegistry;
 use App\Support\Addons\PlatformVersion;
+use App\Support\Addons\Registry\RegistryItem;
 use App\Support\Addons\Version\VersionComparator;
 
 /**
@@ -84,6 +85,132 @@ final class DependencyResolver
         }
 
         return $resolved;
+    }
+
+    /**
+     * Read-only install/update preflight. It never mutates local state.
+     *
+     * @param  array<string, MarketplaceItem>  $localItems
+     * @param  array<string, RegistryItem>  $remoteItems
+     * @param  array<string, list<string>>  $identityConflicts
+     */
+    public function preflight(
+        MarketplaceItem|RegistryItem $root,
+        AddonRegistry $registry,
+        VersionComparator $comparator,
+        array $localItems,
+        array $remoteItems,
+        string $registryState,
+        array $identityConflicts = [],
+    ): array {
+        $nodes = [];
+        $plan = [];
+        $cycles = [];
+        $visiting = [];
+        $visited = [];
+
+        $visit = function (MarketplaceItem|RegistryItem $candidate, array $path = []) use (&$visit, &$nodes, &$plan, &$cycles, &$visiting, &$visited, $root, $registry, $comparator, $localItems, $remoteItems, $registryState, $identityConflicts): void {
+            $code = $candidate->code;
+            if (isset($visiting[$code])) {
+                $start = array_search($code, $path, true);
+                $cycle = [...array_slice($path, $start === false ? 0 : $start), $code];
+                $cycles[] = implode(' -> ', $cycle);
+
+                return;
+            }
+            if (isset($visited[$code])) {
+                return;
+            }
+            $visiting[$code] = true;
+            $path[] = $code;
+            $dependencies = $candidate instanceof RegistryItem ? $candidate->dependencies : $candidate->getDependencies();
+            usort($dependencies, fn (array $a, array $b): int => strcmp($a['code'], $b['code']));
+
+            foreach ($dependencies as $dependency) {
+                $dependencyCode = $dependency['code'];
+                $constraint = $dependency['constraint'] ?? null;
+                $required = (bool) ($dependency['required'] ?? true);
+                $installed = $registry->find($dependencyCode);
+                $local = $localItems[$dependencyCode] ?? null;
+                $remote = $remoteItems[$dependencyCode] ?? null;
+                $installedSatisfied = $installed?->is_installed && ($constraint === null || $constraint === '' || $constraint === '*' || $comparator->satisfies((string) $installed->version, $constraint));
+                $localAvailable = $local?->isValid() && $local->path !== null && is_file(base_path($local->path));
+                $remoteAvailable = $remote !== null && $registryState === 'fresh';
+
+                $state = match (true) {
+                    isset($identityConflicts[$dependencyCode]) => 'identity_conflict',
+                    $installed?->is_installed && ! $installedSatisfied => 'installed_version_mismatch',
+                    $installedSatisfied => 'satisfied_installed',
+                    $localAvailable && $remoteAvailable => 'available_local_and_remote',
+                    $localAvailable => 'available_local',
+                    $remoteAvailable => 'available_remote',
+                    $remote !== null => 'remote_stale_or_unavailable',
+                    default => 'missing',
+                };
+                $blocking = $required && in_array($state, ['installed_version_mismatch', 'identity_conflict', 'remote_stale_or_unavailable', 'missing'], true);
+                $nodes[$dependencyCode] = [
+                    'code' => $dependencyCode, 'constraint' => $constraint, 'required' => $required, 'state' => $state,
+                    'installed' => (bool) $installed?->is_installed, 'enabled' => (bool) $installed?->is_enabled,
+                    'installed_version' => $installed?->version, 'local_version' => $local?->version, 'remote_version' => $remote?->version,
+                    'blocking' => $blocking, 'reason' => $this->nodeReason($state, $constraint),
+                ];
+
+                $next = $remoteAvailable ? $remote : ($localAvailable ? $local : null);
+                if ($required && $next !== null && ! $installedSatisfied) {
+                    $visit($next, $path);
+                }
+            }
+            unset($visiting[$code]);
+            $visited[$code] = true;
+            if ($code !== $root->code && isset($nodes[$code]) && ! $nodes[$code]['installed']) {
+                $plan[] = $code;
+            }
+        };
+        $visit($root);
+        $plan = array_values(array_unique($plan));
+        foreach ($cycles as $cycle) {
+            foreach (explode(' -> ', $cycle) as $code) {
+                if (isset($nodes[$code])) {
+                    $nodes[$code]['state'] = 'cycle';
+                    $nodes[$code]['blocking'] = true;
+                    $nodes[$code]['reason'] = 'Dependency cycle: '.$cycle;
+                }
+            }
+        }
+        $blocking = array_values(array_filter($nodes, fn (array $node): bool => $node['blocking']));
+        $state = $cycles !== [] ? 'blocked_cycle' : ($blocking !== [] ? $this->blockedState($blocking) : ($plan !== [] ? 'installable' : 'satisfied'));
+
+        return ['state' => $state, 'nodes' => $nodes, 'plan' => $plan, 'cycles' => array_values(array_unique($cycles)), 'blocking' => $blocking];
+    }
+
+    private function nodeReason(string $state, ?string $constraint): string
+    {
+        return match ($state) {
+            'satisfied_installed' => 'Installed dependency satisfies the constraint.',
+            'installed_version_mismatch' => 'Installed dependency requires update for constraint ['.($constraint ?? '*').'].',
+            'available_local' => 'Dependency is available from the local catalog.',
+            'available_remote' => 'Dependency is available from the fresh Registry.',
+            'available_local_and_remote' => 'Dependency is available from local and remote catalogs.',
+            'remote_stale_or_unavailable' => 'Remote dependency exists but Registry is not fresh.',
+            'identity_conflict' => 'Dependency identity conflicts between local and remote sources.',
+            default => 'Dependency is missing.',
+        };
+    }
+
+    private function blockedState(array $blocking): string
+    {
+        $states = array_column($blocking, 'state');
+        if (in_array('identity_conflict', $states, true)) {
+            return 'blocked_identity_conflict';
+        }
+        if (in_array('installed_version_mismatch', $states, true)) {
+            return 'blocked_version';
+        }
+        if (in_array('remote_stale_or_unavailable', $states, true)) {
+            return 'unknown_remote_state';
+        }
+
+        return 'blocked_missing';
     }
 
     /**
