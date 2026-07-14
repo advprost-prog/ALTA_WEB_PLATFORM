@@ -8,7 +8,7 @@ use Illuminate\Console\Command;
 
 final class RecoveryRun extends Command
 {
-    protected $signature = 'addons:recovery:run {operation-id} {--safe-only}';
+    protected $signature = 'addons:recovery:run {operation-id} {--safe-only} {--dry-run}';
 
     protected $description = 'Run an explicitly approved safe addon recovery plan.';
 
@@ -19,6 +19,12 @@ final class RecoveryRun extends Command
             $this->error('journal_invalid');
 
             return self::FAILURE;
+        }
+        if ($this->option('dry-run')) {
+            $plan = $recovery->plan($assessment->operationId);
+            $this->line(json_encode($plan, JSON_UNESCAPED_SLASHES));
+
+            return $plan['success'] ? self::SUCCESS : self::FAILURE;
         }
         $result = $recovery->recover($assessment->operationId, $assessment->fingerprint, ArtifactReviewActor::cli());
         $this->line($result['code'].': '.$result['message']);

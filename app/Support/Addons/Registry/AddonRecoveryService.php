@@ -4,11 +4,13 @@ namespace App\Support\Addons\Registry;
 
 use App\Models\SystemAddon;
 use App\Support\Addons\AddonDiscovery;
+use App\Support\Addons\AddonEventLogger;
 use App\Support\Addons\AddonLifecycle;
 use App\Support\Addons\AddonRegistry;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 final class AddonRecoveryService
 {
@@ -20,6 +22,7 @@ final class AddonRecoveryService
         private readonly BackupIntegrityService $backups,
         private readonly ManagedTreeEvidenceBuilder $trees,
         private readonly AddonLivePathResolver $livePaths,
+        private readonly AddonEventLogger $events,
     ) {}
 
     /** @return list<AddonRecoveryAssessment> */
@@ -58,16 +61,18 @@ final class AddonRecoveryService
         if ($assessment === null) {
             return $this->result(false, 'journal_invalid', 'Recovery journal was not found.');
         }
+        if ($this->completedRecoveryExists($operationId)) {
+            return $this->result(false, 'recovery_not_required', 'The addon operation was already recovered.');
+        }
+        if (in_array($assessment->classification, ['completed_consistent', 'rolled_back_consistent'], true)) {
+            return $this->result(false, 'recovery_not_required', 'The addon operation is already consistent.');
+        }
         if (! $assessment->automaticEligible) {
             return $this->result(false, 'automatic_recovery_not_allowed', 'Recovery requires manual intervention.');
         }
-
-        return $this->result(false, 'automatic_recovery_not_implemented', 'Operational recovery is reserved for I6A2.');
-
-        /* I6A2 recovery implementation intentionally remains unreachable until its policy is implemented. */
         $lock = Cache::lock('addon-install-operation:'.$assessment->code, 60);
         if (! $lock->get()) {
-            return $this->result(false, 'recovery_lock_unavailable', 'Addon operation lock is active.');
+            return $this->result(false, 'recovery_operation_active', 'Another addon mutation is active.');
         }
         try {
             $current = $this->inspect($operationId);
@@ -78,42 +83,42 @@ final class AddonRecoveryService
             if ($journal === null) {
                 return $this->result(false, 'journal_invalid', 'Recovery journal is invalid.');
             }
-            $journal['state'] = 'recovering';
-            $this->persist($journal);
+            $execution = $this->startRecoveryJournal($journal, $current, $actor);
+            $this->events->warning($this->eventAddonCode($current->code), 'recovery_started', 'Interrupted addon recovery started.', $this->audit($execution));
+            try {
+                $this->executeRecovery($journal, $current, $execution);
+                $this->transitionRecovery($execution, 'completed');
+                $this->events->info($this->eventAddonCode($current->code), 'recovery_completed', 'Interrupted addon recovery completed.', $this->audit($execution));
 
-            if (in_array($current->classification, ['prepared_no_mutation', 'staged_only'], true)) {
-                $journal['state'] = 'reconciled_failed';
-                $journal['failure_code'] = 'operation_interrupted';
-                $journal['recovered_at'] = now()->toIso8601String();
-                $this->persist($journal);
+                return $this->result(true, 'recovery_completed', 'Interrupted addon operation recovered safely.');
+            } catch (\Throwable $exception) {
+                $code = in_array($exception->getMessage(), $this->failureCodes(), true) ? $exception->getMessage() : 'manual_intervention_required';
+                $execution['failure_code'] = $code;
+                $this->transitionRecovery($execution, 'manual_intervention_required');
+                $this->events->error($this->eventAddonCode($current->code), 'recovery_failed', 'Interrupted addon recovery requires manual intervention.', [...$this->audit($execution), 'code' => $code]);
 
-                return $this->result(true, 'recovery_completed', 'Interrupted operation reconciled without filesystem mutation.');
+                return $this->result(false, $code, 'Recovery evidence was preserved for manual intervention.');
             }
-            if (in_array($current->classification, ['new_live_promoted_db_old', 'first_install_live_present_db_absent'], true)) {
-                $transaction = (string) ($journal['promotion_transaction_id'] ?? '');
-                $rollback = $this->promotion->rollback($current->code, $transaction, 'Crash recovery', $actor);
-                if (! $rollback->success) {
-                    return $this->manual($journal, 'recovery_restore_failed');
-                }
-                $this->reconcilePreviousDb($journal, $rollback->livePath);
-                $journal['state'] = 'rolled_back';
-                $journal['recovered_at'] = now()->toIso8601String();
-                $this->persist($journal);
-
-                return $this->result(true, 'recovery_completed', 'Previous local state restored.');
-            }
-            if ($current->classification === 'new_live_promoted_db_new') {
-                $journal['state'] = 'completed';
-                $journal['completed_at'] = now()->toIso8601String();
-                $this->persist($journal);
-
-                return $this->result(true, 'recovery_completed', 'Consistent target state marked completed without boot.');
-            }
-
-            return $this->manual($journal, 'manual_intervention_required');
         } finally {
             $lock->release();
         }
+    }
+
+    public function plan(string $operationId): array
+    {
+        $assessment = $this->inspect($operationId);
+        if ($assessment === null) {
+            return $this->result(false, 'journal_invalid', 'Recovery journal was not found.');
+        }
+
+        return [
+            'success' => $assessment->automaticEligible,
+            'code' => $assessment->automaticEligible ? 'recovery_plan_ready' : 'automatic_recovery_not_allowed',
+            'classification' => $assessment->classification,
+            'action' => $assessment->proposedAction,
+            'destructive' => $assessment->destructiveActionExpected,
+            'fingerprint' => $assessment->fingerprint,
+        ];
     }
 
     public function classifyEvidence(array $evidence): array
@@ -173,7 +178,7 @@ final class AddonRecoveryService
             return ['new_live_promoted_db_new', 'complete_metadata_verification', true, []];
         }
         if ($live === null && $db === $target && $previous === null) {
-            return ['first_install_db_present_live_missing', 'manual_intervention', false, ['live_missing']];
+            return ['first_install_db_present_live_missing', 'remove_partial_record', true, []];
         }
         if ($live === null && $backupValid && $db === $previous) {
             return ['backup_created_live_missing', 'restore_backup', true, []];
@@ -228,6 +233,247 @@ final class AddonRecoveryService
             (string) ($journal['state'] ?? 'invalid'), $journal['previous_version'] ?? null, $journal['target_version'] ?? null,
             $classification, $action, $automatic, in_array($action, ['rollback_previous', 'restore_backup', 'restore_deterministic_tree'], true),
             $manualReasons, $diagnostics, $fingerprint, $evidence, $liveEvidence, $backupEvidence, $candidateEvidence, $stagingEvidence);
+    }
+
+    private function executeRecovery(array $journal, AddonRecoveryAssessment $assessment, array &$execution): void
+    {
+        $paths = $this->operationPaths($journal);
+        $classification = $assessment->classification;
+        if (! in_array($classification, [
+            'prepared_no_mutation', 'staged_only', 'candidate_only', 'backup_created_live_missing',
+            'new_live_promoted_db_old', 'new_live_promoted_db_new', 'old_live_restored_db_new',
+            'first_install_live_present_db_absent', 'first_install_db_present_live_missing', 'rollback_incomplete',
+        ], true)) {
+            throw new \RuntimeException('recovery_plan_invalid');
+        }
+
+        if (in_array($classification, ['prepared_no_mutation', 'staged_only', 'candidate_only'], true)) {
+            $this->transitionRecovery($execution, 'cleaning_transient');
+            if ($assessment->candidateEvidence->existence === 'present') {
+                $this->deleteExactDirectory($paths['candidate']);
+            }
+            if ($assessment->stagingEvidence->existence === 'present') {
+                $this->deleteExactDirectory($paths['staging']);
+            }
+            $this->transitionRecovery($execution, 'reconciled_interrupted');
+
+            return;
+        }
+
+        if ($classification === 'new_live_promoted_db_new') {
+            $this->transitionRecovery($execution, 'verifying');
+            $this->assertLiveAndDb($journal, $paths['live'], $journal['target_version'] ?? null);
+            $this->transitionRecovery($execution, 'reconciled_completed');
+
+            return;
+        }
+
+        if ($classification === 'first_install_db_present_live_missing') {
+            $this->transitionRecovery($execution, 'removing_partial_record');
+            SystemAddon::query()->where('code', $journal['code'])->delete();
+            if (SystemAddon::query()->where('code', $journal['code'])->exists()) {
+                throw new \RuntimeException('recovery_registration_failed');
+            }
+            $this->transitionRecovery($execution, 'rolled_back');
+
+            return;
+        }
+
+        if ($classification === 'first_install_live_present_db_absent') {
+            $this->transitionRecovery($execution, 'preserving_partial_live');
+            $safety = $this->safetyPath((string) $paths['live'], (string) $execution['recovery_id'], 'first-install');
+            if (! is_dir((string) $paths['live']) || ! rename((string) $paths['live'], $safety)) {
+                throw new \RuntimeException('recovery_cleanup_failed');
+            }
+            if (is_dir((string) $paths['live']) || SystemAddon::query()->where('code', $journal['code'])->exists()) {
+                throw new \RuntimeException('recovery_verification_failed');
+            }
+            $this->transitionRecovery($execution, 'rolled_back');
+
+            return;
+        }
+
+        if ($classification === 'old_live_restored_db_new') {
+            $this->transitionRecovery($execution, 'registering_previous');
+            $this->reconcilePreviousDb($journal, $paths['live']);
+            $this->assertLiveAndDb($journal, $paths['live'], $journal['previous_version'] ?? null);
+            $this->transitionRecovery($execution, 'rolled_back');
+
+            return;
+        }
+
+        if ($classification === 'rollback_incomplete') {
+            if ($assessment->liveEvidence->version === $journal['previous_version']) {
+                $this->reconcilePreviousDb($journal, $paths['live']);
+                $this->assertLiveAndDb($journal, $paths['live'], $journal['previous_version'] ?? null);
+                $this->transitionRecovery($execution, 'rolled_back');
+
+                return;
+            }
+            if ($assessment->liveEvidence->version === $journal['target_version'] && ($assessment->evidence['db_version'] ?? null) === $journal['target_version']) {
+                $this->assertLiveAndDb($journal, $paths['live'], $journal['target_version'] ?? null);
+                $this->transitionRecovery($execution, 'reconciled_completed');
+
+                return;
+            }
+            if ($assessment->backupEvidence->integrity !== 'verified') {
+                throw new \RuntimeException('recovery_plan_invalid');
+            }
+        }
+
+        $this->restorePreviousTree($journal, $assessment, $paths, $execution);
+    }
+
+    private function restorePreviousTree(array $journal, AddonRecoveryAssessment $assessment, array $paths, array &$execution): void
+    {
+        $live = $paths['live'];
+        $backup = $paths['backup'];
+        if (! is_string($live) || ! is_string($backup) || $assessment->backupEvidence->integrity !== 'verified') {
+            throw new \RuntimeException('recovery_plan_invalid');
+        }
+        $payload = $backup.'/payload';
+        if (! is_dir($payload)) {
+            throw new \RuntimeException('recovery_restore_failed');
+        }
+        $safety = null;
+        if (is_dir($live)) {
+            $this->transitionRecovery($execution, 'preserving_target');
+            $safety = $this->safetyPath($live, (string) $execution['recovery_id'], 'target');
+            if (! rename($live, $safety)) {
+                throw new \RuntimeException('recovery_restore_failed');
+            }
+        }
+        $this->transitionRecovery($execution, 'restoring_previous');
+        if (! rename($payload, $live)) {
+            if ($safety !== null && is_dir($safety) && ! rename($safety, $live)) {
+                throw new \RuntimeException('recovery_compensation_failed');
+            }
+            throw new \RuntimeException('recovery_restore_failed');
+        }
+        try {
+            $this->transitionRecovery($execution, 'discovering');
+            $this->reconcilePreviousDb($journal, $live);
+            $this->transitionRecovery($execution, 'verifying');
+            $this->assertLiveAndDb($journal, $live, $journal['previous_version'] ?? null);
+            $this->transitionRecovery($execution, 'rolled_back');
+        } catch (\Throwable) {
+            $failedPrevious = $this->safetyPath($live, (string) $execution['recovery_id'], 'failed-previous');
+            $preserved = rename($live, $failedPrevious);
+            $restored = $safety !== null && is_dir($safety) && rename($safety, $live);
+            if (! $preserved || ! $restored) {
+                throw new \RuntimeException('recovery_compensation_failed');
+            }
+            throw new \RuntimeException('recovery_registration_failed');
+        }
+    }
+
+    private function operationPaths(array $journal): array
+    {
+        $promotion = $this->promotionJournal((string) ($journal['promotion_transaction_id'] ?? ''));
+        $promotion = array_replace($this->promotionMetadataFromStaging($promotion), array_filter($promotion, static fn ($value): bool => $value !== null));
+        $live = is_string($promotion['live_path'] ?? null) ? $promotion['live_path'] : $this->resolvedLivePath($this->registry->find((string) $journal['code']));
+        $transaction = is_string($promotion['transaction_id'] ?? null) ? $promotion['transaction_id'] : null;
+        $stagingDisk = Storage::disk((string) Config::get('addons-registry.staging.disk', 'addons'));
+
+        return [
+            'live' => $live,
+            'backup' => is_string($promotion['backup_path'] ?? null) ? $promotion['backup_path'] : null,
+            'candidate' => $live !== null && $transaction !== null ? dirname($live).'/.'.basename($live).'.promote-'.$transaction : null,
+            'staging' => is_string($promotion['staging_path'] ?? null) ? $stagingDisk->path($promotion['staging_path']) : null,
+        ];
+    }
+
+    private function startRecoveryJournal(array $source, AddonRecoveryAssessment $assessment, ArtifactReviewActor $actor): array
+    {
+        $journal = [
+            'schema_version' => 1,
+            'recovery_id' => (string) Str::uuid(),
+            'source_operation_id' => $source['operation_id'],
+            'code' => $source['code'],
+            'classification' => $assessment->classification,
+            'proposed_action' => $assessment->proposedAction,
+            'evidence_fingerprint' => $assessment->fingerprint,
+            'actor' => $actor->toArray(),
+            'state' => 'recovering',
+            'started_at' => now()->toIso8601String(),
+            'steps' => [['state' => 'recovering', 'at' => now()->toIso8601String()]],
+        ];
+        $this->persistRecovery($journal);
+
+        return $journal;
+    }
+
+    private function transitionRecovery(array &$journal, string $state): void
+    {
+        $journal['state'] = $state;
+        $journal['steps'][] = ['state' => $state, 'at' => now()->toIso8601String()];
+        if (in_array($state, ['completed', 'manual_intervention_required'], true)) {
+            $journal['finished_at'] = now()->toIso8601String();
+        }
+        $this->persistRecovery($journal);
+    }
+
+    private function persistRecovery(array $journal): void
+    {
+        Storage::disk('addons')->put('addons/recovery-journal/'.$journal['code'].'/'.$journal['recovery_id'].'.json', json_encode($journal, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    }
+
+    private function completedRecoveryExists(string $operationId): bool
+    {
+        foreach (Storage::disk('addons')->allFiles('addons/recovery-journal') as $path) {
+            $journal = json_decode((string) Storage::disk('addons')->get($path), true);
+            if (is_array($journal) && ($journal['source_operation_id'] ?? null) === $operationId && ($journal['state'] ?? null) === 'completed') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function assertLiveAndDb(array $journal, ?string $live, ?string $version): void
+    {
+        $db = $this->registry->find((string) $journal['code']);
+        if ($version === null || $this->manifestVersion($live) !== $version || $db?->version !== $version) {
+            throw new \RuntimeException('recovery_verification_failed');
+        }
+    }
+
+    private function safetyPath(string $live, string $id, string $kind): string
+    {
+        return dirname($live).'/.'.basename($live).'.recovery-'.$kind.'-'.$id;
+    }
+
+    private function deleteExactDirectory(?string $path): void
+    {
+        if ($path === null || ! is_dir($path) || is_link($path)) {
+            throw new \RuntimeException('recovery_cleanup_failed');
+        }
+        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($iterator as $entry) {
+            $ok = $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+            if (! $ok) {
+                throw new \RuntimeException('recovery_cleanup_failed');
+            }
+        }
+        if (! rmdir($path)) {
+            throw new \RuntimeException('recovery_cleanup_failed');
+        }
+    }
+
+    private function failureCodes(): array
+    {
+        return ['recovery_plan_invalid', 'recovery_cleanup_failed', 'recovery_restore_failed', 'recovery_discovery_failed',
+            'recovery_registration_failed', 'recovery_verification_failed', 'recovery_compensation_failed', 'manual_intervention_required'];
+    }
+
+    private function audit(array $journal): array
+    {
+        return array_intersect_key($journal, array_flip(['recovery_id', 'source_operation_id', 'code', 'classification', 'evidence_fingerprint', 'state']));
+    }
+
+    private function eventAddonCode(string $code): ?string
+    {
+        return SystemAddon::query()->where('code', $code)->exists() ? $code : null;
     }
 
     private function promotionJournal(string $transactionId): array
@@ -312,7 +558,9 @@ final class AddonRecoveryService
             $manifest = collect(['module.json', 'extension.json', 'manifest.json'])->map(fn ($name) => $livePath.'/'.$name)->first(fn ($path) => is_file($path));
             if (is_string($manifest)) {
                 $type = str_contains($manifest, 'module.json') ? 'module' : 'extension';
-                $this->discovery->syncManifest($manifest, $type);
+                if ($this->discovery->syncManifest($manifest, $type) === null) {
+                    throw new \RuntimeException('recovery_discovery_failed');
+                }
             }
         }
         $addon = $this->registry->find($code);
