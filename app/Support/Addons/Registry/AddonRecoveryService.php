@@ -192,7 +192,7 @@ final class AddonRecoveryService
         $code = (string) $journal['code'];
         $db = $this->registry->find($code);
         $promotion = $this->promotionJournal((string) ($journal['promotion_transaction_id'] ?? ''));
-        $promotion = array_replace($this->promotionMetadataFromStaging($promotion), array_filter($promotion, static fn ($value): bool => $value !== null));
+        $promotion = array_replace($this->promotionMetadataFromArtifact($journal), $this->promotionMetadataFromStaging($promotion), array_filter($promotion, static fn ($value): bool => $value !== null));
         $type = (string) ($promotion['addon_type'] ?? $db?->type ?? 'module');
         $liveRoot = rtrim((string) Config::get('addons-registry.live_roots.'.($type === 'extension' ? 'extensions_path' : 'modules_path'), base_path($type === 'extension' ? 'extensions' : 'modules')), '/');
         $backupRoot = Storage::disk((string) Config::get('addons-registry.promotion.backup_disk', 'addons'))->path(trim((string) Config::get('addons-registry.promotion.backup_path', 'addons/backups'), '/'));
@@ -370,7 +370,7 @@ final class AddonRecoveryService
     private function operationPaths(array $journal): array
     {
         $promotion = $this->promotionJournal((string) ($journal['promotion_transaction_id'] ?? ''));
-        $promotion = array_replace($this->promotionMetadataFromStaging($promotion), array_filter($promotion, static fn ($value): bool => $value !== null));
+        $promotion = array_replace($this->promotionMetadataFromArtifact($journal), $this->promotionMetadataFromStaging($promotion), array_filter($promotion, static fn ($value): bool => $value !== null));
         $live = is_string($promotion['live_path'] ?? null) ? $promotion['live_path'] : $this->resolvedLivePath($this->registry->find((string) $journal['code']));
         $transaction = is_string($promotion['transaction_id'] ?? null) ? $promotion['transaction_id'] : null;
         $stagingDisk = Storage::disk((string) Config::get('addons-registry.staging.disk', 'addons'));
@@ -507,6 +507,28 @@ final class AddonRecoveryService
         }
         $metadataPath = dirname($source).'/metadata.json';
         $metadata = json_decode((string) ($disk->exists($metadataPath) ? $disk->get($metadataPath) : ''), true);
+        if (! is_array($metadata)) {
+            return [];
+        }
+
+        return [
+            'live_path' => $metadata['promotion_live_path'] ?? null,
+            'backup_path' => $metadata['promotion_backup_path'] ?? null,
+            'transaction_id' => $metadata['promotion_transaction_id'] ?? null,
+        ];
+    }
+
+    private function promotionMetadataFromArtifact(array $journal): array
+    {
+        $code = $journal['code'] ?? null;
+        $version = $journal['target_version'] ?? null;
+        if (! is_string($code) || ! is_string($version)) {
+            return [];
+        }
+        $disk = Storage::disk((string) Config::get('addons-registry.downloads.disk', 'addons'));
+        $root = trim((string) Config::get('addons-registry.downloads.quarantine_path', 'addons/quarantine'), '/');
+        $path = $root.'/'.$code.'/'.$version.'/metadata.json';
+        $metadata = json_decode((string) ($disk->exists($path) ? $disk->get($path) : ''), true);
         if (! is_array($metadata)) {
             return [];
         }
