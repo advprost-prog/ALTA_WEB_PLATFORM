@@ -21,6 +21,7 @@ final class ArtifactPromotionManager
         private readonly AddonLivePathResolver $resolver,
         private readonly AddonEventLogger $events,
         private readonly BackupIntegrityService $backupIntegrity,
+        private readonly ManagedTreeInventory $managedInventory,
     ) {}
 
     public function promote(string $code, ArtifactReviewActor $actor): ArtifactPromotionResult
@@ -130,6 +131,14 @@ final class ArtifactPromotionManager
                     'metadata' => $this->refreshMetadata($state),
                 ]);
             }
+            $this->writeJsonAtomically($candidate.'/.candidate-evidence.json', [
+                'schema_version' => 1,
+                'operation_id' => $transactionId,
+                'code' => $state['code'],
+                'version' => $state['version'],
+                'type' => $state['type'],
+                'inventory_digest' => $this->managedInventory->build($candidate)['inventory_digest'],
+            ]);
 
             $rollbackTemp = null;
             if (is_dir($live['live_path'])) {
@@ -146,6 +155,8 @@ final class ArtifactPromotionManager
                     ]);
                 }
             }
+
+            @unlink($candidate.'/.candidate-evidence.json');
 
             if (! rename($candidate, $live['live_path'])) {
                 if ($rollbackTemp !== null && is_dir($rollbackTemp)) {
@@ -1184,6 +1195,16 @@ final class ArtifactPromotionManager
         }
 
         file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    }
+
+    private function writeJsonAtomically(string $path, array $data): void
+    {
+        $temporary = $path.'.'.bin2hex(random_bytes(6)).'.part';
+        $this->writeJson($temporary, $data);
+        if (! rename($temporary, $path)) {
+            @unlink($temporary);
+            throw new RuntimeException('Could not atomically persist candidate evidence.');
+        }
     }
 
     /**

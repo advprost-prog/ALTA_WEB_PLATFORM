@@ -8,7 +8,7 @@ use RuntimeException;
 
 final class ManagedTreeInventory
 {
-    private const EXCLUDED = ['backup.json'];
+    private const EXCLUDED = ['backup.json', '.candidate-evidence.json'];
 
     public function build(string $root): array
     {

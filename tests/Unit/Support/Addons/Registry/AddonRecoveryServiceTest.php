@@ -27,6 +27,17 @@ final class AddonRecoveryServiceTest extends TestCase
             'target complete missing marker' => [['journal_state' => 'registering', 'previous_version' => '1.0.0', 'target_version' => '2.0.0', 'live_version' => '2.0.0', 'db_version' => '2.0.0', 'backup_valid' => true], 'new_live_promoted_db_new', true],
             'first install db only' => [['journal_state' => 'registering', 'previous_version' => null, 'target_version' => '2.0.0', 'live_version' => null, 'db_version' => '2.0.0'], 'first_install_db_present_live_missing', false],
             'ambiguous' => [['journal_state' => 'promoting', 'previous_version' => '1.0.0', 'target_version' => '2.0.0', 'live_version' => '3.0.0', 'db_version' => '1.5.0'], 'ambiguous_conflict', false],
+            'completed' => [['journal_state' => 'completed', 'previous_version' => null, 'target_version' => '2.0.0', 'live_version' => '2.0.0', 'db_version' => '2.0.0'], 'completed_consistent', false],
+            'rolled back' => [['journal_state' => 'rolled_back', 'previous_version' => '1.0.0', 'target_version' => '2.0.0', 'live_version' => '1.0.0', 'db_version' => '1.0.0'], 'rolled_back_consistent', false],
+            'unmanaged precedence' => [['journal_state' => 'completed', 'previous_version' => '1.0.0', 'target_version' => '2.0.0', 'live_version' => '2.0.0', 'db_version' => '2.0.0', 'live_status' => 'unmanaged'], 'unmanaged_path_conflict', false],
+            'integrity precedence' => [['journal_state' => 'completed', 'previous_version' => '1.0.0', 'target_version' => '2.0.0', 'live_version' => '2.0.0', 'db_version' => '2.0.0', 'live_status' => 'integrity_failed'], 'integrity_failure', false],
+            'ownership precedence' => [['journal_state' => 'staged', 'previous_version' => '1.0.0', 'target_version' => '2.0.0', 'live_version' => '1.0.0', 'db_version' => '1.0.0', 'staging_status' => 'ownership_mismatch'], 'unmanaged_path_conflict', false],
+            'staged only' => [['journal_state' => 'staged', 'previous_version' => '1.0.0', 'target_version' => '2.0.0', 'live_version' => '1.0.0', 'db_version' => '1.0.0', 'staging_verified' => true], 'staged_only', true],
+            'candidate only' => [['journal_state' => 'promoting', 'previous_version' => '1.0.0', 'target_version' => '2.0.0', 'live_version' => '1.0.0', 'db_version' => '1.0.0', 'candidate_verified' => true], 'candidate_only', true],
+            'backup live missing' => [['journal_state' => 'promoting', 'previous_version' => '1.0.0', 'target_version' => '2.0.0', 'live_version' => null, 'db_version' => '1.0.0', 'backup_valid' => true], 'backup_created_live_missing', true],
+            'first install live only' => [['journal_state' => 'promoted', 'previous_version' => null, 'target_version' => '2.0.0', 'live_version' => '2.0.0', 'db_version' => null], 'first_install_live_present_db_absent', true],
+            'old live db new' => [['journal_state' => 'recovering', 'previous_version' => '1.0.0', 'target_version' => '2.0.0', 'live_version' => '1.0.0', 'db_version' => '2.0.0'], 'rollback_incomplete', true],
+            'rollback ambiguous' => [['journal_state' => 'recovering', 'previous_version' => '1.0.0', 'target_version' => '2.0.0', 'live_version' => '2.0.0', 'db_version' => '2.0.0', 'backup_valid' => true], 'rollback_incomplete', false],
         ];
     }
 }

@@ -7,6 +7,7 @@ use App\Support\Addons\AddonDiscovery;
 use App\Support\Addons\AddonLifecycle;
 use App\Support\Addons\AddonRegistry;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
 
 final class AddonRecoveryService
@@ -17,6 +18,8 @@ final class AddonRecoveryService
         private readonly AddonRegistry $registry,
         private readonly AddonLifecycle $lifecycle,
         private readonly BackupIntegrityService $backups,
+        private readonly ManagedTreeEvidenceBuilder $trees,
+        private readonly AddonLivePathResolver $livePaths,
     ) {}
 
     /** @return list<AddonRecoveryAssessment> */
@@ -58,6 +61,10 @@ final class AddonRecoveryService
         if (! $assessment->automaticEligible) {
             return $this->result(false, 'automatic_recovery_not_allowed', 'Recovery requires manual intervention.');
         }
+
+        return $this->result(false, 'automatic_recovery_not_implemented', 'Operational recovery is reserved for I6A2.');
+
+        /* I6A2 recovery implementation intentionally remains unreachable until its policy is implemented. */
         $lock = Cache::lock('addon-install-operation:'.$assessment->code, 60);
         if (! $lock->get()) {
             return $this->result(false, 'recovery_lock_unavailable', 'Addon operation lock is active.');
@@ -118,16 +125,51 @@ final class AddonRecoveryService
         $target = $evidence['target_version'] ?? null;
         $backupValid = (bool) ($evidence['backup_valid'] ?? false);
 
-        if (in_array($state, ['prepared', 'preflight_validated'], true) && $live === $previous && $db === $previous) {
+        if ($state === 'invalid' || ! is_string($evidence['target_version'] ?? null)) {
+            return ['ambiguous_conflict', 'manual_intervention', false, ['journal_invalid']];
+        }
+
+        foreach (['live', 'backup', 'candidate', 'staging'] as $tree) {
+            $status = $evidence[$tree.'_status'] ?? null;
+            if (in_array($status, ['unmanaged', 'symlink_conflict'], true)) {
+                return ['unmanaged_path_conflict', 'manual_intervention', false, ['unmanaged_path_conflict']];
+            }
+            if ($status === 'integrity_failed') {
+                return ['integrity_failure', 'manual_intervention', false, [$tree.'_integrity_failed']];
+            }
+            if ($status === 'ownership_mismatch') {
+                return ['unmanaged_path_conflict', 'manual_intervention', false, ['ownership_mismatch']];
+            }
+        }
+
+        if ($state === 'completed' && $live === $target && $db === $target && ($previous === null || $backupValid) && ! ($evidence['candidate_exists'] ?? false) && ! ($evidence['staging_exists'] ?? false)) {
+            return ['completed_consistent', 'none', false, []];
+        }
+        if ($state === 'rolled_back' && $live === $previous && $db === $previous && ! ($evidence['candidate_verified'] ?? false)) {
+            return ['rolled_back_consistent', 'none', false, []];
+        }
+        if ($state === 'promoting' && ($evidence['candidate_verified'] ?? false) && $live === $previous && $db === $previous && ! $backupValid) {
+            return ['candidate_only', 'mark_interrupted', true, []];
+        }
+        if (in_array($state, ['rolling_back', 'recovering'], true)) {
+            $targets = count(array_filter([$live === $previous, $live === $target, $backupValid]));
+
+            return ['rollback_incomplete', $targets === 1 ? 'restore_deterministic_tree' : 'manual_intervention', $targets === 1, $targets === 1 ? [] : ['ambiguous_recovery_state']];
+        }
+        if ($live === $previous && $db === $target && $previous !== null) {
+            return ['old_live_restored_db_new', 'restore_previous_database', true, []];
+        }
+
+        if (in_array($state, ['prepared', 'preflight_validated'], true) && $live === $previous && $db === $previous && ! ($evidence['candidate_verified'] ?? false) && ! $backupValid) {
             return ['prepared_no_mutation', 'mark_interrupted', true, []];
         }
-        if ($state === 'staged' && $live === $previous && $db === $previous) {
+        if ($state === 'staged' && ($evidence['staging_verified'] ?? false) && ! ($evidence['candidate_verified'] ?? false) && $live === $previous && $db === $previous) {
             return ['staged_only', 'retain_for_retry', true, []];
         }
         if ($live === $target && $db === $previous && ($previous === null || $backupValid)) {
             return [$previous === null ? 'first_install_live_present_db_absent' : 'new_live_promoted_db_old', 'rollback_previous', true, []];
         }
-        if ($live === $target && $db === $target) {
+        if ($live === $target && $db === $target && ($previous === null || $backupValid)) {
             return ['new_live_promoted_db_new', 'complete_metadata_verification', true, []];
         }
         if ($live === null && $db === $target && $previous === null) {
@@ -143,33 +185,103 @@ final class AddonRecoveryService
     private function inspectJournal(array $journal): AddonRecoveryAssessment
     {
         $code = (string) $journal['code'];
-        $promotion = $this->promotion->getPromotionReport($code);
-        $livePath = is_string($promotion['live_path'] ?? null) ? $promotion['live_path'] : null;
-        $liveVersion = $this->manifestVersion($livePath);
         $db = $this->registry->find($code);
-        $backupPath = is_string($promotion['backup_path'] ?? null) ? $promotion['backup_path'] : null;
-        $backupVersion = $this->manifestVersion($backupPath);
-        $backupIntegrity = $backupPath === null ? ['valid' => false, 'status' => 'missing', 'diagnostics' => ['backup_record_missing']] : $this->backups->verify($backupPath);
+        $promotion = $this->promotionJournal((string) ($journal['promotion_transaction_id'] ?? ''));
+        $promotion = array_replace($this->promotionMetadataFromStaging($promotion), array_filter($promotion, static fn ($value): bool => $value !== null));
+        $type = (string) ($promotion['addon_type'] ?? $db?->type ?? 'module');
+        $liveRoot = rtrim((string) Config::get('addons-registry.live_roots.'.($type === 'extension' ? 'extensions_path' : 'modules_path'), base_path($type === 'extension' ? 'extensions' : 'modules')), '/');
+        $backupRoot = Storage::disk((string) Config::get('addons-registry.promotion.backup_disk', 'addons'))->path(trim((string) Config::get('addons-registry.promotion.backup_path', 'addons/backups'), '/'));
+        $stagingDisk = (string) Config::get('addons-registry.staging.disk', 'addons');
+        $stagingRoot = Storage::disk($stagingDisk)->path(trim((string) Config::get('addons-registry.staging.path', 'addons/staging'), '/'));
+        $livePath = is_string($promotion['live_path'] ?? null) ? $promotion['live_path'] : $this->resolvedLivePath($db);
+        $transaction = is_string($promotion['transaction_id'] ?? null) ? $promotion['transaction_id'] : null;
+        $candidatePath = $livePath !== null && $transaction !== null ? dirname($livePath).'/.'.basename($livePath).'.promote-'.$transaction : null;
+        $expected = ['code' => $code, 'operation_id' => $transaction];
+        $liveEvidence = $this->trees->inspect('live', $livePath, $liveRoot, ['code' => $code]);
+        $backupEvidence = $this->trees->inspect('backup', is_string($promotion['backup_path'] ?? null) ? $promotion['backup_path'] : null, $backupRoot, $expected);
+        $candidateEvidence = $this->trees->inspect('candidate', $candidatePath, $liveRoot, $expected);
+        $stagingPath = is_string($promotion['staging_path'] ?? null) ? Storage::disk($stagingDisk)->path($promotion['staging_path']) : null;
+        $stagingEvidence = $this->trees->inspect('staging', $stagingPath, $stagingRoot, $expected);
         $evidence = [
             'journal_state' => $journal['state'] ?? 'invalid', 'previous_version' => $journal['previous_version'] ?? null,
-            'target_version' => $journal['target_version'] ?? null, 'live_version' => $liveVersion,
+            'target_version' => $journal['target_version'] ?? null, 'live_version' => $liveEvidence->version,
             'db_version' => $db?->version, 'db_enabled' => (bool) $db?->is_enabled,
-            'backup_valid' => ($backupIntegrity['valid'] ?? false) && $backupVersion !== null && $backupVersion === ($journal['previous_version'] ?? null),
-            'backup_version' => $backupVersion, 'promotion_transaction_id' => $journal['promotion_transaction_id'] ?? null,
-            'backup_integrity_status' => $backupIntegrity['status'] ?? 'missing',
+            'backup_valid' => $backupEvidence->integrity === 'verified' && $backupEvidence->version === ($journal['previous_version'] ?? null),
+            'backup_version' => $backupEvidence->version, 'promotion_transaction_id' => $journal['promotion_transaction_id'] ?? null,
+            'candidate_verified' => $candidateEvidence->integrity === 'verified' && $candidateEvidence->ownership === 'managed',
+            'staging_verified' => $stagingEvidence->integrity === 'verified' && $stagingEvidence->ownership === 'managed',
+            'candidate_exists' => $candidateEvidence->existence === 'present', 'staging_exists' => $stagingEvidence->existence === 'present',
         ];
+        foreach (compact('liveEvidence', 'backupEvidence', 'candidateEvidence', 'stagingEvidence') as $name => $tree) {
+            $prefix = substr($name, 0, -8);
+            $evidence[$prefix.'_status'] = $tree->ownership !== 'managed' && $tree->ownership !== 'not_applicable' ? $tree->ownership : $tree->integrity;
+        }
         [$classification, $action, $automatic, $diagnostics] = $this->classifyEvidence($evidence);
-        if (in_array($evidence['backup_integrity_status'], ['corrupt', 'invalid', 'unmanaged', 'symlink_conflict'], true)) {
-            [$classification, $action, $automatic, $diagnostics] = ['integrity_failure', 'manual_intervention', false, $backupIntegrity['diagnostics']];
+        $securityEvidence = ['journal' => array_intersect_key($evidence, array_flip(['journal_state', 'previous_version', 'target_version', 'db_version', 'db_enabled']))];
+        foreach (compact('liveEvidence', 'backupEvidence', 'candidateEvidence', 'stagingEvidence') as $name => $tree) {
+            $securityEvidence[$name] = array_diff_key($tree->toArray(), array_flip(['diagnosticCode', 'diagnosticMessage', 'fileCount', 'totalBytes']));
         }
-        if ($evidence['backup_integrity_status'] === 'legacy_unverified' && in_array($classification, ['backup_created_live_missing', 'new_live_promoted_db_old'], true)) {
-            [$classification, $action, $automatic, $diagnostics] = ['integrity_failure', 'manual_intervention', false, ['backup_legacy_unverified']];
-        }
-        $fingerprint = hash('sha256', json_encode($evidence, JSON_UNESCAPED_SLASHES));
+        $fingerprint = hash('sha256', json_encode($securityEvidence, JSON_UNESCAPED_SLASHES));
+        $manualReasons = $automatic ? [] : $diagnostics;
 
         return new AddonRecoveryAssessment((string) $journal['operation_id'], $code, (string) ($journal['operation_type'] ?? 'install'),
             (string) ($journal['state'] ?? 'invalid'), $journal['previous_version'] ?? null, $journal['target_version'] ?? null,
-            $classification, $action, $automatic, $diagnostics, $fingerprint, $evidence);
+            $classification, $action, $automatic, in_array($action, ['rollback_previous', 'restore_backup', 'restore_deterministic_tree'], true),
+            $manualReasons, $diagnostics, $fingerprint, $evidence, $liveEvidence, $backupEvidence, $candidateEvidence, $stagingEvidence);
+    }
+
+    private function promotionJournal(string $transactionId): array
+    {
+        if ($transactionId === '') {
+            return [];
+        }
+        $disk = Storage::disk((string) Config::get('addons-registry.promotion.journal_disk', 'addons'));
+        $root = trim((string) Config::get('addons-registry.promotion.journal_path', 'addons/promotion-journal'), '/');
+        foreach ($disk->allFiles($root) as $path) {
+            $journal = json_decode((string) $disk->get($path), true);
+            if (is_array($journal) && ($journal['transaction_id'] ?? null) === $transactionId) {
+                return $journal;
+            }
+        }
+
+        return [];
+    }
+
+    private function promotionMetadataFromStaging(array $promotion): array
+    {
+        $stagingPath = $promotion['staging_path'] ?? null;
+        if (! is_string($stagingPath)) {
+            return [];
+        }
+        $disk = Storage::disk((string) Config::get('addons-registry.staging.disk', 'addons'));
+        $staging = json_decode((string) ($disk->exists($stagingPath.'/staging.json') ? $disk->get($stagingPath.'/staging.json') : ''), true);
+        $source = is_array($staging) ? ($staging['source']['quarantine_path'] ?? null) : null;
+        if (! is_string($source)) {
+            return [];
+        }
+        $metadataPath = dirname($source).'/metadata.json';
+        $metadata = json_decode((string) ($disk->exists($metadataPath) ? $disk->get($metadataPath) : ''), true);
+        if (! is_array($metadata)) {
+            return [];
+        }
+
+        return [
+            'live_path' => $metadata['promotion_live_path'] ?? null,
+            'backup_path' => $metadata['promotion_backup_path'] ?? null,
+            'transaction_id' => $metadata['promotion_transaction_id'] ?? null,
+        ];
+    }
+
+    private function resolvedLivePath(?SystemAddon $addon): ?string
+    {
+        if ($addon === null) {
+            return null;
+        }
+        try {
+            return $this->livePaths->resolve(['code' => $addon->code, 'type' => $addon->type, 'vendor' => $addon->vendor])['live_path'];
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function manifestVersion(?string $directory): ?string
