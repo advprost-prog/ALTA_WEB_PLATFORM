@@ -20,6 +20,7 @@ final class ArtifactPromotionManager
         private readonly StagingIntegrityVerifier $verifier,
         private readonly AddonLivePathResolver $resolver,
         private readonly AddonEventLogger $events,
+        private readonly BackupIntegrityService $backupIntegrity,
     ) {}
 
     public function promote(string $code, ArtifactReviewActor $actor): ArtifactPromotionResult
@@ -701,20 +702,23 @@ final class ArtifactPromotionManager
             return null;
         }
 
-        $inventory = $this->inventoryForPath($payloadPath);
-        $backup = [
-            'transaction_id' => $transactionId,
-            'code' => $state['code'],
-            'old_version' => $this->liveManifest($livePath)['version'] ?? null,
-            'old_manifest' => $this->liveManifest($livePath),
-            'file_inventory' => $inventory['inventory'],
-            'live_inventory_hash' => $inventory['inventory_hash'],
-            'created_at' => now()->toIso8601String(),
-            'created_by' => $actor->id,
-            'created_by_name' => $actor->name,
-            'created_by_type' => $actor->type,
-            'source_live_path' => $livePath,
-        ];
+        $manifest = $this->liveManifest($livePath);
+        $addon = SystemAddon::query()->where('code', $state['code'])->first();
+        try {
+            $backup = $this->backupIntegrity->create($backupDisk->path($backupPath), [
+                'code' => $state['code'], 'version' => $manifest['version'] ?? null,
+                'type' => $manifest['type'] ?? $state['type'], 'vendor' => $manifest['vendor'] ?? null,
+                'operation_id' => $transactionId, 'operation_type' => 'update',
+                'previous_enabled' => (bool) $addon?->is_enabled, 'installed_snapshot' => $addon?->getAttributes(),
+            ]);
+        } catch (\Throwable) {
+            return null;
+        }
+        $backup['transaction_id'] = $transactionId;
+        $backup['old_version'] = $backup['version'];
+        $backup['old_manifest'] = $manifest;
+        $backup['file_inventory'] = array_map(fn ($file) => ['path' => $file['path'], 'type' => 'file', 'size' => $file['size'], 'sha256' => $file['sha256']], $backup['files']);
+        $backup['live_inventory_hash'] = $this->inventoryForPath($payloadPath)['inventory_hash'];
         $this->writeJson($backupDisk->path($backupPath.'/backup.json'), $backup);
 
         return ['backup_path' => $backupDisk->path($backupPath)];

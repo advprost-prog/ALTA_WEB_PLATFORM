@@ -228,7 +228,8 @@ class AddonArtifactPromotionTest extends TestCase
 
         $backup = json_decode(File::get($promote->backupPath.'/backup.json'), true);
         $this->assertSame('1.0.0', $backup['old_version']);
-        $this->assertSame($firstPromote->livePath, $backup['source_live_path']);
+        $this->assertSame($promote->transactionId, $backup['source_operation_id']);
+        $this->assertSame('verified', $backup['verification_state']);
 
         $rollback = app(ArtifactPromotionManager::class)->rollback(self::CODE, $promote->transactionId, 'test rollback', ArtifactReviewActor::cli('test'));
         $this->assertTrue($rollback->success, implode(' ', $rollback->diagnostics));
