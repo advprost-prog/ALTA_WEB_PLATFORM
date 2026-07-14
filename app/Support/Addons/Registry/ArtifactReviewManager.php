@@ -72,6 +72,9 @@ final class ArtifactReviewManager
             'trust_status' => $state['trust_status'],
             'signature_status' => $state['signature_status'],
             'manifest_status' => $state['manifest_status'],
+            'publisher_public_id' => $state['metadata']['publisher_public_id'] ?? null,
+            'signing_key_fingerprint' => $state['metadata']['signing_key_fingerprint'] ?? null,
+            'verified_at' => $state['metadata']['verified_at'] ?? null,
         ]);
 
         return new ArtifactReviewResult(true, 'approved', ArtifactReviewStatus::APPROVED, [], $this->report($code, $metadata, $state));
@@ -444,6 +447,9 @@ final class ArtifactReviewManager
             'signature_key_id' => $state['signature_key_id'],
             'signature_status' => $state['signature_status'],
             'manifest_status' => $state['manifest_status'],
+            'publisher_public_id' => $state['metadata']['publisher_public_id'] ?? null,
+            'signing_key_fingerprint' => $state['metadata']['signing_key_fingerprint'] ?? null,
+            'verified_at' => $state['metadata']['verified_at'] ?? null,
         ];
     }
 
@@ -465,7 +471,10 @@ final class ArtifactReviewManager
                 || $current['size'] !== ($snapshot['size'] ?? null)
                 || (string) ($current['signature_key_id'] ?? '') !== (string) ($snapshot['signature_key_id'] ?? '')
                 || $current['signature_status'] !== ($snapshot['signature_status'] ?? null)
-                || $current['manifest_status'] !== ($snapshot['manifest_status'] ?? null);
+                || $current['manifest_status'] !== ($snapshot['manifest_status'] ?? null)
+                || $current['publisher_public_id'] !== ($snapshot['publisher_public_id'] ?? null)
+                || $current['signing_key_fingerprint'] !== ($snapshot['signing_key_fingerprint'] ?? null)
+                || $current['verified_at'] !== ($snapshot['verified_at'] ?? null);
         }
 
         return [

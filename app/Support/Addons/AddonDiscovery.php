@@ -74,39 +74,7 @@ class AddonDiscovery
         }
 
         foreach ($scan['manifests'] as $entry) {
-            $manifest = $entry['manifest'];
-            $addon = SystemAddon::query()->firstOrNew(['code' => $manifest['code']]);
-            $previousStatus = $addon->exists ? $addon->status : null;
-            $metadata = $addon->metadata ?? [];
-            $metadata['manifest'] = $manifest;
-            $metadata['discovered_at'] = now()->toIso8601String();
-
-            $addon->fill([
-                'type' => $manifest['type'],
-                'name' => $manifest['name'],
-                'description' => $manifest['description'] ?? null,
-                'vendor' => $manifest['vendor'] ?? null,
-                'version' => $manifest['version'],
-                'source' => $addon->source ?: SystemAddon::SOURCE_LOCAL,
-                'status' => $addon->exists && in_array($addon->status, [
-                    SystemAddon::STATUS_INSTALLED,
-                    SystemAddon::STATUS_ENABLED,
-                    SystemAddon::STATUS_DISABLED,
-                    SystemAddon::STATUS_FAILED,
-                ], true) ? $addon->status : SystemAddon::STATUS_DISCOVERED,
-                'manifest_path' => $entry['relative_path'],
-                'service_provider' => $manifest['service_provider'] ?? null,
-                'checksum' => $entry['checksum'],
-                'metadata' => $metadata,
-                'last_error' => $previousStatus === SystemAddon::STATUS_FAILED ? $addon->last_error : null,
-            ]);
-
-            $addon->save();
-
-            $this->events->info($addon->code, 'discovered', 'Addon manifest discovered.', [
-                'path' => $entry['relative_path'],
-                'type' => $addon->type,
-            ]);
+            $this->persist($entry);
         }
 
         foreach ($scan['invalid'] as $invalid) {
@@ -128,6 +96,44 @@ class AddonDiscovery
             'invalid' => count($scan['invalid']),
             'duplicates' => count($scan['duplicates']),
         ];
+    }
+
+    public function syncManifest(string $path, string $type): ?SystemAddon
+    {
+        $validation = $this->validator->validateFile($path, $type);
+        if (! $validation['valid'] || ! is_array($validation['manifest'])) {
+            return null;
+        }
+
+        return $this->persist([
+            'path' => $path,
+            'relative_path' => $this->relativePath($path),
+            'type' => $type,
+            'manifest' => $validation['manifest'],
+            'checksum' => hash_file('sha256', $path) ?: null,
+        ]);
+    }
+
+    private function persist(array $entry): SystemAddon
+    {
+        $manifest = $entry['manifest'];
+        $addon = SystemAddon::query()->firstOrNew(['code' => $manifest['code']]);
+        $previousStatus = $addon->exists ? $addon->status : null;
+        $metadata = $addon->metadata ?? [];
+        $metadata['manifest'] = $manifest;
+        $metadata['discovered_at'] = now()->toIso8601String();
+        $addon->fill([
+            'type' => $manifest['type'], 'name' => $manifest['name'], 'description' => $manifest['description'] ?? null,
+            'vendor' => $manifest['vendor'] ?? null, 'version' => $manifest['version'],
+            'source' => $addon->source ?: SystemAddon::SOURCE_LOCAL,
+            'status' => $addon->exists && in_array($addon->status, [SystemAddon::STATUS_INSTALLED, SystemAddon::STATUS_ENABLED, SystemAddon::STATUS_DISABLED, SystemAddon::STATUS_FAILED], true) ? $addon->status : SystemAddon::STATUS_DISCOVERED,
+            'manifest_path' => $entry['relative_path'], 'service_provider' => $manifest['service_provider'] ?? null,
+            'checksum' => $entry['checksum'], 'metadata' => $metadata,
+            'last_error' => $previousStatus === SystemAddon::STATUS_FAILED ? $addon->last_error : null,
+        ])->save();
+        $this->events->info($addon->code, 'discovered', 'Addon manifest discovered.', ['path' => $entry['relative_path'], 'type' => $addon->type]);
+
+        return $addon;
     }
 
     /**

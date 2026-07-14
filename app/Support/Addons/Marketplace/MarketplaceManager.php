@@ -25,6 +25,8 @@ use App\Support\Addons\Registry\QuarantinedArtifactInspector;
 use App\Support\Addons\Registry\RegistryCatalog;
 use App\Support\Addons\Registry\RegistryClient;
 use App\Support\Addons\Registry\RegistryItem;
+use App\Support\Addons\Registry\VerifiedAddonInstallOrchestrator;
+use App\Support\Addons\Registry\VerifiedAddonInstallResult;
 use App\Support\Addons\Version\VersionComparator;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Storage;
@@ -330,6 +332,7 @@ final class MarketplaceManager
             ...$this->reviewData($item->code),
             ...$this->stagingData($item->code),
             ...$this->promotionData($item->code),
+            ...$this->installOperationData($item->code),
         ];
     }
 
@@ -406,6 +409,7 @@ final class MarketplaceManager
             ...$this->reviewData($remoteItem->code),
             ...$this->stagingData($remoteItem->code),
             ...$this->promotionData($remoteItem->code),
+            ...$this->installOperationData($remoteItem->code),
         ];
     }
 
@@ -807,6 +811,11 @@ final class MarketplaceManager
         return $this->promotionManager()->promote($code, $actor);
     }
 
+    public function installVerifiedArtifact(string $code, ArtifactReviewActor $actor, bool $enable = false): VerifiedAddonInstallResult
+    {
+        return app(VerifiedAddonInstallOrchestrator::class)->execute($code, $actor, $enable);
+    }
+
     public function rollbackArtifact(string $code, ?string $transactionId, ?string $note, ArtifactReviewActor $actor): ArtifactPromotionResult
     {
         return $this->promotionManager()->rollback($code, $transactionId, $note, $actor);
@@ -958,6 +967,29 @@ final class MarketplaceManager
             'can_promote' => $this->canPromoteArtifact($code),
             'can_rollback' => $this->canRollbackArtifact($code),
             'promotion_blocked_reasons' => $this->getPromotionBlockedReasons($code),
+        ];
+    }
+
+    private function installOperationData(string $code): array
+    {
+        $records = [];
+        foreach (Storage::disk('addons')->files('addons/install-journal/'.$code) as $path) {
+            $record = json_decode((string) Storage::disk('addons')->get($path), true);
+            if (is_array($record)) {
+                $records[] = $record;
+            }
+        }
+        usort($records, fn (array $left, array $right): int => strcmp((string) ($right['started_at'] ?? ''), (string) ($left['started_at'] ?? '')));
+        $latest = $records[0] ?? [];
+
+        return [
+            'install_operation_id' => $latest['operation_id'] ?? null,
+            'install_operation_type' => $latest['operation_type'] ?? null,
+            'install_operation_state' => $latest['state'] ?? null,
+            'install_operation_previous_version' => $latest['previous_version'] ?? null,
+            'install_operation_target_version' => $latest['target_version'] ?? null,
+            'install_operation_failure_code' => $latest['failure_code'] ?? null,
+            'install_operation_diagnostics' => is_array($latest['diagnostics'] ?? null) ? $latest['diagnostics'] : [],
         ];
     }
 

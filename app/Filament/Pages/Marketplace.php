@@ -560,6 +560,25 @@ class Marketplace extends Page
         }
     }
 
+    public function installVerifiedArtifact(string $code): void
+    {
+        $this->guardCode($code);
+        if (! Gate::allows('promote-addon-artifacts')) {
+            Notification::make()->title('Дія заборонена')->danger()->send();
+
+            return;
+        }
+
+        $result = app(MarketplaceManager::class)->installVerifiedArtifact($code, ArtifactReviewActor::fromUser(auth()->user()));
+        Notification::make()
+            ->title($result->success ? 'Addon встановлено' : 'Встановлення не виконано')
+            ->body($result->success
+                ? "[{$code}] {$result->version} встановлено; стан: ".($result->enabled ? 'enabled' : 'disabled').'.'
+                : (($result->failureCode ?? 'operation_failed').': '.implode(' ', $result->diagnostics)))
+            ->color($result->success ? 'success' : 'danger')
+            ->send();
+    }
+
     public function inspectArtifact(string $code): void
     {
         $this->guardCode($code);

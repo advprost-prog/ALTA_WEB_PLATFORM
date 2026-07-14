@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\UserRole;
 use App\Filament\Pages\Marketplace;
 use App\Policies\AddonArtifactPromotionPolicy;
+use App\Support\Addons\AddonDiscovery;
 use App\Support\Addons\Marketplace\MarketplaceManager;
 use App\Support\Addons\Registry\ArtifactPromotionManager;
 use App\Support\Addons\Registry\ArtifactReviewActor;
@@ -15,6 +16,7 @@ use App\Support\Addons\Registry\ArtifactTrustEvaluator;
 use App\Support\Addons\Registry\QuarantinedArtifactInspector;
 use App\Support\Addons\Registry\RegistryCatalog;
 use App\Support\Addons\Registry\RegistryClient;
+use App\Support\Addons\Registry\VerifiedAddonInstallOrchestrator;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
@@ -329,6 +331,62 @@ class AddonMarketplacePromotionWorkflowTest extends TestCase
         ] as $field) {
             $this->assertArrayHasKey($field, $item);
         }
+    }
+
+    public function test_verified_first_install_orchestration_promotes_discovers_and_registers_disabled(): void
+    {
+        $state = $this->preparePromotableArtifact();
+        $result = app(VerifiedAddonInstallOrchestrator::class)->execute(self::CODE, ArtifactReviewActor::cli('test'));
+
+        $this->assertTrue($result->success, implode(' ', $result->diagnostics));
+        $this->assertSame('completed', $result->state);
+        $this->assertSame('install', $result->operationType);
+        $addon = DB::table('system_addons')->where('code', self::CODE)->first();
+        $this->assertNotNull($addon);
+        $this->assertSame('1.0.0', $addon->version);
+        $this->assertFalse((bool) $addon->is_enabled);
+        $this->assertTrue((bool) $addon->is_installed);
+        $this->assertTrue(Storage::disk('addons')->exists($state['metadata_path']));
+        $this->assertFalse(Storage::disk('addons')->exists($state['staging_path']));
+        $this->assertCount(1, Storage::disk('addons')->allFiles('addons/install-journal/'.self::CODE));
+        $this->assertFalse(app()->bound(self::CODE.'.booted'));
+    }
+
+    public function test_verified_update_preserves_enabled_intent_and_retains_backup_without_boot(): void
+    {
+        $this->preparePromotableArtifact('1.0.0');
+        $first = app(VerifiedAddonInstallOrchestrator::class)->execute(self::CODE, ArtifactReviewActor::cli('test'), true);
+        $this->assertTrue($first->success);
+        $this->assertTrue($first->enabled);
+
+        $this->preparePromotableArtifact('1.1.0');
+        $second = app(VerifiedAddonInstallOrchestrator::class)->execute(self::CODE, ArtifactReviewActor::cli('test'));
+
+        $this->assertTrue($second->success, implode(' ', $second->diagnostics));
+        $this->assertSame('update', $second->operationType);
+        $this->assertSame('1.1.0', DB::table('system_addons')->where('code', self::CODE)->value('version'));
+        $this->assertTrue((bool) DB::table('system_addons')->where('code', self::CODE)->value('is_enabled'));
+        $this->assertNotEmpty(Storage::disk('addons')->directories('addons/backups/'.self::CODE));
+        $this->assertFalse(app()->bound(self::CODE.'.booted'));
+    }
+
+    public function test_discovery_failure_compensates_first_install_without_partial_local_state(): void
+    {
+        $this->preparePromotableArtifact();
+        $this->mock(AddonDiscovery::class)
+            ->shouldReceive('syncManifest')
+            ->once()
+            ->andThrow(new \RuntimeException('injected discovery failure'));
+
+        $result = app(VerifiedAddonInstallOrchestrator::class)->execute(self::CODE, ArtifactReviewActor::cli('test'));
+
+        $this->assertFalse($result->success);
+        $this->assertTrue($result->rolledBack);
+        $this->assertSame('post_install_verification_failed', $result->failureCode);
+        $this->assertSame(0, DB::table('system_addons')->where('code', self::CODE)->count());
+        $metadata = collect(Storage::disk('addons')->allFiles('addons/quarantine/'.self::CODE))->first(fn (string $path) => str_ends_with($path, 'metadata.json'));
+        $this->assertNotNull($metadata);
+        $this->assertFalse(app()->bound(self::CODE.'.booted'));
     }
 
     private function marketplace(): Testable

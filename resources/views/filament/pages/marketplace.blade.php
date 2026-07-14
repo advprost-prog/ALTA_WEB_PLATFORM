@@ -457,6 +457,22 @@
                                                     </div>
                                                 </div>
                                             @endif
+                                            @if (($row['promotion_status'] ?? null) === 'promoted' && $canPromote)
+                                                <div class="addon-marketplace-artifact__actions">
+                                                    <x-filament::button wire:click="installVerifiedArtifact('{{ e($item->code) }}')" color="success" size="sm">
+                                                        {{ ($row['addon']?->is_installed ?? false) ? 'Оновити addon' : 'Встановити addon' }}
+                                                    </x-filament::button>
+                                                </div>
+                                            @endif
+                                            @if (! empty($row['install_operation_state']))
+                                                <div class="fi-in-text" style="font-size:0.8rem">
+                                                    Install operation: <strong>{{ $row['install_operation_state'] }}</strong>
+                                                    · {{ $row['install_operation_previous_version'] ?? 'new' }} → {{ $row['install_operation_target_version'] ?? '—' }}
+                                                    @if (! empty($row['install_operation_failure_code']))
+                                                        · {{ $row['install_operation_failure_code'] }}: {{ implode('; ', $row['install_operation_diagnostics'] ?? []) }}
+                                                    @endif
+                                                </div>
+                                            @endif
                                             <div class="addon-marketplace-staging">
                                                 <div class="addon-marketplace-staging__header">
                                                     <strong>Staging</strong>

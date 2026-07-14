@@ -174,7 +174,8 @@ final class ArtifactStagingManager
 
     private function resolve(string $code): ?array
     {
-        $item = collect($this->catalog->load()['items'] ?? [])->first(fn ($i) => $i->code === $code);
+        $catalog = $this->catalog->load();
+        $item = collect($catalog['items'] ?? [])->first(fn ($i) => $i->code === $code);
         if ($item === null || ! is_array($item->raw['artifact'] ?? null)) {
             return null;
         }
@@ -194,7 +195,7 @@ final class ArtifactStagingManager
             return null;
         }
 
-        return ['code' => $code, 'version' => $item->version, 'disk' => $disk, 'artifact_path' => $path, 'metadata_path' => $metadataPath, 'review' => $metadata, 'report' => $reviewResult['report']];
+        return ['code' => $code, 'version' => $item->version, 'registry_state' => $catalog['state'] ?? 'unavailable', 'disk' => $disk, 'artifact_path' => $path, 'metadata_path' => $metadataPath, 'review' => $metadata, 'report' => $reviewResult['report']];
     }
 
     private function blockedReasons(array $r): array
@@ -204,11 +205,22 @@ final class ArtifactStagingManager
         if (! ($c['enabled'] ?? false)) {
             $reasons[] = 'Staging вимкнено.';
         }
+        if (($r['registry_state'] ?? null) !== 'fresh') {
+            $reasons[] = 'Registry assessment is not fresh.';
+        }
         if (($r['review']['status'] ?? '') !== 'quarantined') {
             $reasons[] = 'Artifact не перебуває у quarantine.';
         }
         if (($r['review']['verification_state'] ?? '') !== 'verified') {
             $reasons[] = 'Artifact не має current verified quarantine evidence.';
+        }
+        $publisherId = $r['review']['publisher_public_id'] ?? null;
+        $keyId = $r['review']['signature_key_id'] ?? null;
+        if (is_string($publisherId) && $publisherId !== '' && is_string($keyId) && $keyId !== '') {
+            $trust = (new PublisherTrustStore((array) Config::get('addons-registry.trust', [])))->find($publisherId, $keyId);
+            if (! ($trust['allowed'] ?? false)) {
+                $reasons[] = 'Current publisher signing key is no longer trusted.';
+            }
         }
         if (($c['require_trusted'] ?? true) && $r['report']['trust_status'] !== 'trusted') {
             $reasons[] = 'Artifact не trusted.';
