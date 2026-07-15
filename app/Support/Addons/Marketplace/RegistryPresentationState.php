@@ -17,7 +17,11 @@ final class RegistryPresentationState
             return $url === '' ? 'not_configured' : 'disabled';
         }
 
-        if (in_array($errorCategory, ['invalid_json', 'invalid_schema', 'invalid_response'], true)) {
+        if (in_array($errorCategory, ['html_challenge_response', 'invalid_content_type', 'host_rejected', 'dns_failure', 'connect_failure', 'tls_failure', 'timeout', 'redirect_rejected'], true) && $itemCount === 0) {
+            return $errorCategory;
+        }
+
+        if (in_array($errorCategory, ['invalid_json', 'schema_invalid', 'invalid_schema', 'invalid_response'], true)) {
             return 'invalid_response';
         }
 

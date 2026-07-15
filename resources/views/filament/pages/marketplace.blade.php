@@ -40,7 +40,11 @@
             <x-filament::section :heading="$registryPresentation['title']" icon="heroicon-o-cloud" class="marketplace-state">
                 <p class="fi-in-text">{{ $registryPresentation['description'] }}</p>
                 <div class="marketplace-state__meta">Остання перевірка: {{ $registryMeta['checked_at'] ?? '—' }} · схема: {{ $registryHeader['schema_version'] ?? '—' }}</div>
-                @if ($registryEnabled)<div style="margin-top:.75rem"><x-filament::button wire:click="refreshRegistry" size="sm">Спробувати знову</x-filament::button></div>@endif
+                <div style="margin-top:.75rem;display:flex;gap:.5rem">
+                    @if ($registryEnabled)<x-filament::button wire:click="refreshRegistry" size="sm">Спробувати знову</x-filament::button>@endif
+                    @if ($registryFailureCode)<x-filament::button wire:click="toggleRegistryDetails" color="gray" size="sm">Деталі</x-filament::button>@endif
+                </div>
+                @if ($registryDetailsOpen && $registryFailureCode)<div class="marketplace-state__meta">Код діагностики: {{ $registryFailureCode }}</div>@endif
             </x-filament::section>
         @endif
 

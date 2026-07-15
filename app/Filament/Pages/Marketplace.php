@@ -92,6 +92,8 @@ class Marketplace extends Page
 
     public ?string $expandedStaleItem = null;
 
+    public bool $registryDetailsOpen = false;
+
     /**
      * @var array<string, mixed>
      */
@@ -177,6 +179,7 @@ class Marketplace extends Page
             'registryState' => $resolved['registry_state'],
             'registryPresentationState' => $resolved['registry_presentation_state'],
             'registryPresentation' => $this->registryPresentation($resolved['registry_presentation_state']),
+            'registryFailureCode' => $resolved['registry_meta']['last_error_category'] ?? null,
             'registryMeta' => $resolved['registry_meta'],
             'registryHeader' => $resolved['registry_header'],
             'registryItemCount' => $resolved['registry_item_count'],
@@ -221,6 +224,11 @@ class Marketplace extends Page
     {
         $this->guardIdentifier($identifier);
         $this->expandedStaleItem = $this->expandedStaleItem === $identifier ? null : $identifier;
+    }
+
+    public function toggleRegistryDetails(): void
+    {
+        $this->registryDetailsOpen = ! $this->registryDetailsOpen;
     }
 
     public function recoveryDryRun(string $operationId): void
@@ -1238,7 +1246,11 @@ class Marketplace extends Page
             'unavailable_with_cache' => ['title' => 'Marketplace тимчасово недоступний', 'description' => 'Показано останню збережену версію каталогу.', 'color' => 'warning'],
             'disabled' => ['title' => 'Marketplace вимкнено', 'description' => 'Віддалений каталог вимкнено для цього середовища.', 'color' => 'gray'],
             'not_configured' => ['title' => 'Marketplace не налаштовано', 'description' => 'Віддалений Marketplace не налаштований для цього середовища.', 'color' => 'gray'],
-            'invalid_response' => ['title' => 'Некоректна відповідь Marketplace', 'description' => 'Відповідь сервера не пройшла перевірку, тому каталог не оновлено.', 'color' => 'danger'],
+            'invalid_response' => ['title' => 'Marketplace повернув некоректний каталог', 'description' => 'Відповідь сервера не відповідає підтримуваній схемі Registry.', 'color' => 'danger'],
+            'html_challenge_response', 'invalid_content_type' => ['title' => 'Сервер Marketplace повернув непідтримувану відповідь', 'description' => 'Сервер доступний, але замість каталогу повернув HTML або інший непідтримуваний формат.', 'color' => 'danger'],
+            'host_rejected' => ['title' => 'Адресу Marketplace заблоковано налаштуваннями безпеки', 'description' => 'Домен сервера не входить до дозволеного списку.', 'color' => 'danger'],
+            'dns_failure', 'connect_failure', 'tls_failure', 'timeout' => ['title' => 'Не вдалося встановити з’єднання з Marketplace', 'description' => 'Перевірте мережеве підключення та налаштування сервера Marketplace.', 'color' => 'danger'],
+            'redirect_rejected' => ['title' => 'Marketplace повернув неочікуване перенаправлення', 'description' => 'Перенаправлення заблоковано політикою безпеки клієнта.', 'color' => 'danger'],
             default => ['title' => 'Marketplace недоступний', 'description' => 'Не вдалося підключитися до Marketplace. Каталог недоступний.', 'color' => 'danger'],
         };
     }

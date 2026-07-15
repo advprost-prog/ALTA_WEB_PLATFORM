@@ -15,7 +15,7 @@ class RegistryClient
         try {
             [$url, $host] = $this->validatedEndpoint();
         } catch (RegistryException $e) {
-            return $this->error(0, '', '', $requestedAt, 'policy', $e->getMessage());
+            return $this->error(0, '', '', $requestedAt, $this->policyFailure($e), $e->getMessage());
         }
 
         $headers = [];
@@ -34,9 +34,9 @@ class RegistryClient
                     'allow_redirects' => (bool) ($this->config['allow_redirects'] ?? false),
                 ])->withHeaders($headers)->acceptJson()->get($url);
         } catch (ConnectionException $e) {
-            return $this->error(0, $url, $host, $requestedAt, 'network', 'Registry connection failed.', ['exception' => $e::class]);
+            return $this->error(0, $url, $host, $requestedAt, $this->connectionFailure($e), 'Registry connection failed.', ['exception' => $e::class]);
         } catch (\Throwable $e) {
-            return $this->error(0, $url, $host, $requestedAt, 'network', 'Registry request failed.', ['exception' => $e::class]);
+            return $this->error(0, $url, $host, $requestedAt, 'connect_failure', 'Registry request failed.', ['exception' => $e::class]);
         }
 
         $status = $response->status();
@@ -51,12 +51,21 @@ class RegistryClient
             return $this->response($status, null, $base, $url, $host, $requestedAt, 'rate_limited', 'Registry rate limit reached.');
         }
         if ($status < 200 || $status >= 300) {
-            return $this->response($status, null, $base, $url, $host, $requestedAt, 'http', "Registry returned HTTP {$status}.");
+            $category = $status >= 300 && $status < 400 ? 'redirect_rejected' : 'http_error';
+
+            return $this->response($status, null, $base, $url, $host, $requestedAt, $category, "Registry returned HTTP {$status}.");
         }
 
         $contentType = strtolower((string) $response->header('Content-Type'));
+        if (str_starts_with(strtolower(ltrim($response->body())), '<!doctype html')) {
+            return $this->response($status, null, $base, $url, $host, $requestedAt, 'html_challenge_response', 'Registry returned an HTML response.');
+        }
         if ($contentType !== '' && ! str_contains($contentType, 'application/json') && ! str_contains($contentType, '+json')) {
-            return $this->response($status, null, $base, $url, $host, $requestedAt, 'content_type', 'Registry returned an unsupported Content-Type.');
+            $category = str_contains($contentType, 'text/html') || str_starts_with(ltrim($response->body()), '<!DOCTYPE html')
+                ? 'html_challenge_response'
+                : 'invalid_content_type';
+
+            return $this->response($status, null, $base, $url, $host, $requestedAt, $category, 'Registry returned an unsupported Content-Type.');
         }
         if (strlen($response->body()) > (int) ($this->config['max_response_size'] ?? 1048576)) {
             return $this->response($status, null, $base, $url, $host, $requestedAt, 'oversized', 'Registry response exceeds the configured size limit.');
@@ -67,6 +76,28 @@ class RegistryClient
         }
 
         return $this->response($status, $payload, $base, $url, $host, $requestedAt);
+    }
+
+    private function policyFailure(RegistryException $exception): string
+    {
+        return match (true) {
+            str_contains($exception->getMessage(), 'disabled') => 'registry_disabled',
+            str_contains($exception->getMessage(), 'not configured') => 'registry_not_configured',
+            str_contains($exception->getMessage(), 'Registry host [') && str_contains($exception->getMessage(), 'not allowed') => 'host_rejected',
+            default => 'policy_rejected',
+        };
+    }
+
+    private function connectionFailure(ConnectionException $exception): string
+    {
+        $message = strtolower($exception->getMessage());
+
+        return match (true) {
+            str_contains($message, 'curl error 35'), str_contains($message, 'curl error 51'), str_contains($message, 'curl error 60'), str_contains($message, 'ssl certificate') => 'tls_failure',
+            str_contains($message, 'curl error 6'), str_contains($message, 'could not resolve host') => 'dns_failure',
+            str_contains($message, 'curl error 28'), str_contains($message, 'timed out') => 'timeout',
+            default => 'connect_failure',
+        };
     }
 
     public function isHostAllowed(string $host): bool

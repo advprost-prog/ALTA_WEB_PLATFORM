@@ -71,7 +71,7 @@ class RegistryCatalog
                 return $this->map($snapshot);
             }
 
-            return $this->failure($snapshot, 'invalid_schema', implode(' ', $validated['diagnostics']), $result->status, null);
+            return $this->failure($snapshot, 'schema_invalid', implode(' ', $validated['diagnostics']), $result->status, null);
         }
 
         return $this->failure($snapshot, $result->errorCategory ?? 'unavailable', $result->diagnostic ?? 'Registry unavailable.', $result->status, $result->retryAfter);
@@ -100,7 +100,7 @@ class RegistryCatalog
         if ($snapshot === null) {
             return $this->emptyState($category === 'rate_limited' ? 'rate_limited' : 'unavailable', [$diagnostic], $category, $retryAfter, $status);
         }
-        $snapshot = array_merge($snapshot, ['checked_at' => now()->toIso8601String(), 'state' => $category === 'rate_limited' ? 'rate_limited' : ($category === 'invalid_schema' || $category === 'invalid_json' ? 'stale' : 'offline'), 'last_error' => $diagnostic, 'last_error_category' => $category, 'retry_after' => $retryAfter, 'last_http_status' => $status]);
+        $snapshot = array_merge($snapshot, ['checked_at' => now()->toIso8601String(), 'state' => $category === 'rate_limited' ? 'rate_limited' : (in_array($category, ['schema_invalid', 'invalid_json', 'html_challenge_response', 'invalid_content_type'], true) ? 'stale' : 'offline'), 'last_error' => $diagnostic, 'last_error_category' => $category, 'retry_after' => $retryAfter, 'last_http_status' => $status]);
         Cache::forever(self::CACHE_KEY, $snapshot);
 
         return $this->map($snapshot);

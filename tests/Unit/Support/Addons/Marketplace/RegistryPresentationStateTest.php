@@ -27,6 +27,9 @@ final class RegistryPresentationStateTest extends TestCase
             'disabled' => [['enabled' => false, 'url' => 'https://registry.test'], ['state' => 'disabled', 'items' => []], 'disabled'],
             'not configured' => [['enabled' => false, 'url' => ''], ['state' => 'disabled', 'items' => []], 'not_configured'],
             'invalid response' => [['enabled' => true, 'url' => 'https://registry.test'], ['state' => 'unavailable', 'items' => [], 'meta' => ['last_error_category' => 'invalid_json']], 'invalid_response'],
+            'html challenge' => [['enabled' => true, 'url' => 'https://registry.test'], ['state' => 'unavailable', 'items' => [], 'meta' => ['last_error_category' => 'html_challenge_response']], 'html_challenge_response'],
+            'host rejected' => [['enabled' => true, 'url' => 'https://registry.test'], ['state' => 'unavailable', 'items' => [], 'meta' => ['last_error_category' => 'host_rejected']], 'host_rejected'],
+            'timeout' => [['enabled' => true, 'url' => 'https://registry.test'], ['state' => 'unavailable', 'items' => [], 'meta' => ['last_error_category' => 'timeout']], 'timeout'],
         ];
     }
 }

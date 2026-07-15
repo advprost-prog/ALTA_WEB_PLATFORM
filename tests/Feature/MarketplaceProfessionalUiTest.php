@@ -63,6 +63,23 @@ final class MarketplaceProfessionalUiTest extends TestCase
             ->assertDontSee('unavailable');
     }
 
+    public function test_html_challenge_has_safe_operator_diagnostic_without_raw_body(): void
+    {
+        config(['addons-registry' => array_replace(config('addons-registry'), ['enabled' => true, 'url' => 'https://registry.example.test/catalog', 'allowed_hosts' => ['registry.example.test']])]);
+        Cache::flush();
+        Http::fake(['*' => Http::response('<!DOCTYPE html><title>Browser verification secret-token</title>', 200, ['Content-Type' => 'text/html'])]);
+        $this->forgetRegistryServices();
+
+        Livewire::test(Marketplace::class)
+            ->assertSee('Сервер Marketplace повернув непідтримувану відповідь')
+            ->assertSee('замість каталогу повернув HTML')
+            ->assertDontSee('html_challenge_response')
+            ->assertDontSee('secret-token')
+            ->call('toggleRegistryDetails')
+            ->assertSee('Код діагностики: html_challenge_response')
+            ->assertDontSee('secret-token');
+    }
+
     public function test_installed_tab_shows_only_real_installed_record_with_ukrainian_actions_and_details(): void
     {
         SystemAddon::query()->create([
