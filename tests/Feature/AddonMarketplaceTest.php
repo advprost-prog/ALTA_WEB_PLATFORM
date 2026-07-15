@@ -146,12 +146,12 @@ class AddonMarketplaceTest extends TestCase
         $this->actingAs($this->createUserWithRole(UserRole::Admin))
             ->get('/admin/marketplace')
             ->assertOk()
-            ->assertSee('Marketplace модулів')
+            ->assertSee('Marketplace')
             ->assertSee('core.products')
             ->assertSee('missing_files')
             ->assertSee('Всього позицій')
             ->assertSee('Фільтри')
-            ->assertSee('Discover / rescan');
+            ->assertSee('Перевірити локальні файли');
     }
 
     public function test_marketplace_page_does_not_crash_on_invalid_item(): void

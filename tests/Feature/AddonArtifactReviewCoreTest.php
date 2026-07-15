@@ -224,8 +224,7 @@ class AddonArtifactReviewCoreTest extends TestCase
         $html = Livewire::test(Marketplace::class)->html();
         $markup = file_get_contents(resource_path('views/filament/pages/marketplace.blade.php'));
 
-        $this->assertStringContainsString('addon-marketplace__grid', $html);
-        $this->assertStringContainsString('addon-marketplace-artifact', $html);
+        $this->assertStringContainsString('fi-ta-table', $html);
         $this->assertStringContainsString('addon-marketplace-artifact__statuses', $markup);
         $this->assertStringContainsString('addon-marketplace-artifact__actions', $markup);
         $this->assertStringNotContainsString('addon-marketplace-card__artifact', $markup);

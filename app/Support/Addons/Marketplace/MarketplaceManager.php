@@ -98,6 +98,30 @@ final class MarketplaceManager
             $rows[] = $row;
         }
 
+        $developmentCodes = collect((array) config('addons-marketplace.items', []))
+            ->filter(fn ($entry): bool => is_array($entry) && ($entry['visibility'] ?? 'production') !== 'production')
+            ->pluck('code')->filter()->all();
+        $knownCodes = array_map(fn (array $row): string => $row['item']->code, $rows);
+        foreach ($this->registry->installed() as $addon) {
+            if (in_array($addon->code, $knownCodes, true) || in_array($addon->code, $developmentCodes, true)) {
+                continue;
+            }
+            $manifest = is_array($addon->metadata['manifest'] ?? null) ? $addon->metadata['manifest'] : [];
+            $item = MarketplaceItem::fromArray([
+                'code' => $addon->code, 'type' => $addon->type, 'vendor' => $addon->vendor ?: 'Local',
+                'name' => $addon->name, 'description' => $addon->description ?: '', 'version' => $addon->version,
+                'category' => '', 'path' => $addon->manifest_path, 'dependencies' => $manifest['dependencies'] ?? [],
+                'visibility' => 'production', 'implementation_state' => 'functional', 'audit_classification' => 'production_builtin',
+            ]);
+            $localItems[$item->code] = $item;
+            $row = $this->resolveItem($item);
+            $row['source'] = 'installed';
+            $row['remote_version'] = null;
+            $row['local_catalog_version'] = null;
+            $row['registry_metadata'] = [];
+            $rows[] = $row;
+        }
+
         $identityConflicts = $this->identityConflicts($localItems, $remoteItems);
         foreach ($rows as &$row) {
             $code = $row['item']->code;

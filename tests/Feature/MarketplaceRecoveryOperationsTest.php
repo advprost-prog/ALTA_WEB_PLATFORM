@@ -38,6 +38,7 @@ final class MarketplaceRecoveryOperationsTest extends TestCase
         $this->actingAs($this->createUserWithRole(UserRole::Admin));
 
         Livewire::test(Marketplace::class)
+            ->call('setMarketplaceTab', 'operations')
             ->assertSee(__('marketplace.operations.heading'))
             ->assertSee(__('marketplace.operations.status'))
             ->assertSee('healthy')
@@ -48,10 +49,16 @@ final class MarketplaceRecoveryOperationsTest extends TestCase
     {
         $this->actingAs($this->createUserWithRole(UserRole::Admin));
         app()->setLocale('en');
-        Livewire::test(Marketplace::class)->assertSee('Operations / Recovery')->assertSee('Backup retention');
+        Livewire::test(Marketplace::class)
+            ->call('setMarketplaceTab', 'operations')
+            ->assertSee('Operations / Recovery')
+            ->assertSee('Backup retention');
 
         app()->setLocale('uk');
-        Livewire::test(Marketplace::class)->assertSee('Операції та відновлення')->assertSee('Зберігання backups');
+        Livewire::test(Marketplace::class)
+            ->call('setMarketplaceTab', 'operations')
+            ->assertSee('Операції та відновлення')
+            ->assertSee('Зберігання backups');
     }
 
     public function test_recovery_dry_run_is_read_only_and_safe_action_recovers_after_reinspection(): void
@@ -66,6 +73,7 @@ final class MarketplaceRecoveryOperationsTest extends TestCase
         $before = Storage::disk('addons')->get($path);
 
         Livewire::test(Marketplace::class)
+            ->call('setMarketplaceTab', 'operations')
             ->assertSee('prepared_no_mutation')
             ->call('recoveryDryRun', $id)
             ->assertHasNoErrors();

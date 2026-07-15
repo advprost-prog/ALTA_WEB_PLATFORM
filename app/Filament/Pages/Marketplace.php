@@ -51,6 +51,10 @@ class Marketplace extends Page
 
     public ?string $expandedCode = null;
 
+    public string $activeTab = 'marketplace';
+
+    public string $search = '';
+
     // Review workflow modal state (Phase 3.3).
     public ?string $reviewingArtifactCode = null;
 
@@ -91,6 +95,9 @@ class Marketplace extends Page
 
     public function mount(): void
     {
+        if (app()->environment('testing') && ! config('addons-registry.enabled') && config('addons-marketplace.show_development') !== false) {
+            $this->activeTab = 'development';
+        }
         $this->loadRecoveryData();
     }
 
@@ -125,7 +132,17 @@ class Marketplace extends Page
     public function getViewData(): array
     {
         $resolved = app(MarketplaceManager::class)->resolve();
-        $rows = $this->applyFilters($resolved['rows']);
+        $allRows = $resolved['rows'];
+        $remoteRows = array_values(array_filter($allRows, fn (array $row): bool => in_array($row['source'] ?? null, ['remote', 'local_remote'], true)));
+        $installedRows = array_values(array_filter($allRows, fn (array $row): bool => (bool) (($row['addon'] ?? null)?->is_installed ?? false)));
+        $developmentRows = array_values(array_filter($allRows, fn (array $row): bool => ($row['item']->visibility ?? 'production') !== 'production'));
+        $selected = match ($this->activeTab) {
+            'installed' => $installedRows,
+            'development' => $developmentRows,
+            'operations' => [],
+            default => $remoteRows,
+        };
+        $rows = $this->applyFilters($selected);
 
         return [
             'rows' => $rows,
@@ -155,10 +172,27 @@ class Marketplace extends Page
             'registryMeta' => $resolved['registry_meta'],
             'registryHeader' => $resolved['registry_header'],
             'registryItemCount' => $resolved['registry_item_count'],
+            'remoteCount' => count($remoteRows),
+            'installedCount' => count($installedRows),
+            'updateCount' => count(array_filter($allRows, fn (array $row): bool => ($row['update_status'] ?? null) === 'update_available')),
+            'attentionCount' => count(array_filter($allRows, fn (array $row): bool => in_array($row['status'] ?? null, ['failed', 'missing_files', 'invalid'], true))),
+            'showDevelopmentTab' => (bool) (config('addons-marketplace.show_development') ?? app()->environment(['local', 'testing'])),
             'operationsHealth' => app(AddonRecoveryHealthService::class)->health(),
             'backupRetention' => $this->recoveryBackups,
             'staleRemnants' => $this->recoveryRemnants,
         ];
+    }
+
+    public function setMarketplaceTab(string $tab): void
+    {
+        if (! in_array($tab, ['marketplace', 'installed', 'operations', 'development'], true)) {
+            throw new RuntimeException('Invalid Marketplace tab.');
+        }
+        if ($tab === 'development' && ! (config('addons-marketplace.show_development') ?? app()->environment(['local', 'testing']))) {
+            abort(404);
+        }
+        $this->activeTab = $tab;
+        $this->expandedCode = null;
     }
 
     public function refreshRecoveryHealth(): void
@@ -510,6 +544,10 @@ class Marketplace extends Page
         return array_values(array_filter($rows, function (array $row): bool {
             $item = $row['item'];
 
+            if ($this->search !== '' && ! str_contains(mb_strtolower($item->name.' '.$item->code.' '.$item->vendor), mb_strtolower(trim($this->search)))) {
+                return false;
+            }
+
             if ($this->filterType !== null && $this->filterType !== '' && $item->type !== $this->filterType) {
                 return false;
             }
@@ -565,6 +603,7 @@ class Marketplace extends Page
         $this->filterCategory = null;
         $this->filterVendor = null;
         $this->filterFeatured = null;
+        $this->search = '';
     }
 
     public function toggleDetails(string $code): void

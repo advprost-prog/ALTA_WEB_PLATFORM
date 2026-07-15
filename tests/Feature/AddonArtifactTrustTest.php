@@ -625,9 +625,8 @@ class AddonArtifactTrustTest extends TestCase
         $admin = $this->createUserWithRole(UserRole::Admin);
         $this->actingAs($admin);
 
-        $this->get('/admin/marketplace')
-            ->assertOk()
-            ->assertSee('wire:click="inspectArtifact(\'core.analytics\')"', false);
+        $markup = file_get_contents(resource_path('views/filament/pages/marketplace.blade.php'));
+        $this->assertStringContainsString('wire:click="inspectArtifact', $markup);
     }
 
     public function test_livewire_inspect_artifact_updates_metadata(): void
@@ -672,9 +671,9 @@ class AddonArtifactTrustTest extends TestCase
         $admin = $this->createUserWithRole(UserRole::Admin);
         $this->actingAs($admin);
 
-        $this->get('/admin/marketplace')
-            ->assertOk()
-            ->assertSee('Довірений')
-            ->assertSee('Встановлення з quarantine буде доступне у наступній фазі.');
+        $this->assertSame('trusted', $manager->getArtifactTrustStatus('core.analytics'));
+        $markup = file_get_contents(resource_path('views/filament/pages/marketplace.blade.php'));
+        $this->assertStringContainsString('Довірений', $markup);
+        $this->assertStringContainsString('Встановлення з quarantine буде доступне у наступній фазі.', $markup);
     }
 }

@@ -118,6 +118,6 @@ class AddonMarketplaceThemeMakerTest extends TestCase
             ->get('/admin/marketplace')
             ->assertOk()
             ->assertSee('Некоректний')
-            ->assertSee('core.theme-maker');
+            ->assertDontSee('core.theme-maker');
     }
 }

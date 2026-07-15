@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\SystemAddon;
 use App\Support\Addons\Marketplace\AddonCatalogAuditService;
 use App\Support\Addons\Marketplace\MarketplaceCatalog;
 use App\Support\Addons\Marketplace\MarketplaceManager;
@@ -45,5 +46,23 @@ final class MarketplaceCatalogTruthTest extends TestCase
         $this->assertCount(5, $items);
         $this->assertContains('fixture', array_column($items, 'implementationState'));
         $this->assertContains('placeholder', array_column($items, 'implementationState'));
+    }
+
+    public function test_installed_production_addon_is_projected_separately_without_remote_fabrication(): void
+    {
+        config(['addons-marketplace.show_development' => false, 'addons-registry.enabled' => false]);
+        SystemAddon::query()->create([
+            'code' => 'vendor.production', 'type' => 'module', 'name' => 'Production Module', 'vendor' => 'Vendor',
+            'version' => '1.2.0', 'source' => 'local', 'status' => 'disabled', 'is_installed' => true, 'is_enabled' => false,
+            'manifest_path' => 'modules/Vendor/Production/module.json', 'metadata' => ['manifest' => ['dependencies' => []]],
+        ]);
+        app()->forgetInstance(MarketplaceCatalog::class);
+        app()->forgetInstance(MarketplaceManager::class);
+
+        $resolved = app(MarketplaceManager::class)->resolve();
+        $this->assertSame(0, $resolved['registry_item_count']);
+        $this->assertCount(1, $resolved['rows']);
+        $this->assertSame('installed', $resolved['rows'][0]['source']);
+        $this->assertSame('vendor.production', $resolved['rows'][0]['item']->code);
     }
 }

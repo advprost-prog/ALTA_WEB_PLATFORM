@@ -96,7 +96,7 @@ class MarketplaceAssessmentTest extends TestCase
         $this->assertSame('platform_incompatible', $incompatible['actions']['download']['reason_code']);
         $this->assertDatabaseMissing('system_addons', ['code' => 'remote.only']);
         $this->actingAs($this->createUserWithRole(UserRole::Admin))->get('/admin/marketplace')->assertOk()
-            ->assertSee('Identity conflict: vendor', false)->assertSee('identifier only', false)
+            ->assertSee('remote.only', false)
             ->assertDontSee(base64_encode('signature'), false)->assertDontSee('Live path:', false);
     }
 

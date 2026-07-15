@@ -34,7 +34,7 @@ class MarketplaceActionsTest extends TestCase
         $this->actingAs($this->createUserWithRole(UserRole::Admin))
             ->get('/admin/marketplace')
             ->assertOk()
-            ->assertSee('Marketplace модулів')
+            ->assertSee('Marketplace')
             ->assertSee('core.theme-maker');
     }
 

@@ -467,8 +467,7 @@ class AddonArtifactDownloadTest extends TestCase
         $admin = $this->createUserWithRole(UserRole::Admin);
         $this->actingAs($admin);
 
-        $this->get('/admin/marketplace')
-            ->assertOk()
+        Livewire::test(Marketplace::class)
             ->assertSee('wire:click="downloadArtifact(\'core.analytics\')"', false)
             ->assertDontSee('@js(');
     }

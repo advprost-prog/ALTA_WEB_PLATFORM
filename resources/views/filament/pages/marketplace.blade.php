@@ -4,13 +4,13 @@
         {{-- Header --}}
         <x-filament::section
             :aside="true"
-            heading="Marketplace модулів"
-            description="Керування локальними модулями та розширеннями платформи."
+            heading="Marketplace"
+            description="Опубліковані модулі, встановлені addons та операційний стан."
             icon="heroicon-o-squares-2x2"
         >
             <div class="addon-marketplace__toolbar">
             <x-filament::button wire:click="rescan" icon="heroicon-o-arrow-path" size="sm">
-                Discover / rescan
+                Перевірити локальні файли
             </x-filament::button>
             @php
                 $registryConfig = config('addons-registry', []);
@@ -18,32 +18,44 @@
             @endphp
             @if ($registryEnabled)
                 <x-filament::button wire:click="refreshRegistry" icon="heroicon-o-cloud-arrow-down" size="sm" color="gray">
-                    Оновити registry
+                    Оновити каталог
                 </x-filament::button>
             @endif
             </div>
         </x-filament::section>
 
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:1rem;border-bottom:1px solid var(--gray-200);padding-bottom:0.75rem">
+            <x-filament::button wire:click="setMarketplaceTab('marketplace')" :color="$activeTab === 'marketplace' ? 'primary' : 'gray'" size="sm">Marketplace</x-filament::button>
+            <x-filament::button wire:click="setMarketplaceTab('installed')" :color="$activeTab === 'installed' ? 'primary' : 'gray'" size="sm">Встановлені</x-filament::button>
+            <x-filament::button wire:click="setMarketplaceTab('operations')" :color="$activeTab === 'operations' ? 'primary' : 'gray'" size="sm">Операції та відновлення</x-filament::button>
+            @if ($showDevelopmentTab)
+                <x-filament::button wire:click="setMarketplaceTab('development')" :color="$activeTab === 'development' ? 'warning' : 'gray'" size="sm">Для розробки</x-filament::button>
+            @endif
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem;margin-top:1rem">
+            @foreach ([['Опубліковано', $remoteCount], ['Встановлено', $installedCount], ['Доступні оновлення', $updateCount], ['Потребують уваги', $attentionCount]] as [$label, $value])
+                <div style="border:1px solid var(--gray-200);border-radius:0.5rem;padding:0.75rem;background:var(--gray-50)">
+                    <div style="font-size:1.25rem;font-weight:600">{{ $value }}</div><div class="fi-in-text" style="font-size:0.75rem;color:var(--gray-500)">{{ $label }}</div>
+                </div>
+            @endforeach
+        </div>
+
         @if ($registryEnabled)
-            <x-filament::section heading="Registry: {{ $registryState }}" icon="heroicon-o-cloud" style="margin-top:1rem">
+            <x-filament::section heading="Стан Marketplace Registry: {{ $registryState }}" icon="heroicon-o-cloud" style="margin-top:1rem">
                 <div class="fi-in-text" style="font-size:0.875rem">
-                    <div><strong>Host:</strong> {{ $registryMeta['source_host'] ?? '—' }}</div>
-                    <div><strong>Last success:</strong> {{ $registryMeta['last_successful_refresh_at'] ?? '—' }}</div>
-                    <div><strong>Last check:</strong> {{ $registryMeta['checked_at'] ?? '—' }}</div>
-                    <div><strong>Application:</strong> {{ $registryHeader['application_version'] ?? '—' }}</div>
-                    <div><strong>Build:</strong> {{ $registryHeader['build_version'] ?? '—' }}</div>
-                    <div><strong>Schema:</strong> {{ $registryHeader['schema_version'] ?? '—' }}</div>
-                    @if (! empty($registryMeta['last_error']))<div><strong>Error:</strong> {{ $registryMeta['last_error'] }}</div>@endif
+                    <div><strong>Сервер:</strong> {{ $registryMeta['source_host'] ?? '—' }}</div>
+                    <div><strong>Останнє успішне оновлення:</strong> {{ $registryMeta['last_successful_refresh_at'] ?? '—' }}</div>
+                    <div><strong>Остання перевірка:</strong> {{ $registryMeta['checked_at'] ?? '—' }}</div>
+                    <div><strong>Версія застосунку:</strong> {{ $registryHeader['application_version'] ?? '—' }}</div>
+                    <div><strong>Збірка:</strong> {{ $registryHeader['build_version'] ?? '—' }}</div>
+                    <div><strong>Схема:</strong> {{ $registryHeader['schema_version'] ?? '—' }}</div>
+                    @if (! empty($registryMeta['last_error']))<div><strong>Помилка:</strong> {{ $registryMeta['last_error'] }}</div>@endif
                 </div>
             </x-filament::section>
         @endif
 
-        @if ($registryEnabled && $registryState === 'fresh' && $registryItemCount === 0)
-            <x-filament::callout color="warning" icon="heroicon-o-globe-alt" heading="External production release gate" style="margin-top:1rem">
-                {{ __('marketplace.release_gate') }}
-            </x-filament::callout>
-        @endif
-
+        @if ($activeTab === 'operations')
         <x-filament::section :heading="__('marketplace.operations.heading')" icon="heroicon-o-wrench-screwdriver" style="margin-top:1rem">
             <div class="fi-in-text" style="font-size:0.875rem">
                 <strong>{{ __('marketplace.operations.status') }}:</strong> {{ $operationsHealth['status'] }} ·
@@ -139,7 +151,84 @@
                 <div class="fi-in-text">{{ __('marketplace.stale.none') }}</div>
             @endif
         </x-filament::section>
+        @endif
 
+        @if (in_array($activeTab, ['marketplace', 'installed'], true))
+            @if ($activeTab === 'marketplace' && $remoteCount === 0)
+                <x-filament::section heading="У Marketplace поки немає опублікованих модулів" icon="heroicon-o-shopping-bag" style="margin-top:1rem;text-align:center">
+                    <p class="fi-in-text">
+                        {{ $registryState === 'fresh'
+                            ? 'Підключення до сервера Marketplace працює, але каталог ще не містить опублікованих релізів.'
+                            : 'Каталог ще не містить опублікованих релізів. Стан підключення показано нижче.' }}
+                    </p>
+                    <div class="fi-in-text" style="font-size:0.8rem;color:var(--gray-500);margin-top:0.75rem">
+                        Registry: {{ $registryState === 'fresh' ? 'доступний' : $registryState }} · cache: {{ $registryMeta['state'] ?? $registryState }} · schema: {{ $registryHeader['schema_version'] ?? '—' }} · оновлено: {{ $registryMeta['checked_at'] ?? '—' }}
+                    </div>
+                    <div style="margin-top:1rem;display:flex;justify-content:center;gap:0.5rem">
+                        @if ($registryEnabled)
+                            <x-filament::button wire:click="refreshRegistry" size="sm">Оновити каталог</x-filament::button>
+                        @endif
+                        <x-filament::button wire:click="setMarketplaceTab('installed')" color="gray" size="sm">Перейти до встановлених</x-filament::button>
+                    </div>
+                </x-filament::section>
+            @elseif ($activeTab === 'installed' && $installedCount === 0)
+                <x-filament::section heading="Встановлених модулів немає" icon="heroicon-o-cube" style="margin-top:1rem">
+                    <p class="fi-in-text">Локальний registry не містить підтверджених встановлених addons.</p>
+                </x-filament::section>
+            @else
+                <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-top:1rem">
+                    <input class="fi-input" style="max-width:20rem" type="search" wire:model.live.debounce.300ms="search" placeholder="Пошук за назвою, code або видавцем">
+                    <select class="fi-select-input" style="max-width:12rem" wire:model.live="filterType"><option value="">Усі типи</option><option value="module">Модулі</option><option value="extension">Розширення</option></select>
+                    <select class="fi-select-input" style="max-width:12rem" wire:model.live="filterStatus"><option value="">Усі стани</option>@foreach ($statusOptions as $value => $label)<option value="{{ $value }}">{{ $label }}</option>@endforeach</select>
+                    <x-filament::button wire:click="resetFilters" color="gray" size="sm">Скинути</x-filament::button>
+                </div>
+                <div style="overflow-x:auto;margin-top:1rem;border:1px solid var(--gray-200);border-radius:0.5rem">
+                    <table class="fi-ta-table w-full table-auto divide-y divide-gray-200 text-start dark:divide-white/5">
+                        <thead><tr><th style="padding:0.75rem">Модуль</th><th>Видавець</th><th>Категорія</th><th>Встановлена версія</th><th>Доступна версія</th><th>Стан</th><th>Дії</th></tr></thead>
+                        <tbody>
+                        @foreach ($rows as $row)
+                            @php
+                                $item = $row['item'];
+                            @endphp
+                            <tr>
+                                <td style="padding:0.75rem"><strong>{{ $item->name }}</strong><div style="font-size:0.75rem;color:var(--gray-500)">{{ $item->code }}</div></td>
+                                <td>{{ $item->vendor }}</td><td>{{ $item->category ?: '—' }}</td>
+                                <td>{{ $row['installed_version'] ?? '—' }}</td><td>{{ $row['remote_version'] ?? $row['available_version'] ?? '—' }}</td>
+                                <td>
+                                    <x-filament::badge :color="($row['trust_status'] ?? null) === 'trusted' ? 'success' : (in_array($row['status'], ['enabled','installed'], true) ? 'success' : (($row['status'] ?? null) === 'failed' ? 'danger' : 'gray'))">
+                                        {{ ($row['trust_status'] ?? null) === 'trusted' ? 'Довірений' : ($statusLabels[$row['status']] ?? $row['status']) }}
+                                    </x-filament::badge>
+                                    @if (($row['update_status'] ?? null) === 'update_available') <span style="color:var(--warning-600);font-size:0.75rem">Доступне оновлення</span>@endif
+                                    @if (($row['trust_status'] ?? null) === 'trusted') <div style="font-size:0.75rem;color:var(--gray-500)">Встановлення з quarantine буде доступне у наступній фазі.</div>@endif
+                                </td>
+                                <td style="white-space:nowrap">
+                                    @if ($activeTab === 'installed')
+                                        @if ((($row['addon'] ?? null)?->is_enabled ?? false))<x-filament::button wire:click="disableAddon('{{ $item->code }}')" color="gray" size="xs">Вимкнути</x-filament::button>@else<x-filament::button wire:click="enableAddon('{{ $item->code }}')" size="xs">Увімкнути</x-filament::button>@endif
+                                        <x-filament::button wire:click="toggleDetails('{{ $item->code }}')" color="gray" size="xs">Деталі</x-filament::button>
+                                    @elseif (($row['artifact_status'] ?? null) === 'not_downloaded')
+                                        <x-filament::button wire:click="downloadArtifact('{{ $item->code }}')" size="xs">Завантажити</x-filament::button>
+                                    @elseif (($row['artifact_status'] ?? null) !== 'not_available')
+                                        <x-filament::button wire:click="inspectArtifact('{{ $item->code }}')" color="gray" size="xs">Перевірити</x-filament::button>
+                                        @if (($row['trust_status'] ?? null) === 'trusted' && ($row['review_status'] ?? null) !== 'approved')
+                                            <x-filament::button wire:click="openApproveArtifactModal('{{ $item->code }}')" size="xs">Схвалити</x-filament::button>
+                                        @endif
+                                        <x-filament::button wire:click="toggleDetails('{{ $item->code }}')" color="gray" size="xs">Деталі</x-filament::button>
+                                    @else
+                                        <x-filament::button wire:click="toggleDetails('{{ $item->code }}')" color="gray" size="xs">Деталі</x-filament::button>
+                                    @endif
+                                </td>
+                            </tr>
+                            @if ($expandedCode === $item->code)
+                                <tr><td colspan="7" style="padding:0.75rem;background:var(--gray-50)"><strong>Технічні деталі:</strong> сумісність {{ $row['compatibility_status'] ?? 'unknown' }}; залежності {{ ($row['dependency_issues'] ?? []) === [] ? 'виконані' : implode('; ', $row['dependency_issues']) }}; manifest {{ $item->path ? basename($item->path) : 'відсутній' }}.</td></tr>
+                            @endif
+                        @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @endif
+        @endif
+
+        <?php if ($activeTab === 'development'): ?>
         {{-- Summary --}}
         <div
             class="fi-grid lg:fi-grid-cols"
@@ -837,6 +926,8 @@
                 @endforeach
             </div>
         @endif
+
+        <?php endif; ?>
 
         @if ($reviewModalOpen)
             <div role="dialog" aria-modal="true" class="addon-marketplace-review-modal">
