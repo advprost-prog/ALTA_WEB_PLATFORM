@@ -205,7 +205,6 @@ final class ArtifactPromotionManager
 
             $this->persistMetadata($state['metadata_path'], $promotion);
             $this->journalCompleted($journalPath, []);
-            $this->retention($code);
             $this->logEvent($code, 'marketplace_artifact_promoted', 'Artifact promoted into live addon directory.', [
                 'transaction_id' => $transactionId,
                 'live_path' => $live['live_path'],
@@ -733,31 +732,6 @@ final class ArtifactPromotionManager
         $this->writeJson($backupDisk->path($backupPath.'/backup.json'), $backup);
 
         return ['backup_path' => $backupDisk->path($backupPath)];
-    }
-
-    private function retention(string $code): void
-    {
-        $keep = max(1, (int) Config::get('addons-registry.promotion.keep_backups', 5));
-        $disk = Storage::disk((string) Config::get('addons-registry.promotion.backup_disk', 'addons'));
-        $root = rtrim((string) Config::get('addons-registry.promotion.backup_path', 'addons/backups'), '/').'/'.$code;
-
-        if (! $disk->exists($root)) {
-            return;
-        }
-
-        $directories = collect($disk->directories($root))
-            ->map(fn (string $directory): array => ['path' => $directory, 'mtime' => $disk->lastModified($directory)])
-            ->sortBy('mtime')
-            ->values();
-
-        while ($directories->count() > $keep) {
-            $oldest = $directories->shift();
-            if (! is_array($oldest)) {
-                continue;
-            }
-
-            $this->deleteDirectory($disk->path((string) $oldest['path']));
-        }
     }
 
     private function markPromotionStale(array $state, array $diagnostics): void

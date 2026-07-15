@@ -150,6 +150,15 @@ return [
         'keep_backups' => (int) env('ADDONS_REGISTRY_PROMOTION_KEEP_BACKUPS', 5),
     ],
 
+    'cleanup' => [
+        'enabled' => env('ADDONS_REGISTRY_CLEANUP_ENABLED', false),
+        'backup_retention_min_count' => env('ADDONS_REGISTRY_BACKUP_RETENTION_MIN_COUNT', 1),
+        'backup_retention_max_count' => env('ADDONS_REGISTRY_BACKUP_RETENTION_MAX_COUNT', 5),
+        'backup_retention_days' => env('ADDONS_REGISTRY_BACKUP_RETENTION_DAYS', 30),
+        'stale_after' => env('ADDONS_REGISTRY_STALE_CLEANUP_AFTER', 86400),
+        'tombstone_path' => 'addons/cleanup-journal/backups',
+    ],
+
     'live_roots' => [
         'modules_path' => env('ADDONS_REGISTRY_LIVE_MODULES_PATH', base_path('modules')),
         'extensions_path' => env('ADDONS_REGISTRY_LIVE_EXTENSIONS_PATH', base_path('extensions')),
