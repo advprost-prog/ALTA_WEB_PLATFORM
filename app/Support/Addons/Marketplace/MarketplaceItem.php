@@ -37,6 +37,9 @@ final class MarketplaceItem
         public readonly array $tags,
         public readonly bool $isFeatured,
         public readonly int $sortOrder,
+        public readonly string $visibility,
+        public readonly string $implementationState,
+        public readonly string $auditClassification,
         public readonly bool $valid = true,
         public readonly array $errors = [],
         public readonly array $raw = [],
@@ -79,6 +82,12 @@ final class MarketplaceItem
 
         if (isset($data['sort_order']) && ! is_int($data['sort_order'])) {
             $errors[] = 'Field [sort_order] must be an integer.';
+        }
+        if (! in_array($data['visibility'] ?? 'production', ['production', 'development', 'testing'], true)) {
+            $errors[] = 'Field [visibility] must be production, development, or testing.';
+        }
+        if (! in_array($data['implementation_state'] ?? 'functional', ['functional', 'placeholder', 'fixture'], true)) {
+            $errors[] = 'Field [implementation_state] must be functional, placeholder, or fixture.';
         }
 
         $version = (string) ($data['version'] ?? '');
@@ -134,6 +143,9 @@ final class MarketplaceItem
             tags: $tags,
             isFeatured: is_bool($data['is_featured'] ?? null) ? $data['is_featured'] : false,
             sortOrder: is_int($data['sort_order'] ?? null) ? $data['sort_order'] : 999,
+            visibility: (string) ($data['visibility'] ?? 'production'),
+            implementationState: (string) ($data['implementation_state'] ?? 'functional'),
+            auditClassification: (string) ($data['audit_classification'] ?? 'unknown_manual_review'),
             valid: $errors === [],
             errors: $errors,
             raw: $data,

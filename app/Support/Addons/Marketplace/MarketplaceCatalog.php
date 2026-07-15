@@ -60,6 +60,10 @@ final class MarketplaceCatalog
 
             $item = MarketplaceItem::fromArray($entry);
 
+            if (! $this->visible($item)) {
+                continue;
+            }
+
             if (! $item->isValid()) {
                 $diagnostics[] = "Invalid marketplace item [{$item->code}]: ".implode(' ', $item->errors);
 
@@ -96,5 +100,18 @@ final class MarketplaceCatalog
             'diagnostics' => $diagnostics,
             'warnings' => $warnings,
         ];
+    }
+
+    private function visible(MarketplaceItem $item): bool
+    {
+        if ($item->visibility === 'production') {
+            return true;
+        }
+        $configured = config('addons-marketplace.show_development');
+        $development = $configured === null
+            ? app()->environment(['local', 'testing'])
+            : filter_var($configured, FILTER_VALIDATE_BOOL);
+
+        return $item->visibility === 'development' ? $development : app()->environment('testing');
     }
 }

@@ -2,6 +2,8 @@
 
 return [
 
+    'show_development' => env('ADDONS_MARKETPLACE_SHOW_DEVELOPMENT'),
+
     /*
     |--------------------------------------------------------------------------
     | Local Addon Marketplace Catalog
@@ -52,6 +54,9 @@ return [
             'tags' => ['catalog', 'products', 'core'],
             'is_featured' => true,
             'sort_order' => 10,
+            'visibility' => 'development',
+            'implementation_state' => 'fixture',
+            'audit_classification' => 'test_fixture',
         ],
 
         [
@@ -69,6 +74,9 @@ return [
             'tags' => ['marketing', 'promotions', 'core'],
             'is_featured' => true,
             'sort_order' => 20,
+            'visibility' => 'development',
+            'implementation_state' => 'placeholder',
+            'audit_classification' => 'placeholder_unimplemented',
         ],
 
         [
@@ -86,6 +94,9 @@ return [
             'tags' => ['integrations', 'core'],
             'is_featured' => false,
             'sort_order' => 30,
+            'visibility' => 'development',
+            'implementation_state' => 'placeholder',
+            'audit_classification' => 'placeholder_unimplemented',
         ],
 
         [
@@ -103,6 +114,9 @@ return [
             'tags' => ['theme', 'design', 'demo'],
             'is_featured' => true,
             'sort_order' => 40,
+            'visibility' => 'development',
+            'implementation_state' => 'fixture',
+            'audit_classification' => 'test_fixture',
         ],
 
         [
@@ -120,6 +134,9 @@ return [
             'tags' => ['seo', 'marketing', 'core'],
             'is_featured' => false,
             'sort_order' => 50,
+            'visibility' => 'development',
+            'implementation_state' => 'placeholder',
+            'audit_classification' => 'placeholder_unimplemented',
         ],
 
     ],
