@@ -7,6 +7,7 @@ use App\Filament\Pages\Marketplace;
 use App\Policies\AddonArtifactPromotionPolicy;
 use App\Support\Addons\AddonDiscovery;
 use App\Support\Addons\Marketplace\MarketplaceManager;
+use App\Support\Addons\Registry\AddonRecoveryHealthService;
 use App\Support\Addons\Registry\ArtifactPromotionManager;
 use App\Support\Addons\Registry\ArtifactReviewActor;
 use App\Support\Addons\Registry\ArtifactReviewManager;
@@ -389,6 +390,21 @@ class AddonMarketplacePromotionWorkflowTest extends TestCase
         $this->assertFalse(app()->bound(self::CODE.'.booted'));
     }
 
+    public function test_release_candidate_end_to_end_signed_download_review_stage_and_install(): void
+    {
+        $v1 = $this->preparePromotableArtifact('1.0.0', actualDownload: true);
+        $install = app(VerifiedAddonInstallOrchestrator::class)->execute(self::CODE, ArtifactReviewActor::cli('release-gate'));
+        $this->assertTrue($install->success, implode(' ', $install->diagnostics));
+        $this->assertSame('1.0.0', DB::table('system_addons')->where('code', self::CODE)->value('version'));
+        $this->assertFalse((bool) DB::table('system_addons')->where('code', self::CODE)->value('is_enabled'));
+        $this->assertFalse(Storage::disk('addons')->exists($v1['staging_path']));
+
+        $this->assertSame('healthy', app(AddonRecoveryHealthService::class)->health(true)['status']);
+        $this->assertSame([], Storage::disk('addons')->allFiles('addons/staging'));
+        $this->assertFalse(app()->bound(self::CODE.'.booted'));
+        $this->assertDatabaseHas('system_addon_events', ['addon_code' => self::CODE, 'event' => 'verified_addon_install_completed']);
+    }
+
     private function marketplace(): Testable
     {
         Filament::setCurrentPanel(Filament::getPanel('admin'));
@@ -399,7 +415,7 @@ class AddonMarketplacePromotionWorkflowTest extends TestCase
     /**
      * @return array{metadata_path: string, staging_path: string}
      */
-    private function preparePromotableArtifact(string $version = '1.0.0', bool $includeMarker = false): array
+    private function preparePromotableArtifact(string $version = '1.0.0', bool $includeMarker = false, bool $actualDownload = false): array
     {
         $registryUrl = $this->registryBaseUrl.'/promotion-ui-registry-'.$version.'.json?request='.uniqid('', true);
         $bytes = $this->artifactBytes($version, $includeMarker);
@@ -418,7 +434,7 @@ class AddonMarketplacePromotionWorkflowTest extends TestCase
             ],
         ];
 
-        Http::fake([$registryUrl => Http::response([
+        $registryDocument = [
             'registry' => ['name' => 'promotion-ui-test', 'version' => 'test-build', 'application_version' => '1.0.0', 'build_version' => 'test-build', 'schema_version' => '1', 'generated_at' => '2026-07-14T00:00:00+00:00'],
             'items' => [[
                 'code' => self::CODE,
@@ -433,7 +449,26 @@ class AddonMarketplacePromotionWorkflowTest extends TestCase
                 'published_at' => '2026-07-14T00:00:00+00:00',
                 'artifact' => $artifact,
             ]],
-        ])]);
+        ];
+        if ($actualDownload) {
+            $registryRequests = 0;
+            Http::fake(function ($request) use ($registryDocument, $artifact, $bytes, &$registryRequests) {
+                if (str_contains($request->url(), 'promotion-ui-registry-')) {
+                    $registryRequests++;
+
+                    return $registryRequests > 1 && $request->hasHeader('If-None-Match')
+                        ? Http::response('', 304, ['ETag' => '"release"'])
+                        : Http::response($registryDocument, 200, ['Content-Type' => 'application/json', 'ETag' => '"release"']);
+                }
+                if ($request->url() === $artifact['url']) {
+                    return Http::response($bytes, 200, ['Content-Type' => 'application/zip', 'Content-Length' => (string) strlen($bytes)]);
+                }
+
+                return Http::response('', 404);
+            });
+        } else {
+            Http::fake([$registryUrl => Http::response($registryDocument)]);
+        }
 
         Config::set('addons-registry.enabled', true);
         Config::set('addons-registry.url', $registryUrl);
@@ -441,6 +476,8 @@ class AddonMarketplacePromotionWorkflowTest extends TestCase
         Config::set('addons-registry.mode', 'read_only');
         Config::set('addons-registry.trust.require_signature', true);
         Config::set('addons-registry.trust.trusted_keys', ['review-key' => base64_encode($this->signingPublic)]);
+        Config::set('addons-registry.trust.legacy_publishers', ['review-key' => '11111111-1111-4111-8111-111111111111']);
+        Config::set('addons-registry.downloads.enabled', true);
         Config::set('addons-registry.downloads.disk', 'addons');
         Config::set('addons-registry.downloads.quarantine_path', 'addons/quarantine');
         Config::set('addons-registry.review.enabled', true);
@@ -456,59 +493,61 @@ class AddonMarketplacePromotionWorkflowTest extends TestCase
         $artifactPath = $directory.'/core.analytics-'.$version.'.zip';
         $metadataPath = $directory.'/metadata.json';
 
-        Storage::disk('addons')->put($artifactPath, $bytes);
-        Storage::disk('addons')->put($metadataPath, json_encode([
-            'code' => self::CODE,
-            'version' => $version,
-            'source_url' => $artifact['url'],
-            'sha256' => hash('sha256', $bytes),
-            'size' => strlen($bytes),
-            'downloaded_at' => now()->toIso8601String(),
-            'status' => 'quarantined',
-            'verification_state' => 'verified',
-            'signature_status' => 'valid',
-            'signature_checked_at' => now()->toIso8601String(),
-            'signature_key_id' => 'review-key',
-            'manifest_status' => 'valid',
-            'manifest_checked_at' => now()->toIso8601String(),
-            'trust_status' => 'trusted',
-            'review_status' => 'pending',
-            'reviewed_at' => null,
-            'reviewed_by' => null,
-            'reviewed_by_name' => null,
-            'review_note' => null,
-            'approval_revoked_at' => null,
-            'approval_revoked_by' => null,
-            'approval_revoked_by_name' => null,
-            'approval_revoke_note' => null,
-            'review_history' => [],
-            'approved_integrity_snapshot' => null,
-            'approval_is_stale' => false,
-            'staging_status' => 'not_staged',
-            'staging_path' => null,
-            'staged_at' => null,
-            'staged_by' => null,
-            'staged_by_name' => null,
-            'staging_artifact_sha256' => null,
-            'staging_inventory_hash' => null,
-            'staging_diagnostics' => [],
-            'staging_is_stale' => false,
-            'promotion_status' => 'not_promoted',
-            'promotion_transaction_id' => null,
-            'promotion_live_path' => null,
-            'promotion_backup_path' => null,
-            'promoted_at' => null,
-            'promoted_by' => null,
-            'promoted_by_name' => null,
-            'promoted_by_type' => null,
-            'promoted_version' => null,
-            'promotion_inventory_hash' => null,
-            'promotion_diagnostics' => [],
-            'promotion_is_stale' => false,
-            'rollback_available' => false,
-            'last_rollback_transaction_id' => null,
-            'artifact_diagnostics' => [],
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        if (! $actualDownload) {
+            Storage::disk('addons')->put($artifactPath, $bytes);
+            Storage::disk('addons')->put($metadataPath, json_encode([
+                'code' => self::CODE,
+                'version' => $version,
+                'source_url' => $artifact['url'],
+                'sha256' => hash('sha256', $bytes),
+                'size' => strlen($bytes),
+                'downloaded_at' => now()->toIso8601String(),
+                'status' => 'quarantined',
+                'verification_state' => 'verified',
+                'signature_status' => 'valid',
+                'signature_checked_at' => now()->toIso8601String(),
+                'signature_key_id' => 'review-key',
+                'manifest_status' => 'valid',
+                'manifest_checked_at' => now()->toIso8601String(),
+                'trust_status' => 'trusted',
+                'review_status' => 'pending',
+                'reviewed_at' => null,
+                'reviewed_by' => null,
+                'reviewed_by_name' => null,
+                'review_note' => null,
+                'approval_revoked_at' => null,
+                'approval_revoked_by' => null,
+                'approval_revoked_by_name' => null,
+                'approval_revoke_note' => null,
+                'review_history' => [],
+                'approved_integrity_snapshot' => null,
+                'approval_is_stale' => false,
+                'staging_status' => 'not_staged',
+                'staging_path' => null,
+                'staged_at' => null,
+                'staged_by' => null,
+                'staged_by_name' => null,
+                'staging_artifact_sha256' => null,
+                'staging_inventory_hash' => null,
+                'staging_diagnostics' => [],
+                'staging_is_stale' => false,
+                'promotion_status' => 'not_promoted',
+                'promotion_transaction_id' => null,
+                'promotion_live_path' => null,
+                'promotion_backup_path' => null,
+                'promoted_at' => null,
+                'promoted_by' => null,
+                'promoted_by_name' => null,
+                'promoted_by_type' => null,
+                'promoted_version' => null,
+                'promotion_inventory_hash' => null,
+                'promotion_diagnostics' => [],
+                'promotion_is_stale' => false,
+                'rollback_available' => false,
+                'last_rollback_transaction_id' => null,
+                'artifact_diagnostics' => [],
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        }
 
         app()->forgetInstance(RegistryClient::class);
         app()->forgetInstance(RegistryCatalog::class);
@@ -522,6 +561,15 @@ class AddonMarketplacePromotionWorkflowTest extends TestCase
             config('addons-registry'),
         ));
         app(RegistryCatalog::class)->flush();
+
+        if ($actualDownload) {
+            $download = app(MarketplaceManager::class)->downloadArtifact(self::CODE);
+            $this->assertTrue($download->success, implode(' ', $download->diagnostics));
+            $metadataPath = (string) $download->metadataPath;
+            $this->assertSame('trusted', $this->metadata($metadataPath)['trust_status']);
+            app(RegistryCatalog::class)->refresh();
+            $this->assertSame(304, app(RegistryCatalog::class)->snapshot()['last_http_status']);
+        }
 
         $actor = ArtifactReviewActor::cli('test');
         $review = app(ArtifactReviewManager::class);

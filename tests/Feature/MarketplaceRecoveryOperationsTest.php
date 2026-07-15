@@ -38,10 +38,20 @@ final class MarketplaceRecoveryOperationsTest extends TestCase
         $this->actingAs($this->createUserWithRole(UserRole::Admin));
 
         Livewire::test(Marketplace::class)
-            ->assertSee('Operations / Recovery')
-            ->assertSee('Status:')
+            ->assertSee(__('marketplace.operations.heading'))
+            ->assertSee(__('marketplace.operations.status'))
             ->assertSee('healthy')
             ->assertDontSee(Storage::disk('addons')->path(''));
+    }
+
+    public function test_operations_surface_renders_english_and_ukrainian_translations(): void
+    {
+        $this->actingAs($this->createUserWithRole(UserRole::Admin));
+        app()->setLocale('en');
+        Livewire::test(Marketplace::class)->assertSee('Operations / Recovery')->assertSee('Backup retention');
+
+        app()->setLocale('uk');
+        Livewire::test(Marketplace::class)->assertSee('Операції та відновлення')->assertSee('Зберігання backups');
     }
 
     public function test_recovery_dry_run_is_read_only_and_safe_action_recovers_after_reinspection(): void

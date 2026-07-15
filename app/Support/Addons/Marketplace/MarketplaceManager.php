@@ -121,6 +121,7 @@ final class MarketplaceManager
             'registry_state' => $remoteCatalog['state'] ?? 'disabled',
             'registry_meta' => $remoteCatalog['meta'] ?? [],
             'registry_header' => $remoteCatalog['registry'] ?? [],
+            'registry_item_count' => count($remoteItems),
         ];
     }
 

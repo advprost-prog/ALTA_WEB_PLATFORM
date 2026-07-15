@@ -94,6 +94,11 @@ class Marketplace extends Page
         $this->loadRecoveryData();
     }
 
+    public function getTitle(): string
+    {
+        return __('marketplace.page_title');
+    }
+
     public function canReviewArtifacts(): bool
     {
         return AddonArtifactReviewPolicy::canReviewAddonArtifacts(auth()->user());
@@ -149,6 +154,7 @@ class Marketplace extends Page
             'registryState' => $resolved['registry_state'],
             'registryMeta' => $resolved['registry_meta'],
             'registryHeader' => $resolved['registry_header'],
+            'registryItemCount' => $resolved['registry_item_count'],
             'operationsHealth' => app(AddonRecoveryHealthService::class)->health(),
             'backupRetention' => $this->recoveryBackups,
             'staleRemnants' => $this->recoveryRemnants,

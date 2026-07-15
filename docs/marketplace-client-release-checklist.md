@@ -1,0 +1,22 @@
+# Marketplace client release checklist
+
+- [ ] Intended commits reviewed; full suite, changed-file Pint, and `git diff --check` green.
+- [ ] Target PHP version, Sodium, ZIP, JSON, hash, cache locks, and database schema verified.
+- [ ] `addons:marketplace:preflight --production` has no blockers.
+- [ ] Managed roots private, writable, non-symlinked, distinct, and atomic-rename compatible.
+- [ ] Production URL is HTTPS; exact host allowlisted; TLS verification on; redirects off.
+- [ ] Publisher UUID/key ID/public key/fingerprint verified with dual control; no private key present.
+- [ ] Registry initial `200`, conditional `304`, and schema `1` verified.
+- [ ] Empty Registry accepted without artifact requests, or authorized signed release visible.
+- [ ] Controlled signed download, verification, manual review, staging, and disabled install green.
+- [ ] Controlled update backup, recovery health, operational rollback, and audit green.
+- [ ] Negative signature, unknown/mismatched key, dependency, compatibility, archive, recovery, and cleanup gates green.
+- [ ] Existing five local catalog entries and installed/enabled states preserved offline.
+- [ ] Legacy cache/evidence fails closed; no fabricated trust or verification.
+- [ ] No unresolved/manual recovery debt, corrupt referenced backup, or cleanup-pending evidence.
+- [ ] Production cleanup remains dry-run unless separately approved.
+- [ ] Marketplace HTTP and Filament/Livewire render/reload/authorization tests green.
+- [ ] Browser infrastructure debt recorded if no stable harness exists.
+- [ ] Monitoring covers Registry freshness, operation health, failures, and addon audit events.
+- [ ] Application deployment rollback and addon operational rollback procedures reviewed.
+- [ ] No production DB, artifact, release, trust, or server mutation was used to pass readiness.

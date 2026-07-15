@@ -38,24 +38,30 @@
             </x-filament::section>
         @endif
 
-        <x-filament::section heading="Operations / Recovery" icon="heroicon-o-wrench-screwdriver" style="margin-top:1rem">
+        @if ($registryEnabled && $registryState === 'fresh' && $registryItemCount === 0)
+            <x-filament::callout color="warning" icon="heroicon-o-globe-alt" heading="External production release gate" style="margin-top:1rem">
+                {{ __('marketplace.release_gate') }}
+            </x-filament::callout>
+        @endif
+
+        <x-filament::section :heading="__('marketplace.operations.heading')" icon="heroicon-o-wrench-screwdriver" style="margin-top:1rem">
             <div class="fi-in-text" style="font-size:0.875rem">
-                <strong>Status:</strong> {{ $operationsHealth['status'] }} ·
-                unresolved {{ $operationsHealth['unresolved_count'] }} ·
-                manual {{ $operationsHealth['manual_intervention_count'] }} ·
-                corrupt backups {{ $operationsHealth['corrupt_backup_count'] }} ·
-                cleanup pending {{ $operationsHealth['cleanup_pending_count'] }}
+                <strong>{{ __('marketplace.operations.status') }}:</strong> {{ $operationsHealth['status'] }} ·
+                {{ __('marketplace.operations.unresolved') }} {{ $operationsHealth['unresolved_count'] }} ·
+                {{ __('marketplace.operations.manual') }} {{ $operationsHealth['manual_intervention_count'] }} ·
+                {{ __('marketplace.operations.corrupt') }} {{ $operationsHealth['corrupt_backup_count'] }} ·
+                {{ __('marketplace.operations.pending') }} {{ $operationsHealth['cleanup_pending_count'] }}
             </div>
             <div style="margin-top:0.75rem">
                 <x-filament::button wire:click="refreshRecoveryHealth" color="gray" size="sm" icon="heroicon-o-arrow-path">
-                    Refresh diagnostics
+                    {{ __('marketplace.operations.refresh') }}
                 </x-filament::button>
             </div>
 
             @if ($operationsHealth['items'])
                 <div style="overflow-x:auto;margin-top:1rem">
                     <table class="fi-ta-table w-full table-auto divide-y divide-gray-200 text-start dark:divide-white/5">
-                        <thead><tr><th>Operation</th><th>Addon</th><th>State</th><th>Classification</th><th>Evidence</th><th>Actions</th></tr></thead>
+                        <thead><tr><th>{{ __('marketplace.operations.operation') }}</th><th>{{ __('marketplace.operations.addon') }}</th><th>{{ __('marketplace.operations.state') }}</th><th>{{ __('marketplace.operations.classification') }}</th><th>{{ __('marketplace.operations.evidence') }}</th><th>{{ __('marketplace.operations.actions') }}</th></tr></thead>
                         <tbody>
                         @foreach ($operationsHealth['items'] as $operation)
                             <tr>
@@ -65,13 +71,13 @@
                                 <td>{{ $operation['classification'] }} / {{ $operation['proposed_action'] }}</td>
                                 <td>live {{ $operation['integrity']['live'] }}, backup {{ $operation['integrity']['backup'] }}, candidate {{ $operation['integrity']['candidate'] }}, staging {{ $operation['integrity']['staging'] }}</td>
                                 <td>
-                                    <x-filament::button wire:click="recoveryDryRun('{{ $operation['operation_id'] }}')" size="xs" color="gray">Dry run</x-filament::button>
+                                    <x-filament::button wire:click="recoveryDryRun('{{ $operation['operation_id'] }}')" size="xs" color="gray">{{ __('marketplace.operations.dry_run') }}</x-filament::button>
                                     @if ($operation['automatic'] && $canManagePromotion)
-                                        <x-filament::button wire:click="runSafeRecovery('{{ $operation['operation_id'] }}')" wire:confirm="Run the revalidated safe recovery plan?" size="xs" color="warning">Run safe recovery</x-filament::button>
+                                        <x-filament::button wire:click="runSafeRecovery('{{ $operation['operation_id'] }}')" wire:confirm="Run the revalidated safe recovery plan?" size="xs" color="warning">{{ __('marketplace.operations.run_safe') }}</x-filament::button>
                                     @endif
                                     @if ($canManagePromotion)
-                                        <x-filament::button wire:click="rollbackDryRun('{{ $operation['addon_code'] }}', '{{ $operation['operation_id'] }}')" size="xs" color="gray">Rollback preflight</x-filament::button>
-                                        <x-filament::button wire:click="markManualIntervention('{{ $operation['operation_id'] }}')" wire:confirm="Preserve this operation as manual-intervention-required? A reason is required." size="xs" color="danger">Mark manual</x-filament::button>
+                                        <x-filament::button wire:click="rollbackDryRun('{{ $operation['addon_code'] }}', '{{ $operation['operation_id'] }}')" size="xs" color="gray">{{ __('marketplace.operations.rollback_preflight') }}</x-filament::button>
+                                        <x-filament::button wire:click="markManualIntervention('{{ $operation['operation_id'] }}')" wire:confirm="Preserve this operation as manual-intervention-required? A reason is required." size="xs" color="danger">{{ __('marketplace.operations.mark_manual') }}</x-filament::button>
                                     @endif
                                 </td>
                             </tr>
@@ -82,55 +88,55 @@
             @endif
             @if ($canManagePromotion && $operationsHealth['items'])
                 <div style="margin-top:0.75rem;max-width:36rem">
-                    <label class="fi-fo-field-wrp-label"><span class="fi-fo-field-wrp-label-text">Manual intervention reason</span></label>
+                    <label class="fi-fo-field-wrp-label"><span class="fi-fo-field-wrp-label-text">{{ __('marketplace.operations.manual_reason') }}</span></label>
                     <input class="fi-input" type="text" maxlength="500" wire:model="manualInterventionReason">
                 </div>
             @endif
 
             @if ($operationsHealth['rollback_candidates'])
-                <h3 style="font-weight:600;margin-top:1rem">Completed update rollback</h3>
+                <h3 style="font-weight:600;margin-top:1rem">{{ __('marketplace.operations.completed_rollback') }}</h3>
                 @foreach ($operationsHealth['rollback_candidates'] as $rollback)
                     <div class="fi-in-text" style="margin-top:0.5rem">
                         {{ $rollback['addon_code'] }} · {{ $rollback['current_version'] ?? 'unknown' }} → {{ $rollback['target_version'] ?? 'unknown' }} · {{ $rollback['code'] }}
-                        <x-filament::button wire:click="rollbackDryRun('{{ $rollback['addon_code'] }}', '{{ $rollback['operation_id'] }}')" size="xs" color="gray">Rollback dry run</x-filament::button>
+                        <x-filament::button wire:click="rollbackDryRun('{{ $rollback['addon_code'] }}', '{{ $rollback['operation_id'] }}')" size="xs" color="gray">{{ __('marketplace.operations.rollback_dry') }}</x-filament::button>
                         @if ($rollback['eligible'] && $canManagePromotion)
-                            <x-filament::button wire:click="executeOperationalRollback('{{ $rollback['addon_code'] }}', '{{ $rollback['operation_id'] }}')" wire:confirm="Execute the revalidated operational rollback?" size="xs" color="danger">Execute rollback</x-filament::button>
+                            <x-filament::button wire:click="executeOperationalRollback('{{ $rollback['addon_code'] }}', '{{ $rollback['operation_id'] }}')" wire:confirm="Execute the revalidated operational rollback?" size="xs" color="danger">{{ __('marketplace.operations.execute_rollback') }}</x-filament::button>
                         @endif
                     </div>
                 @endforeach
             @endif
         </x-filament::section>
 
-        <x-filament::section heading="Backup retention" icon="heroicon-o-archive-box" style="margin-top:1rem">
+        <x-filament::section :heading="__('marketplace.backups.heading')" icon="heroicon-o-archive-box" style="margin-top:1rem">
             @if ($backupRetention)
                 @foreach ($backupRetention as $backup)
                     <div class="fi-in-text" style="margin-bottom:0.5rem">
                         <strong>{{ $backup['backupId'] }}</strong> · {{ $backup['addonCode'] ?? 'unknown' }} · {{ $backup['version'] ?? 'unknown' }} ·
                         {{ $backup['integrityStatus'] }} · {{ $backup['reason'] }}
-                        @if ($backup['lastKnownGood']) · last-known-good @endif
-                        @if ($backup['referencedByIncompleteOperation']) · unresolved reference @endif
+                        @if ($backup['lastKnownGood']) · {{ __('marketplace.backups.last_good') }} @endif
+                        @if ($backup['referencedByIncompleteOperation']) · {{ __('marketplace.backups.reference') }} @endif
                         @if ($backup['eligible'] && $canManagePromotion)
-                            <x-filament::button wire:click="cleanupBackup('{{ $backup['backupId'] }}')" wire:confirm="Delete this exact eligible managed backup?" size="xs" color="danger">Cleanup exact backup</x-filament::button>
+                            <x-filament::button wire:click="cleanupBackup('{{ $backup['backupId'] }}')" wire:confirm="Delete this exact eligible managed backup?" size="xs" color="danger">{{ __('marketplace.backups.cleanup') }}</x-filament::button>
                         @endif
                     </div>
                 @endforeach
             @else
-                <div class="fi-in-text">No managed backups.</div>
+                <div class="fi-in-text">{{ __('marketplace.backups.none') }}</div>
             @endif
         </x-filament::section>
 
-        <x-filament::section heading="Stale recovery data" icon="heroicon-o-trash" style="margin-top:1rem">
+        <x-filament::section :heading="__('marketplace.stale.heading')" icon="heroicon-o-trash" style="margin-top:1rem">
             @if ($staleRemnants)
                 @foreach ($staleRemnants as $item)
                     <div class="fi-in-text" style="margin-bottom:0.5rem">
                         {{ $item['kind'] }} · {{ substr($item['identifier'], 0, 12) }} · {{ $item['reason'] }}
                         @if ($item['eligible'] && $canManagePromotion)
-                            <x-filament::button wire:click="cleanupStaleItem('{{ $item['identifier'] }}')" wire:confirm="Delete this exact revalidated stale item?" size="xs" color="danger">Cleanup exact item</x-filament::button>
+                            <x-filament::button wire:click="cleanupStaleItem('{{ $item['identifier'] }}')" wire:confirm="Delete this exact revalidated stale item?" size="xs" color="danger">{{ __('marketplace.stale.cleanup') }}</x-filament::button>
                         @endif
                     </div>
                 @endforeach
             @else
-                <div class="fi-in-text">No stale managed remnants.</div>
+                <div class="fi-in-text">{{ __('marketplace.stale.none') }}</div>
             @endif
         </x-filament::section>
 
@@ -553,7 +559,7 @@
                                                     </div>
                                                 </div>
                                             @endif
-                                            @if (($row['promotion_status'] ?? null) === 'promoted' && $canPromote)
+                                            @if (($row['promotion_status'] ?? null) === 'promoted' && $canManagePromotion)
                                                 <div class="addon-marketplace-artifact__actions">
                                                     <x-filament::button wire:click="installVerifiedArtifact('{{ e($item->code) }}')" color="success" size="sm">
                                                         {{ ($row['addon']?->is_installed ?? false) ? 'Оновити addon' : 'Встановити addon' }}
