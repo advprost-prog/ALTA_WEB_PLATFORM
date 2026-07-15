@@ -151,7 +151,7 @@ class AddonMarketplaceTest extends TestCase
             ->assertSee('missing_files')
             ->assertSee('Всього позицій')
             ->assertSee('Фільтри')
-            ->assertSee('Перевірити локальні файли');
+            ->assertDontSee('Перевірити локальні файли');
     }
 
     public function test_marketplace_page_does_not_crash_on_invalid_item(): void

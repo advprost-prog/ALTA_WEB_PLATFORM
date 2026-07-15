@@ -41,7 +41,8 @@ final class MarketplaceRecoveryOperationsTest extends TestCase
             ->call('setMarketplaceTab', 'operations')
             ->assertSee(__('marketplace.operations.heading'))
             ->assertSee(__('marketplace.operations.status'))
-            ->assertSee('healthy')
+            ->assertSee('система працює нормально')
+            ->assertDontSee('healthy')
             ->assertDontSee(Storage::disk('addons')->path(''));
     }
 
@@ -58,7 +59,7 @@ final class MarketplaceRecoveryOperationsTest extends TestCase
         Livewire::test(Marketplace::class)
             ->call('setMarketplaceTab', 'operations')
             ->assertSee('Операції та відновлення')
-            ->assertSee('Зберігання backups');
+            ->assertSee('Резервні копії');
     }
 
     public function test_recovery_dry_run_is_read_only_and_safe_action_recovers_after_reinspection(): void
@@ -74,7 +75,8 @@ final class MarketplaceRecoveryOperationsTest extends TestCase
 
         Livewire::test(Marketplace::class)
             ->call('setMarketplaceTab', 'operations')
-            ->assertSee('prepared_no_mutation')
+            ->assertSee('Незавершена операція додатка')
+            ->assertDontSee('prepared_no_mutation')
             ->call('recoveryDryRun', $id)
             ->assertHasNoErrors();
         $this->assertSame($before, Storage::disk('addons')->get($path));

@@ -55,7 +55,10 @@ class MarketplaceActionsTest extends TestCase
         $this->actingAs($this->createUserWithRole(UserRole::Admin));
 
         $this->marketplace()->call('refreshRegistry')->assertHasNoErrors();
-        $this->marketplace()->call('refreshRegistry')->assertHasNoErrors()->assertSee('Registry: fresh')->assertSee('build-1')->assertSee('1.0.0');
+        $this->marketplace()->call('refreshRegistry')->assertHasNoErrors()
+            ->assertSee('У Marketplace поки немає опублікованих модулів')
+            ->assertSee('схема: 1')
+            ->assertDontSee('Registry: fresh');
 
         $this->assertSame(304, app(RegistryCatalog::class)->snapshot()['last_http_status']);
     }

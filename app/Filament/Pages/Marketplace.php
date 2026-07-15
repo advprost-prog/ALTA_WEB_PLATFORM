@@ -88,6 +88,10 @@ class Marketplace extends Page
 
     public array $recoveryRemnants = [];
 
+    public ?string $expandedRecoveryOperation = null;
+
+    public ?string $expandedStaleItem = null;
+
     /**
      * @var array<string, mixed>
      */
@@ -144,6 +148,7 @@ class Marketplace extends Page
             default => $remoteRows,
         };
         $rows = $this->applyFilters($selected);
+        $operationsHealth = app(AddonRecoveryHealthService::class)->health();
 
         return [
             'rows' => $rows,
@@ -171,6 +176,7 @@ class Marketplace extends Page
             'promotionLabels' => ArtifactPromotionStatus::LABELS,
             'registryState' => $resolved['registry_state'],
             'registryPresentationState' => $resolved['registry_presentation_state'],
+            'registryPresentation' => $this->registryPresentation($resolved['registry_presentation_state']),
             'registryMeta' => $resolved['registry_meta'],
             'registryHeader' => $resolved['registry_header'],
             'registryItemCount' => $resolved['registry_item_count'],
@@ -179,7 +185,8 @@ class Marketplace extends Page
             'updateCount' => count(array_filter($allRows, fn (array $row): bool => ($row['update_status'] ?? null) === 'update_available')),
             'attentionCount' => count(array_filter($productionRows, fn (array $row): bool => in_array($row['status'] ?? null, ['failed', 'missing_files', 'invalid'], true))),
             'showDevelopmentTab' => (bool) (config('addons-marketplace.show_development') ?? app()->environment(['local', 'testing'])),
-            'operationsHealth' => app(AddonRecoveryHealthService::class)->health(),
+            'operationsHealth' => $operationsHealth,
+            'operationsStatusLabel' => $this->operationsStatusLabel((string) ($operationsHealth['status'] ?? 'healthy')),
             'backupRetention' => $this->recoveryBackups,
             'staleRemnants' => $this->recoveryRemnants,
         ];
@@ -202,6 +209,18 @@ class Marketplace extends Page
         app(AddonRecoveryHealthService::class)->health(true);
         $this->loadRecoveryData();
         Notification::make()->title('Recovery diagnostics refreshed')->success()->send();
+    }
+
+    public function toggleRecoveryOperation(string $operationId): void
+    {
+        $this->guardOperationId($operationId);
+        $this->expandedRecoveryOperation = $this->expandedRecoveryOperation === $operationId ? null : $operationId;
+    }
+
+    public function toggleStaleItem(string $identifier): void
+    {
+        $this->guardIdentifier($identifier);
+        $this->expandedStaleItem = $this->expandedStaleItem === $identifier ? null : $identifier;
     }
 
     public function recoveryDryRun(string $operationId): void
@@ -1207,5 +1226,30 @@ class Marketplace extends Page
         }
 
         return $colors[$status] ?? 'gray';
+    }
+
+    /** @return array{title: string, description: string, color: string} */
+    private function registryPresentation(string $state): array
+    {
+        return match ($state) {
+            'connected_empty' => ['title' => 'Marketplace підключено', 'description' => 'Підключення до Marketplace працює. Опублікованих модулів поки немає.', 'color' => 'success'],
+            'connected_with_items' => ['title' => 'Marketplace підключено', 'description' => 'Каталог Marketplace актуальний.', 'color' => 'success'],
+            'stale_cache' => ['title' => 'Каталог потребує оновлення', 'description' => 'Показано збережену версію каталогу. Отримана відповідь не пройшла перевірку.', 'color' => 'warning'],
+            'unavailable_with_cache' => ['title' => 'Marketplace тимчасово недоступний', 'description' => 'Показано останню збережену версію каталогу.', 'color' => 'warning'],
+            'disabled' => ['title' => 'Marketplace вимкнено', 'description' => 'Віддалений каталог вимкнено для цього середовища.', 'color' => 'gray'],
+            'not_configured' => ['title' => 'Marketplace не налаштовано', 'description' => 'Віддалений Marketplace не налаштований для цього середовища.', 'color' => 'gray'],
+            'invalid_response' => ['title' => 'Некоректна відповідь Marketplace', 'description' => 'Відповідь сервера не пройшла перевірку, тому каталог не оновлено.', 'color' => 'danger'],
+            default => ['title' => 'Marketplace недоступний', 'description' => 'Не вдалося підключитися до Marketplace. Каталог недоступний.', 'color' => 'danger'],
+        };
+    }
+
+    private function operationsStatusLabel(string $status): string
+    {
+        return match ($status) {
+            'healthy' => 'Система працює нормально',
+            'degraded' => 'Потребує уваги',
+            'manual_intervention_required' => 'Потрібне ручне втручання',
+            default => 'Потребує перевірки',
+        };
     }
 }

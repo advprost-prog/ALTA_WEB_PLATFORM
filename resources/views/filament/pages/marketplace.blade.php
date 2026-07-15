@@ -1,68 +1,56 @@
 <x-filament-panels::page>
+    <style>
+        .marketplace-page-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.marketplace-page-header__actions{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end}.marketplace-tabs{display:flex;gap:.5rem;overflow-x:auto;white-space:nowrap;padding:.25rem 0 .75rem;border-bottom:1px solid var(--gray-200);scrollbar-width:thin}.marketplace-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem}.marketplace-table-wrap{max-width:100%;overflow-x:auto;border:1px solid var(--gray-200);border-radius:.5rem}.marketplace-state{margin-top:1rem}.marketplace-state__meta{font-size:.75rem;color:var(--gray-500);margin-top:.5rem}.marketplace-remnant{border:1px solid var(--gray-200);border-radius:.5rem;padding:.75rem;margin-top:.5rem}
+        @media(max-width:900px){.marketplace-page-header{flex-direction:column}.marketplace-page-header__actions{justify-content:flex-start}.marketplace-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.marketplace-table-wrap table{min-width:760px}}
+    </style>
     <div class="addon-marketplace">
 
-        {{-- Header --}}
-        <x-filament::section
-            :aside="true"
-            heading="Marketplace"
-            description="Опубліковані модулі, встановлені addons та операційний стан."
-            icon="heroicon-o-squares-2x2"
-        >
-            <div class="addon-marketplace__toolbar">
-            <x-filament::button wire:click="rescan" icon="heroicon-o-arrow-path" size="sm">
-                Перевірити локальні файли
-            </x-filament::button>
+        <header class="marketplace-page-header">
+            <div><h1 style="font-size:1.35rem;font-weight:700">Marketplace додатків</h1><p class="fi-in-text" style="color:var(--gray-500)">Опубліковані модулі, локально встановлені додатки та операційний стан.</p></div>
             @php
                 $registryConfig = config('addons-registry', []);
                 $registryEnabled = (bool) ($registryConfig['enabled'] ?? false);
             @endphp
-            @if ($registryEnabled)
-                <x-filament::button wire:click="refreshRegistry" icon="heroicon-o-cloud-arrow-down" size="sm" color="gray">
-                    Оновити каталог
-                </x-filament::button>
-            @endif
+            <div class="marketplace-page-header__actions">
+                @if ($registryEnabled)<x-filament::button wire:click="refreshRegistry" icon="heroicon-o-cloud-arrow-down" size="sm">Оновити каталог</x-filament::button>@endif
+                @if ($activeTab === 'installed' || $activeTab === 'operations')<x-filament::button wire:click="rescan" icon="heroicon-o-arrow-path" size="sm" color="gray">Перевірити локальні файли</x-filament::button>@endif
             </div>
-        </x-filament::section>
+        </header>
 
-        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:1rem;border-bottom:1px solid var(--gray-200);padding-bottom:0.75rem">
+        <nav class="marketplace-tabs" aria-label="Розділи Marketplace" style="margin-top:1rem">
             <x-filament::button wire:click="setMarketplaceTab('marketplace')" :color="$activeTab === 'marketplace' ? 'primary' : 'gray'" size="sm">Marketplace</x-filament::button>
             <x-filament::button wire:click="setMarketplaceTab('installed')" :color="$activeTab === 'installed' ? 'primary' : 'gray'" size="sm">Встановлені</x-filament::button>
             <x-filament::button wire:click="setMarketplaceTab('operations')" :color="$activeTab === 'operations' ? 'primary' : 'gray'" size="sm">Операції та відновлення</x-filament::button>
             @if ($showDevelopmentTab)
                 <x-filament::button wire:click="setMarketplaceTab('development')" :color="$activeTab === 'development' ? 'warning' : 'gray'" size="sm">Для розробки</x-filament::button>
             @endif
-        </div>
+        </nav>
 
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem;margin-top:1rem">
+        @if (in_array($activeTab, ['marketplace', 'installed'], true))
+        <div class="marketplace-kpis" style="margin-top:.75rem">
             @foreach ([['Опубліковано', $remoteCount], ['Встановлено', $installedCount], ['Доступні оновлення', $updateCount], ['Потребують уваги', $attentionCount]] as [$label, $value])
                 <div style="border:1px solid var(--gray-200);border-radius:0.5rem;padding:0.75rem;background:var(--gray-50)">
                     <div style="font-size:1.25rem;font-weight:600">{{ $value }}</div><div class="fi-in-text" style="font-size:0.75rem;color:var(--gray-500)">{{ $label }}</div>
                 </div>
             @endforeach
         </div>
+        @endif
 
-        @if ($registryEnabled)
-            <x-filament::section heading="Стан Marketplace Registry: {{ $registryState }}" icon="heroicon-o-cloud" style="margin-top:1rem">
-                <div class="fi-in-text" style="font-size:0.875rem">
-                    <div><strong>Сервер:</strong> {{ $registryMeta['source_host'] ?? '—' }}</div>
-                    <div><strong>Останнє успішне оновлення:</strong> {{ $registryMeta['last_successful_refresh_at'] ?? '—' }}</div>
-                    <div><strong>Остання перевірка:</strong> {{ $registryMeta['checked_at'] ?? '—' }}</div>
-                    <div><strong>Версія застосунку:</strong> {{ $registryHeader['application_version'] ?? '—' }}</div>
-                    <div><strong>Збірка:</strong> {{ $registryHeader['build_version'] ?? '—' }}</div>
-                    <div><strong>Схема:</strong> {{ $registryHeader['schema_version'] ?? '—' }}</div>
-                    @if (! empty($registryMeta['last_error']))<div><strong>Помилка:</strong> {{ $registryMeta['last_error'] }}</div>@endif
-                </div>
+        @if ($activeTab === 'marketplace' && ! in_array($registryPresentationState, ['connected_empty', 'connected_with_items'], true))
+            <x-filament::section :heading="$registryPresentation['title']" icon="heroicon-o-cloud" class="marketplace-state">
+                <p class="fi-in-text">{{ $registryPresentation['description'] }}</p>
+                <div class="marketplace-state__meta">Остання перевірка: {{ $registryMeta['checked_at'] ?? '—' }} · схема: {{ $registryHeader['schema_version'] ?? '—' }}</div>
+                @if ($registryEnabled)<div style="margin-top:.75rem"><x-filament::button wire:click="refreshRegistry" size="sm">Спробувати знову</x-filament::button></div>@endif
             </x-filament::section>
         @endif
 
         @if ($activeTab === 'operations')
         <x-filament::section :heading="__('marketplace.operations.heading')" icon="heroicon-o-wrench-screwdriver" style="margin-top:1rem">
             <div class="fi-in-text" style="font-size:0.875rem">
-                <strong>{{ __('marketplace.operations.status') }}:</strong> {{ $operationsHealth['status'] }} ·
-                {{ __('marketplace.operations.unresolved') }} {{ $operationsHealth['unresolved_count'] }} ·
-                {{ __('marketplace.operations.manual') }} {{ $operationsHealth['manual_intervention_count'] }} ·
-                {{ __('marketplace.operations.corrupt') }} {{ $operationsHealth['corrupt_backup_count'] }} ·
-                {{ __('marketplace.operations.pending') }} {{ $operationsHealth['cleanup_pending_count'] }}
+                <strong>{{ __('marketplace.operations.status') }}:</strong> {{ mb_strtolower($operationsStatusLabel) }} ·
+                {{ __('marketplace.operations.unresolved') }}: {{ $operationsHealth['unresolved_count'] }} ·
+                {{ __('marketplace.operations.manual') }}: {{ $operationsHealth['manual_intervention_count'] }} ·
+                {{ __('marketplace.operations.corrupt') }}: {{ $operationsHealth['corrupt_backup_count'] }}
             </div>
             <div style="margin-top:0.75rem">
                 <x-filament::button wire:click="refreshRecoveryHealth" color="gray" size="sm" icon="heroicon-o-arrow-path">
@@ -71,18 +59,13 @@
             </div>
 
             @if ($operationsHealth['items'])
-                <div style="overflow-x:auto;margin-top:1rem">
-                    <table class="fi-ta-table w-full table-auto divide-y divide-gray-200 text-start dark:divide-white/5">
-                        <thead><tr><th>{{ __('marketplace.operations.operation') }}</th><th>{{ __('marketplace.operations.addon') }}</th><th>{{ __('marketplace.operations.state') }}</th><th>{{ __('marketplace.operations.classification') }}</th><th>{{ __('marketplace.operations.evidence') }}</th><th>{{ __('marketplace.operations.actions') }}</th></tr></thead>
-                        <tbody>
-                        @foreach ($operationsHealth['items'] as $operation)
-                            <tr>
-                                <td>{{ $operation['operation'] }}</td>
-                                <td>{{ $operation['addon_code'] }}</td>
-                                <td>{{ $operation['state'] }}</td>
-                                <td>{{ $operation['classification'] }} / {{ $operation['proposed_action'] }}</td>
-                                <td>live {{ $operation['integrity']['live'] }}, backup {{ $operation['integrity']['backup'] }}, candidate {{ $operation['integrity']['candidate'] }}, staging {{ $operation['integrity']['staging'] }}</td>
-                                <td>
+                <div style="margin-top:1rem">
+                    @foreach ($operationsHealth['items'] as $operation)
+                        <div class="marketplace-remnant">
+                            <div style="display:flex;justify-content:space-between;gap:.75rem;align-items:center;flex-wrap:wrap">
+                                <div><strong>Незавершена операція додатка</strong><div class="fi-in-text" style="font-size:.8rem;color:var(--gray-500)">Зміни призупинено до безпечної повторної перевірки.</div></div>
+                                <div style="display:flex;gap:.35rem;flex-wrap:wrap">
+                                    <x-filament::button wire:click="toggleRecoveryOperation('{{ $operation['operation_id'] }}')" size="xs" color="gray">Деталі</x-filament::button>
                                     <x-filament::button wire:click="recoveryDryRun('{{ $operation['operation_id'] }}')" size="xs" color="gray">{{ __('marketplace.operations.dry_run') }}</x-filament::button>
                                     @if ($operation['automatic'] && $canManagePromotion)
                                         <x-filament::button wire:click="runSafeRecovery('{{ $operation['operation_id'] }}')" wire:confirm="Run the revalidated safe recovery plan?" size="xs" color="warning">{{ __('marketplace.operations.run_safe') }}</x-filament::button>
@@ -91,11 +74,13 @@
                                         <x-filament::button wire:click="rollbackDryRun('{{ $operation['addon_code'] }}', '{{ $operation['operation_id'] }}')" size="xs" color="gray">{{ __('marketplace.operations.rollback_preflight') }}</x-filament::button>
                                         <x-filament::button wire:click="markManualIntervention('{{ $operation['operation_id'] }}')" wire:confirm="Preserve this operation as manual-intervention-required? A reason is required." size="xs" color="danger">{{ __('marketplace.operations.mark_manual') }}</x-filament::button>
                                     @endif
-                                </td>
-                            </tr>
-                        @endforeach
-                        </tbody>
-                    </table>
+                                </div>
+                            </div>
+                            @if ($expandedRecoveryOperation === $operation['operation_id'])
+                                <div class="fi-in-text" style="font-size:.8rem;margin-top:.75rem">ID: {{ substr($operation['operation_id'], 0, 8) }}… · додаток: {{ $operation['addon_code'] }} · стан: {{ $operation['state'] }} · перевірка: основні файли {{ $operation['integrity']['live'] }}, резервна копія {{ $operation['integrity']['backup'] }}, кандидат {{ $operation['integrity']['candidate'] }}, каталог підготовки {{ $operation['integrity']['staging'] }}</div>
+                            @endif
+                        </div>
+                    @endforeach
                 </div>
             @endif
             @if ($canManagePromotion && $operationsHealth['items'])
@@ -109,7 +94,7 @@
                 <h3 style="font-weight:600;margin-top:1rem">{{ __('marketplace.operations.completed_rollback') }}</h3>
                 @foreach ($operationsHealth['rollback_candidates'] as $rollback)
                     <div class="fi-in-text" style="margin-top:0.5rem">
-                        {{ $rollback['addon_code'] }} · {{ $rollback['current_version'] ?? 'unknown' }} → {{ $rollback['target_version'] ?? 'unknown' }} · {{ $rollback['code'] }}
+                        {{ $rollback['addon_code'] }} · {{ $rollback['current_version'] ?? 'невідомо' }} → {{ $rollback['target_version'] ?? 'невідомо' }}
                         <x-filament::button wire:click="rollbackDryRun('{{ $rollback['addon_code'] }}', '{{ $rollback['operation_id'] }}')" size="xs" color="gray">{{ __('marketplace.operations.rollback_dry') }}</x-filament::button>
                         @if ($rollback['eligible'] && $canManagePromotion)
                             <x-filament::button wire:click="executeOperationalRollback('{{ $rollback['addon_code'] }}', '{{ $rollback['operation_id'] }}')" wire:confirm="Execute the revalidated operational rollback?" size="xs" color="danger">{{ __('marketplace.operations.execute_rollback') }}</x-filament::button>
@@ -140,10 +125,17 @@
         <x-filament::section :heading="__('marketplace.stale.heading')" icon="heroicon-o-trash" style="margin-top:1rem">
             @if ($staleRemnants)
                 @foreach ($staleRemnants as $item)
-                    <div class="fi-in-text" style="margin-bottom:0.5rem">
-                        {{ $item['kind'] }} · {{ substr($item['identifier'], 0, 12) }} · {{ $item['reason'] }}
-                        @if ($item['eligible'] && $canManagePromotion)
-                            <x-filament::button wire:click="cleanupStaleItem('{{ $item['identifier'] }}')" wire:confirm="Delete this exact revalidated stale item?" size="xs" color="danger">{{ __('marketplace.stale.cleanup') }}</x-filament::button>
+                    <div class="marketplace-remnant">
+                        <strong>{{ $item['reason'] === 'stale_item_unmanaged' ? 'Виявлено непідтверджені службові дані' : 'Виявлено застарілі службові дані' }}</strong>
+                        <p class="fi-in-text" style="font-size:.8rem;color:var(--gray-500)">{{ $item['reason'] === 'stale_item_unmanaged' ? 'Каталог підготовки не пов’язаний із відомою операцією та залишений без змін із міркувань безпеки.' : 'Службові дані збережено до підтвердження безпечного очищення.' }}</p>
+                        <div style="display:flex;gap:.35rem;margin-top:.5rem">
+                            <x-filament::button wire:click="toggleStaleItem('{{ $item['identifier'] }}')" color="gray" size="xs">Деталі</x-filament::button>
+                            @if ($item['eligible'] && $canManagePromotion)
+                                <x-filament::button wire:click="cleanupStaleItem('{{ $item['identifier'] }}')" wire:confirm="Видалити ці повторно перевірені службові дані?" size="xs" color="danger">{{ __('marketplace.stale.cleanup') }}</x-filament::button>
+                            @endif
+                        </div>
+                        @if ($expandedStaleItem === $item['identifier'])
+                            <div class="fi-in-text" style="font-size:.8rem;margin-top:.75rem">Ідентифікатор: {{ substr($item['identifier'], 0, 12) }}… · тип: {{ $item['kind'] }}</div>
                         @endif
                     </div>
                 @endforeach
@@ -154,15 +146,11 @@
         @endif
 
         @if (in_array($activeTab, ['marketplace', 'installed'], true))
-            @if ($activeTab === 'marketplace' && $remoteCount === 0)
+            @if ($activeTab === 'marketplace' && $remoteCount === 0 && $registryPresentationState === 'connected_empty')
                 <x-filament::section heading="У Marketplace поки немає опублікованих модулів" icon="heroicon-o-shopping-bag" style="margin-top:1rem;text-align:center">
-                    <p class="fi-in-text">
-                        {{ $registryState === 'fresh'
-                            ? 'Підключення до сервера Marketplace працює, але каталог ще не містить опублікованих релізів.'
-                            : 'Каталог ще не містить опублікованих релізів. Стан підключення показано нижче.' }}
-                    </p>
+                    <p class="fi-in-text">Підключення до сервера Marketplace працює, але каталог ще не містить доступних релізів.</p>
                     <div class="fi-in-text" style="font-size:0.8rem;color:var(--gray-500);margin-top:0.75rem">
-                        Registry: {{ $registryState === 'fresh' ? 'доступний' : $registryState }} · cache: {{ $registryMeta['state'] ?? $registryState }} · schema: {{ $registryHeader['schema_version'] ?? '—' }} · оновлено: {{ $registryMeta['checked_at'] ?? '—' }}
+                        Останнє оновлення: {{ $registryMeta['checked_at'] ?? '—' }} · схема: {{ $registryHeader['schema_version'] ?? '—' }} · кеш: актуальний
                     </div>
                     <div style="margin-top:1rem;display:flex;justify-content:center;gap:0.5rem">
                         @if ($registryEnabled)
@@ -171,6 +159,7 @@
                         <x-filament::button wire:click="setMarketplaceTab('installed')" color="gray" size="sm">Перейти до встановлених</x-filament::button>
                     </div>
                 </x-filament::section>
+            @elseif ($activeTab === 'marketplace' && $remoteCount === 0)
             @elseif ($activeTab === 'installed' && $installedCount === 0)
                 <x-filament::section heading="Встановлених модулів немає" icon="heroicon-o-cube" style="margin-top:1rem">
                     <p class="fi-in-text">Локальний registry не містить підтверджених встановлених addons.</p>
@@ -182,7 +171,7 @@
                     <select class="fi-select-input" style="max-width:12rem" wire:model.live="filterStatus"><option value="">Усі стани</option>@foreach ($statusOptions as $value => $label)<option value="{{ $value }}">{{ $label }}</option>@endforeach</select>
                     <x-filament::button wire:click="resetFilters" color="gray" size="sm">Скинути</x-filament::button>
                 </div>
-                <div style="overflow-x:auto;margin-top:1rem;border:1px solid var(--gray-200);border-radius:0.5rem">
+                <div class="marketplace-table-wrap" style="margin-top:1rem">
                     <table class="fi-ta-table w-full table-auto divide-y divide-gray-200 text-start dark:divide-white/5">
                         <thead><tr><th style="padding:0.75rem">Модуль</th><th>Видавець</th><th>Категорія</th><th>Встановлена версія</th><th>Доступна версія</th><th>Стан</th><th>Дії</th></tr></thead>
                         <tbody>
