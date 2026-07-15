@@ -26,6 +26,22 @@ final class MarketplaceCatalogTruthTest extends TestCase
         }
     }
 
+    public function test_theme_maker_is_a_test_fixture_and_stale_install_state_does_not_make_it_production(): void
+    {
+        config(['addons-marketplace.show_development' => false, 'addons-registry.enabled' => false]);
+        SystemAddon::query()->create([
+            'code' => 'core.theme-maker', 'type' => 'extension', 'name' => 'Theme Maker', 'vendor' => 'Core',
+            'version' => '0.2.0', 'source' => 'local', 'status' => 'enabled', 'is_installed' => true, 'is_enabled' => true,
+        ]);
+        app()->forgetInstance(MarketplaceCatalog::class);
+        app()->forgetInstance(MarketplaceManager::class);
+
+        $audit = collect(app(AddonCatalogAuditService::class)->audit())->firstWhere('code', 'core.theme-maker');
+        $this->assertSame('test_fixture', $audit['classification']);
+        $this->assertSame('development', $audit['visibility']);
+        $this->assertSame([], app(MarketplaceManager::class)->resolve()['rows']);
+    }
+
     public function test_production_policy_hides_development_fixtures_and_placeholders_server_side(): void
     {
         config(['addons-marketplace.show_development' => false, 'addons-registry.enabled' => false]);
@@ -64,5 +80,7 @@ final class MarketplaceCatalogTruthTest extends TestCase
         $this->assertCount(1, $resolved['rows']);
         $this->assertSame('installed', $resolved['rows'][0]['source']);
         $this->assertSame('vendor.production', $resolved['rows'][0]['item']->code);
+        $this->assertNull($resolved['rows'][0]['remote_version']);
+        $this->assertNotSame('update_available', $resolved['rows'][0]['update_status']);
     }
 }

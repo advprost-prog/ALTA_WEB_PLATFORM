@@ -143,6 +143,7 @@ final class MarketplaceManager
             'diagnostics' => $diagnostics,
             'warnings' => $catalog['warnings'],
             'registry_state' => $remoteCatalog['state'] ?? 'disabled',
+            'registry_presentation_state' => app(RegistryPresentationState::class)->resolve($remoteCatalog),
             'registry_meta' => $remoteCatalog['meta'] ?? [],
             'registry_header' => $remoteCatalog['registry'] ?? [],
             'registry_item_count' => count($remoteItems),

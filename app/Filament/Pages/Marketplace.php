@@ -136,6 +136,7 @@ class Marketplace extends Page
         $remoteRows = array_values(array_filter($allRows, fn (array $row): bool => in_array($row['source'] ?? null, ['remote', 'local_remote'], true)));
         $installedRows = array_values(array_filter($allRows, fn (array $row): bool => (bool) (($row['addon'] ?? null)?->is_installed ?? false)));
         $developmentRows = array_values(array_filter($allRows, fn (array $row): bool => ($row['item']->visibility ?? 'production') !== 'production'));
+        $productionRows = array_values(array_filter($allRows, fn (array $row): bool => ($row['item']->visibility ?? 'production') === 'production'));
         $selected = match ($this->activeTab) {
             'installed' => $installedRows,
             'development' => $developmentRows,
@@ -169,13 +170,14 @@ class Marketplace extends Page
             'canManagePromotion' => $this->canPromoteArtifacts() || $this->canRollbackArtifacts(),
             'promotionLabels' => ArtifactPromotionStatus::LABELS,
             'registryState' => $resolved['registry_state'],
+            'registryPresentationState' => $resolved['registry_presentation_state'],
             'registryMeta' => $resolved['registry_meta'],
             'registryHeader' => $resolved['registry_header'],
             'registryItemCount' => $resolved['registry_item_count'],
             'remoteCount' => count($remoteRows),
             'installedCount' => count($installedRows),
             'updateCount' => count(array_filter($allRows, fn (array $row): bool => ($row['update_status'] ?? null) === 'update_available')),
-            'attentionCount' => count(array_filter($allRows, fn (array $row): bool => in_array($row['status'] ?? null, ['failed', 'missing_files', 'invalid'], true))),
+            'attentionCount' => count(array_filter($productionRows, fn (array $row): bool => in_array($row['status'] ?? null, ['failed', 'missing_files', 'invalid'], true))),
             'showDevelopmentTab' => (bool) (config('addons-marketplace.show_development') ?? app()->environment(['local', 'testing'])),
             'operationsHealth' => app(AddonRecoveryHealthService::class)->health(),
             'backupRetention' => $this->recoveryBackups,

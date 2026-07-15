@@ -43,6 +43,18 @@ class MarketplaceAssessmentTest extends TestCase
         $this->assertSame('compatible', $assessment['compatibility']['result']);
     }
 
+    public function test_installed_version_never_becomes_available_version_without_remote_match(): void
+    {
+        $this->installed('core.products', '1.0.0', true);
+        $this->fakeRegistry([]);
+
+        $row = collect(app(MarketplaceManager::class)->resolve()['rows'])->first(fn (array $row): bool => $row['item']->code === 'core.products');
+        $this->assertSame('1.0.0', $row['installed_version']);
+        $this->assertSame('1.0.0', $row['local_catalog_version']);
+        $this->assertNull($row['remote_version']);
+        $this->assertNotSame('update_available', $row['update_status']);
+    }
+
     public function test_local_only_items_cover_not_installed_enabled_and_disabled_without_registry_candidates(): void
     {
         $this->fakeRegistry([]);

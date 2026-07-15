@@ -193,7 +193,7 @@
                             <tr>
                                 <td style="padding:0.75rem"><strong>{{ $item->name }}</strong><div style="font-size:0.75rem;color:var(--gray-500)">{{ $item->code }}</div></td>
                                 <td>{{ $item->vendor }}</td><td>{{ $item->category ?: '—' }}</td>
-                                <td>{{ $row['installed_version'] ?? '—' }}</td><td>{{ $row['remote_version'] ?? $row['available_version'] ?? '—' }}</td>
+                                <td>{{ $row['installed_version'] ?? '—' }}</td><td>{{ $row['remote_version'] ?? '—' }}</td>
                                 <td>
                                     <x-filament::badge :color="($row['trust_status'] ?? null) === 'trusted' ? 'success' : (in_array($row['status'], ['enabled','installed'], true) ? 'success' : (($row['status'] ?? null) === 'failed' ? 'danger' : 'gray'))">
                                         {{ ($row['trust_status'] ?? null) === 'trusted' ? 'Довірений' : ($statusLabels[$row['status']] ?? $row['status']) }}
@@ -219,7 +219,7 @@
                                 </td>
                             </tr>
                             @if ($expandedCode === $item->code)
-                                <tr><td colspan="7" style="padding:0.75rem;background:var(--gray-50)"><strong>Технічні деталі:</strong> сумісність {{ $row['compatibility_status'] ?? 'unknown' }}; залежності {{ ($row['dependency_issues'] ?? []) === [] ? 'виконані' : implode('; ', $row['dependency_issues']) }}; manifest {{ $item->path ? basename($item->path) : 'відсутній' }}.</td></tr>
+                                <tr><td colspan="7" style="padding:0.75rem;background:var(--gray-50)"><strong>Технічні деталі:</strong> сумісність {{ $row['compatibility_status'] ?? 'unknown' }}; залежності {{ ($row['dependency_issues'] ?? []) === [] ? 'виконані' : implode('; ', $row['dependency_issues']) }}; версія локального пакета {{ $row['local_catalog_version'] ?? '—' }}; дані Marketplace {{ $row['remote_version'] ?? 'відсутні' }}; manifest {{ $item->path ? basename($item->path) : 'відсутній' }}.</td></tr>
                             @endif
                         @endforeach
                         </tbody>
