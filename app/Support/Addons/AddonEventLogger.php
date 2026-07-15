@@ -3,6 +3,8 @@
 namespace App\Support\Addons;
 
 use App\Models\SystemAddonEvent;
+use App\Support\Addons\Registry\AddonRecoveryHealthCache;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 
 class AddonEventLogger
@@ -47,5 +49,9 @@ class AddonEventLogger
             'message' => $message,
             'context' => $context === [] ? null : $context,
         ]);
+
+        if (str_contains($event, 'recovery') || str_contains($event, 'rollback') || str_contains($event, 'cleanup') || str_contains($event, 'install')) {
+            Cache::forget(AddonRecoveryHealthCache::KEY);
+        }
     }
 }

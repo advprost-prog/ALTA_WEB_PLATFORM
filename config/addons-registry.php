@@ -159,6 +159,14 @@ return [
         'tombstone_path' => 'addons/cleanup-journal/backups',
     ],
 
+    'recovery_health' => [
+        'enabled' => env('ADDONS_REGISTRY_RECOVERY_HEALTH_ENABLED', true),
+        'cache_ttl' => env('ADDONS_REGISTRY_RECOVERY_HEALTH_CACHE_TTL', 60),
+        'stale_after' => env('ADDONS_REGISTRY_RECOVERY_STALE_AFTER', 300),
+        'auto_safe' => env('ADDONS_REGISTRY_RECOVERY_AUTO_SAFE', false),
+        'max_operations' => 100,
+    ],
+
     'live_roots' => [
         'modules_path' => env('ADDONS_REGISTRY_LIVE_MODULES_PATH', base_path('modules')),
         'extensions_path' => env('ADDONS_REGISTRY_LIVE_EXTENSIONS_PATH', base_path('extensions')),
