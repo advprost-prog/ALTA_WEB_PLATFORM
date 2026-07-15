@@ -3,6 +3,8 @@
 namespace App\Support\Addons;
 
 use App\Models\SystemAddon;
+use App\Support\Addons\Providers\AddonProviderException;
+use App\Support\Addons\Providers\AddonProviderResolver;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -11,6 +13,7 @@ class AddonLifecycle
     public function __construct(
         private readonly AddonRegistry $registry,
         private readonly AddonEventLogger $events,
+        private readonly AddonProviderResolver $providers,
     ) {}
 
     public function install(string $code): SystemAddon
@@ -60,7 +63,8 @@ class AddonLifecycle
             }
 
             if ($addon->service_provider && ! $this->serviceProviderIsAllowed($addon)) {
-                $this->fail($addon, 'Service provider is outside the allowed local addon namespace/path.');
+                $diagnostic = $this->serviceProviderDiagnostic($addon) ?? 'provider_not_allowed';
+                $this->fail($addon, "Service provider rejected [{$diagnostic}].");
             }
 
             $addon->forceFill([
@@ -173,17 +177,22 @@ class AddonLifecycle
             return true;
         }
 
-        $path = $this->serviceProviderPath($addon);
+        $diagnostic = $this->serviceProviderDiagnostic($addon);
 
-        if ($path === null) {
-            return false;
+        // A missing source remains an allowed declaration but is never loaded;
+        // AddonManager records it through the existing provider-missing path.
+        return $diagnostic === null || $diagnostic === 'provider_file_missing';
+    }
+
+    public function serviceProviderDiagnostic(SystemAddon $addon): ?string
+    {
+        try {
+            $this->providers->resolve($addon);
+        } catch (AddonProviderException $exception) {
+            return $exception->diagnosticCode;
         }
 
-        $basePath = realpath(base_path()) ?: base_path();
-        $normalizedPath = str_replace('\\', '/', $path);
-        $normalizedBase = str_replace('\\', '/', $basePath);
-
-        return str_starts_with($normalizedPath, $normalizedBase);
+        return null;
     }
 
     public function serviceProviderClassExists(SystemAddon $addon): bool
@@ -192,42 +201,25 @@ class AddonLifecycle
             return true;
         }
 
-        $path = $this->serviceProviderPath($addon);
-
-        if ($path && is_file($path)) {
-            require_once $path;
+        try {
+            return $this->providers->load($addon);
+        } catch (AddonProviderException) {
+            return false;
         }
-
-        return class_exists($addon->service_provider);
     }
 
     public function serviceProviderPath(SystemAddon $addon): ?string
     {
-        $manifest = $addon->metadata['manifest'] ?? [];
-        $provider = $addon->service_provider;
-
-        if (! is_string($provider) || $provider === '') {
+        try {
+            return $this->providers->resolve($addon)->providerFile;
+        } catch (AddonProviderException) {
             return null;
         }
+    }
 
-        $directory = dirname(base_path((string) $addon->manifest_path));
-        $prefix = $addon->type === SystemAddon::TYPE_MODULE
-            ? $this->expectedNamespacePrefix($directory, 'Modules')
-            : $this->expectedNamespacePrefix($directory, 'Extensions');
-
-        if (! str_starts_with($provider, $prefix)) {
-            return null;
-        }
-
-        $relativeClass = substr($provider, strlen($prefix));
-        $relativePath = str_replace('\\', '/', $relativeClass).'.php';
-        $path = $directory.'/src/'.$relativePath;
-
-        if (isset($manifest['service_provider_path']) && is_string($manifest['service_provider_path'])) {
-            $path = $directory.'/'.ltrim($manifest['service_provider_path'], '/');
-        }
-
-        return $path;
+    public function unregisterServiceProvider(string $addonCode): void
+    {
+        $this->providers->unregister($addonCode);
     }
 
     /**
@@ -371,17 +363,17 @@ class AddonLifecycle
         return mb_strimwidth($sanitized, 0, $limit, '...');
     }
 
-    private function expectedNamespacePrefix(string $directory, string $rootNamespace): string
-    {
-        $relative = trim(str_replace('\\', '/', str_replace(base_path(), '', $directory)), '/');
-        $parts = array_slice(explode('/', $relative), 1);
-
-        return $rootNamespace.'\\'.implode('\\', $parts).'\\';
-    }
-
     private function versionSatisfies(string $currentVersion, string $constraint): bool
     {
         $constraint = trim($constraint);
+
+        if (str_contains($constraint, ' ')) {
+            $parts = preg_split('/\s+/', $constraint, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+            return $parts !== [] && collect($parts)->every(
+                fn (string $part): bool => $this->versionSatisfies($currentVersion, $part),
+            );
+        }
 
         if (str_starts_with($constraint, '>=')) {
             return version_compare($currentVersion, trim(substr($constraint, 2)), '>=');

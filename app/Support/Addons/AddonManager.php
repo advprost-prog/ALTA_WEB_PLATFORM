@@ -43,6 +43,7 @@ class AddonManager
     {
         $addon = $this->lifecycle->disable($code);
         $this->hooks->flushAddon($addon->code);
+        $this->lifecycle->unregisterServiceProvider($addon->code);
 
         return $addon;
     }
@@ -51,6 +52,7 @@ class AddonManager
     {
         $addon = $this->lifecycle->uninstall($code);
         $this->hooks->flushAddon($addon->code);
+        $this->lifecycle->unregisterServiceProvider($addon->code);
 
         return $addon;
     }
@@ -59,6 +61,7 @@ class AddonManager
     {
         $addon = $this->lifecycle->remove($code);
         $this->hooks->flushAddon($addon->code);
+        $this->lifecycle->unregisterServiceProvider($addon->code);
 
         return $addon;
     }
@@ -192,8 +195,9 @@ class AddonManager
         }
 
         if (! $this->lifecycle->serviceProviderIsAllowed($addon)) {
-            $this->markRuntimeFailure($addon, 'Service provider is outside the allowed local addon namespace/path.', 'service_provider_blocked', [
+            $this->markRuntimeFailure($addon, 'Service provider package contract was rejected.', 'service_provider_blocked', [
                 'service_provider' => $addon->service_provider,
+                'diagnostic_code' => $this->lifecycle->serviceProviderDiagnostic($addon) ?? 'provider_not_allowed',
             ]);
 
             return false;
@@ -210,6 +214,7 @@ class AddonManager
         try {
             app()->register($addon->service_provider);
         } catch (Throwable $exception) {
+            $this->lifecycle->unregisterServiceProvider($addon->code);
             $this->markRuntimeFailure($addon, 'Addon boot failed: '.$exception->getMessage(), 'service_provider_failed', [
                 'service_provider' => $addon->service_provider,
                 'exception' => $exception::class,

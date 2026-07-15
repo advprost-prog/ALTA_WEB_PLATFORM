@@ -46,10 +46,12 @@ extensions/
       resources/views/
 ```
 
-Service providers, when used, must live under the addon directory and match the local namespace:
+Bundled/internal service providers must live under the addon directory and match the host-derived namespace:
 
 - modules: `Modules\Vendor\ModuleCode\...`
 - extensions: `Extensions\Vendor\ExtensionCode\...`
+
+Trusted standalone Marketplace packages may instead own a stable vendor namespace. They use the same manifest `service_provider` field plus package-local `composer.json` `autoload.psr-4`; no second namespace manifest field is required. See “Standalone package providers” below.
 
 ## Manifest Format
 
@@ -210,11 +212,45 @@ Module manifests may declare `permissions`. Phase 1 stores and exposes enabled a
 - No marketplace downloads, payments, remote install, or package execution are implemented.
 - Manifests cannot contain arbitrary PHP code.
 - No `eval` is used.
-- Service providers must match the addon namespace/path whitelist.
+- Service providers must pass either the bundled namespace/path contract or the standalone package contract.
 - Missing service provider classes are reported, not allowed to crash the app.
 - Runtime boot failures are isolated per addon; they do not crash the application kernel.
 - Disabled addons do not register routes, hooks, menu entries, widgets, or providers.
 - Phase 2 should add checksums/signatures and a separate reviewed marketplace install process.
+
+## Standalone package providers
+
+Standalone packages are active only after the existing verified Marketplace flow promotes them into an approved module or extension live root. Quarantine, staging, backup, recovery and arbitrary filesystem locations are never provider roots. The package stays disabled after install until an explicit enable operation.
+
+Required production metadata is the existing `module.json`/`extension.json` plus `composer.json`. The manifest declares one exact provider FQCN. Composer metadata must contain a syntactically valid package name and a package-owned PSR-4 mapping, for example:
+
+```json
+{
+  "name": "neutral-vendor/audit-tools",
+  "autoload": {
+    "psr-4": {
+      "NeutralVendor\\AuditTools\\": "src/"
+    }
+  }
+}
+```
+
+The host does not run Composer and does not install package dependencies. It ignores `autoload-dev`, scripts and repositories and never executes them. `autoload.files`, classmap and include-path loading are rejected with `package_autoload_unsupported`; package-bundled `vendor/` is not searched or registered.
+
+Resolution is fail-closed:
+
+1. Canonicalize the manifest parent and prove it is below the bundled root or configured active Marketplace root.
+2. Parse `composer.json`, validate the package name and PSR-4 mapping, and reject absolute, drive/UNC, NUL and traversal paths.
+3. Canonicalize every source directory and prove it stays within the package root, including through symlinks.
+4. Reject protected prefixes: `App`, `Modules`, `Extensions`, `Database`, `Tests`, `Illuminate`, `Laravel`, `Filament`, `Livewire`, `Symfony`, `Composer`, `PHPUnit`, `Mockery`, and host dependency roots `Psr`, `GuzzleHttp`, `Monolog`, `League`, `Carbon`, and `Doctrine`.
+5. Select the longest matching PSR-4 prefix, resolve the provider suffix, require exactly one readable regular candidate, and prove it remains below both source and package roots.
+6. Register one package-scoped SPL loader, load only the approved provider, compare its reflection file to the approved canonical file, and require the exact manifest class to be an instantiable Laravel `ServiceProvider`.
+
+Overlapping namespace ownership by active addon loaders fails with `namespace_collision`. Loader registration is keyed by addon code and canonical package root, repeated bootstrap is idempotent, and failed validation/load unregisters its loader. Disable, uninstall and remove unregister the mapping. PHP classes cannot be unloaded: workers and other long-running processes must restart after install, update, enable, disable, uninstall or package replacement before the new runtime state is authoritative. HTTP request processes naturally pick up state on their next bootstrap.
+
+Stable package diagnostics include `package_metadata_missing`, `package_metadata_invalid`, `psr4_missing`, `psr4_path_invalid`, `psr4_path_escape`, `namespace_reserved`, `namespace_collision`, `provider_prefix_mismatch`, `provider_file_missing`, `provider_file_escape`, `provider_file_ambiguous`, `provider_class_invalid`, `provider_reflection_mismatch`, `provider_not_allowed`, and `package_autoload_unsupported`. Operator messages expose the code and package-relative context only; stack traces and unrelated absolute paths are not UI diagnostics.
+
+External repositories must produce a root manifest, package-local source/config/migrations/resources and Composer PSR-4 metadata. They must not rely on fixture namespaces, host `vendor/`, Composer scripts/plugins, absolute host paths or private credentials. Marketplace signature, checksum, review, staging, promotion, rollback and recovery policy remains unchanged by provider loading.
 
 ## Demo Seeding Safety
 

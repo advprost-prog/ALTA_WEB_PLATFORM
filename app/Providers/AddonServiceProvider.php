@@ -7,6 +7,7 @@ use App\Support\Addons\AddonHookRegistry;
 use App\Support\Addons\AddonManager;
 use App\Support\Addons\Marketplace\MarketplaceCatalog;
 use App\Support\Addons\Marketplace\MarketplaceManager;
+use App\Support\Addons\Providers\PackageScopedAutoloadRegistry;
 use App\Support\Addons\Registry\RegistryCatalog;
 use App\Support\Addons\Registry\RegistryClient;
 use Illuminate\Support\Facades\Schema;
@@ -20,6 +21,7 @@ class AddonServiceProvider extends ServiceProvider
         $this->app->singleton(AddonHookRegistry::class);
         $this->app->singleton(MarketplaceCatalog::class);
         $this->app->singleton(MarketplaceManager::class);
+        $this->app->singleton(PackageScopedAutoloadRegistry::class);
 
         $this->app->singleton(RegistryClient::class, fn ($app) => new RegistryClient(config('addons-registry', [])));
         $this->app->singleton(RegistryCatalog::class, fn ($app) => new RegistryCatalog(

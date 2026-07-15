@@ -62,6 +62,14 @@ Only public keys belong in client configuration. Never store a seed, secret key,
 9. Inspect retention with `addons:backups:scan` and `addons:backups:cleanup --dry-run`. Mutation requires `--execute` and protects last-known-good and referenced backups.
 10. Inspect remnants with `addons:cleanup:scan` and `addons:cleanup:run --dry-run`. Unknown, symlinked, or unmanaged evidence is retained.
 
+## Standalone provider operations
+
+Before enabling an external addon, confirm its root `composer.json` has a valid package name and package-owned `autoload.psr-4` mapping to relative, package-local readable directories. The client never runs Composer, Composer scripts/plugins, or package commands and never loads a package `vendor/` tree. `autoload.files`, classmap and include-path mechanisms are unsupported and fail closed.
+
+Provider diagnostics use stable codes documented in `docs/addons.md`. Treat metadata, path escape, reserved namespace, namespace collision, ambiguous source, reflection mismatch and unsupported-autoload diagnostics as blockers; do not rename a package into `App`, `Modules`, `Extensions` or framework namespaces and do not add an addon-specific exception. Only promoted active module/extension roots are executable. Quarantine, staging, backups and recovery data are never loader roots.
+
+Restart queue workers, scheduler workers, Octane/RoadRunner and other long-running PHP processes after addon install, update, enable, disable, uninstall, rollback or package replacement. Unregistering an addon loader cannot unload PHP classes already resident in a process. Verify recovery health and addon diagnostics again after restart.
+
 ## Incidents and manual intervention
 
 Stop mutations for the affected addon, preserve journals and evidence, refresh diagnostics, and record an operator reason. Never force-complete, broadly delete, follow symlinks, or run `migrate:fresh`. A manual-intervention marker blocks new verified install/update until evidence is reconciled. Keep the core application available unless its own integrity is affected.
