@@ -27,6 +27,7 @@ class RollbackAddonPromotion extends Command
                         $line .= ' ['.implode('; ', array_map('strval', (array) $reason['details'])).']';
                     }
                     $this->line('  - '.$line);
+
                     continue;
                 }
 

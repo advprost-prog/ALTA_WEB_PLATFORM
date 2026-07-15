@@ -48,8 +48,8 @@ final class MarketplaceStatus
     public const DOWNLOAD_FAILED = 'failed';
 
     /**
-      * @var array<string, string>
-      */
+     * @var array<string, string>
+     */
     public const LABELS = [
         self::AVAILABLE => 'Доступний',
         self::DISCOVERED => 'Виявлено',

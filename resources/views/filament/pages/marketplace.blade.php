@@ -221,7 +221,7 @@
             @endif
         @endif
 
-        <?php if ($activeTab === 'development'): ?>
+        <?php if ($activeTab === 'development') { ?>
         {{-- Summary --}}
         <div
             class="fi-grid lg:fi-grid-cols"
@@ -920,7 +920,7 @@
             </div>
         @endif
 
-        <?php endif; ?>
+        <?php } ?>
 
         @if ($reviewModalOpen)
             <div role="dialog" aria-modal="true" class="addon-marketplace-review-modal">
