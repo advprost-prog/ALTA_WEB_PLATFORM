@@ -9,10 +9,14 @@ use App\Support\Addons\Marketplace\MarketplaceManager;
 use App\Support\Addons\Marketplace\MarketplaceStatus;
 use App\Support\Addons\Marketplace\UpdateStatus;
 use App\Support\Addons\Registry\AddonLivePathResolver;
+use App\Support\Addons\Registry\AddonOperationalRollbackService;
+use App\Support\Addons\Registry\AddonRecoveryHealthService;
+use App\Support\Addons\Registry\AddonRecoveryService;
 use App\Support\Addons\Registry\ArtifactPromotionStatus;
 use App\Support\Addons\Registry\ArtifactReviewActor;
 use App\Support\Addons\Registry\ArtifactReviewResult;
 use App\Support\Addons\Registry\ArtifactReviewStatus;
+use App\Support\Addons\Registry\RecoveryDataCleanupService;
 use App\Support\Addons\Registry\RegistryCatalog;
 use BackedEnum;
 use Filament\Notifications\Notification;
@@ -74,6 +78,12 @@ class Marketplace extends Page
 
     public bool $promotionModalOpen = false;
 
+    public ?string $manualInterventionReason = null;
+
+    public array $recoveryBackups = [];
+
+    public array $recoveryRemnants = [];
+
     /**
      * @var array<string, mixed>
      */
@@ -81,7 +91,7 @@ class Marketplace extends Page
 
     public function mount(): void
     {
-        //
+        $this->loadRecoveryData();
     }
 
     public function canReviewArtifacts(): bool
@@ -139,7 +149,116 @@ class Marketplace extends Page
             'registryState' => $resolved['registry_state'],
             'registryMeta' => $resolved['registry_meta'],
             'registryHeader' => $resolved['registry_header'],
+            'operationsHealth' => app(AddonRecoveryHealthService::class)->health(),
+            'backupRetention' => $this->recoveryBackups,
+            'staleRemnants' => $this->recoveryRemnants,
         ];
+    }
+
+    public function refreshRecoveryHealth(): void
+    {
+        app(AddonRecoveryHealthService::class)->health(true);
+        $this->loadRecoveryData();
+        Notification::make()->title('Recovery diagnostics refreshed')->success()->send();
+    }
+
+    public function recoveryDryRun(string $operationId): void
+    {
+        $this->guardOperationId($operationId);
+        $plan = app(AddonRecoveryService::class)->plan($operationId);
+        $this->operationNotification('Recovery dry run', $plan);
+    }
+
+    public function runSafeRecovery(string $operationId): void
+    {
+        $this->authorizeOperations();
+        $this->guardOperationId($operationId);
+        $service = app(AddonRecoveryService::class);
+        $assessment = $service->inspect($operationId);
+        $result = $assessment === null ? ['success' => false, 'code' => 'journal_invalid']
+            : $service->recover($operationId, $assessment->fingerprint, ArtifactReviewActor::fromUser(auth()->user()));
+        $this->operationNotification('Recovery', $result);
+    }
+
+    public function markManualIntervention(string $operationId): void
+    {
+        $this->authorizeOperations();
+        $this->guardOperationId($operationId);
+        $result = app(AddonRecoveryService::class)->markManualIntervention($operationId, (string) $this->manualInterventionReason, ArtifactReviewActor::fromUser(auth()->user()));
+        $this->manualInterventionReason = null;
+        $this->operationNotification('Manual intervention', $result);
+    }
+
+    public function rollbackDryRun(string $addonCode, string $operationId): void
+    {
+        $this->guardCode($addonCode);
+        $this->guardOperationId($operationId);
+        $this->operationNotification('Rollback preflight', app(AddonOperationalRollbackService::class)->assess($addonCode, $operationId));
+    }
+
+    public function executeOperationalRollback(string $addonCode, string $operationId): void
+    {
+        $this->authorizeOperations();
+        $this->guardCode($addonCode);
+        $this->guardOperationId($operationId);
+        $service = app(AddonOperationalRollbackService::class);
+        $plan = $service->assess($addonCode, $operationId);
+        $result = ! ($plan['success'] ?? false) ? $plan : $service->rollback($addonCode, $operationId, (string) $plan['fingerprint'], ArtifactReviewActor::fromUser(auth()->user()));
+        $this->operationNotification('Operational rollback', $result);
+    }
+
+    public function cleanupBackup(string $backupId): void
+    {
+        $this->authorizeOperations();
+        $this->guardIdentifier($backupId);
+        $service = app(RecoveryDataCleanupService::class);
+        $item = collect($service->scanBackups())->first(fn ($candidate) => $candidate->backupId === $backupId);
+        $result = $item === null ? ['success' => false, 'code' => 'backup_cleanup_state_changed'] : $service->cleanupBackup($backupId, $item->fingerprint);
+        $this->operationNotification('Backup cleanup', $result);
+    }
+
+    public function cleanupStaleItem(string $identifier): void
+    {
+        $this->authorizeOperations();
+        if (! preg_match('/^[a-f0-9]{64}$/', $identifier)) {
+            throw new RuntimeException('Invalid stale item identifier.');
+        }
+        $service = app(RecoveryDataCleanupService::class);
+        $item = collect($service->scanRemnants())->first(fn ($candidate) => $candidate->identifier === $identifier);
+        $result = $item === null ? ['success' => false, 'code' => 'stale_item_state_changed'] : $service->cleanupRemnant($identifier, $item->fingerprint);
+        $this->operationNotification('Stale cleanup', $result);
+    }
+
+    private function authorizeOperations(): void
+    {
+        abort_unless(Gate::allows('promote-addon-artifacts'), 403);
+    }
+
+    private function guardOperationId(string $id): void
+    {
+        if (! preg_match('/^[0-9a-f-]{36}$/i', $id)) {
+            throw new RuntimeException('Invalid operation identifier.');
+        }
+    }
+
+    private function guardIdentifier(string $id): void
+    {
+        if ($id === '' || strlen($id) > 160 || preg_match('/[\\\/\x00-\x1F]/', $id)) {
+            throw new RuntimeException('Invalid backup identifier.');
+        }
+    }
+
+    private function operationNotification(string $title, array $result): void
+    {
+        $success = (bool) ($result['success'] ?? false);
+        Notification::make()->title($title)->body((string) ($result['code'] ?? 'operation_failed'))->color($success ? 'success' : 'warning')->send();
+    }
+
+    private function loadRecoveryData(): void
+    {
+        $cleanup = app(RecoveryDataCleanupService::class);
+        $this->recoveryBackups = array_map(fn ($item) => $item->toArray(), $cleanup->scanBackups());
+        $this->recoveryRemnants = array_map(fn ($item) => $item->toArray(), $cleanup->scanRemnants());
     }
 
     public function openPromoteArtifactModal(string $code): void

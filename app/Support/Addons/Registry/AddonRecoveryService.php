@@ -121,6 +121,44 @@ final class AddonRecoveryService
         ];
     }
 
+    public function markManualIntervention(string $operationId, string $reason, ArtifactReviewActor $actor): array
+    {
+        $reason = trim($reason);
+        $assessment = $this->inspect($operationId);
+        if ($assessment === null || $reason === '' || mb_strlen($reason) > 500) {
+            return $this->result(false, 'manual_intervention_invalid', 'A valid operation and reason are required.');
+        }
+        $lock = Cache::lock('addon-install-operation:'.$assessment->code, 60);
+        if (! $lock->get()) {
+            return $this->result(false, 'recovery_operation_active', 'Another addon mutation is active.');
+        }
+        try {
+            $current = $this->inspect($operationId);
+            if ($current === null || ! hash_equals($assessment->fingerprint, $current->fingerprint)) {
+                return $this->result(false, 'recovery_state_changed', 'Recovery evidence changed after inspection.');
+            }
+            $journal = [
+                'schema_version' => 1,
+                'recovery_id' => (string) Str::uuid(),
+                'source_operation_id' => $operationId,
+                'code' => $current->code,
+                'classification' => $current->classification,
+                'evidence_fingerprint' => $current->fingerprint,
+                'state' => 'manual_intervention_required',
+                'actor' => $actor->toArray(),
+                'reason' => $reason,
+                'started_at' => now()->toIso8601String(),
+                'finished_at' => now()->toIso8601String(),
+            ];
+            Storage::disk('addons')->put('addons/recovery-journal/'.$current->code.'/'.$journal['recovery_id'].'.json', json_encode($journal, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            $this->events->warning($this->eventAddonCode($current->code), 'manual_intervention_marked', 'Addon operation marked for manual intervention.', $this->audit($journal));
+
+            return $this->result(true, 'manual_intervention_marked', 'Operation evidence was preserved for manual intervention.');
+        } finally {
+            $lock->release();
+        }
+    }
+
     public function classifyEvidence(array $evidence): array
     {
         $state = (string) ($evidence['journal_state'] ?? 'invalid');

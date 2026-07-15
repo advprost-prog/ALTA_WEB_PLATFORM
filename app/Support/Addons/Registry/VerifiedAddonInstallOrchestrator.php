@@ -29,6 +29,9 @@ final class VerifiedAddonInstallOrchestrator
         $operationId = (string) Str::uuid();
         $before = $this->registry->find($code);
         $type = $before?->is_installed ? 'update' : 'install';
+        if ($this->requiresManualIntervention($code)) {
+            return $this->failure($code, null, $operationId, $type, 'manual_intervention_required', ['The addon has unresolved manual recovery evidence.']);
+        }
         $lock = Cache::lock('addon-install-operation:'.$code, 60);
         if (! $lock->get()) {
             return $this->failure($code, null, $operationId, $type, 'operation_locked', ['Another addon operation is active.']);
@@ -144,6 +147,18 @@ final class VerifiedAddonInstallOrchestrator
         } finally {
             $lock->release();
         }
+    }
+
+    private function requiresManualIntervention(string $code): bool
+    {
+        foreach (Storage::disk('addons')->allFiles('addons/recovery-journal/'.$code) as $path) {
+            $journal = json_decode((string) Storage::disk('addons')->get($path), true);
+            if (is_array($journal) && ($journal['state'] ?? null) === 'manual_intervention_required') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function compensate(array $journal, string $code, string $type, ?array $snapshot, ?ArtifactPromotionResult $promotion, ArtifactReviewActor $actor, string $failureCode, array $diagnostics): VerifiedAddonInstallResult

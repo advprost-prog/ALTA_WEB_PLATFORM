@@ -13,6 +13,7 @@ final class AddonRecoveryHealthService
     public function __construct(
         private readonly AddonRecoveryService $recovery,
         private readonly RecoveryDataCleanupService $cleanup,
+        private readonly AddonOperationalRollbackService $rollback,
     ) {}
 
     public function health(bool $refresh = false): array
@@ -31,15 +32,17 @@ final class AddonRecoveryHealthService
     private function build(array $policy): array
     {
         $assessments = array_slice($this->recovery->scan(), 0, $policy['max']);
+        $journalDebt = $this->journalDebt($policy['max']);
         $items = [];
         $automatic = $manual = $active = $corrupt = 0;
         $oldest = null;
         foreach ($assessments as $assessment) {
             $updatedAt = $this->operationUpdatedAt($assessment->operationId);
             $age = $updatedAt === null ? null : max(0, time() - $updatedAt);
-            $isActive = $age !== null && $age < $policy['stale'];
-            $isManual = ! $assessment->automaticEligible && ! $isActive;
-            $automatic += (int) ($assessment->automaticEligible && ! $isActive);
+            $markedManual = isset($journalDebt['manual_sources'][$assessment->operationId]);
+            $isActive = ! $markedManual && $age !== null && $age < $policy['stale'];
+            $isManual = $markedManual || (! $assessment->automaticEligible && ! $isActive);
+            $automatic += (int) ($assessment->automaticEligible && ! $isActive && ! $isManual);
             $manual += (int) $isManual;
             $active += (int) $isActive;
             $corrupt += (int) ($assessment->backupEvidence->existence === 'present' && $assessment->backupEvidence->integrity !== 'verified');
@@ -51,7 +54,7 @@ final class AddonRecoveryHealthService
                 'operation_type' => $assessment->operationType,
                 'state' => $isActive ? 'active' : ($isManual ? 'manual_intervention_required' : 'unresolved'),
                 'classification' => $assessment->classification,
-                'automatic' => $assessment->automaticEligible && ! $isActive,
+                'automatic' => $assessment->automaticEligible && ! $isActive && ! $isManual,
                 'proposed_action' => $assessment->proposedAction,
                 'integrity' => [
                     'live' => $assessment->liveEvidence->integrity,
@@ -63,11 +66,21 @@ final class AddonRecoveryHealthService
                 'diagnostic' => $isActive ? 'recovery_operation_active' : ($isManual ? 'recovery_manual_intervention_required' : 'recovery_safe_action_available'),
             ];
         }
+        foreach ($journalDebt['standalone'] as $debt) {
+            if (count($items) >= $policy['max'] || collect($items)->contains(fn (array $item): bool => $item['operation_id'] === $debt['operation_id'] || $item['operation_id'] === $debt['source_operation_id'])) {
+                continue;
+            }
+            $items[] = $debt;
+            $manual += (int) ($debt['state'] === 'manual_intervention_required');
+            $active += (int) ($debt['state'] === 'active');
+            $oldest = $debt['age_seconds'] === null ? $oldest : max($oldest ?? 0, $debt['age_seconds']);
+        }
         usort($items, fn (array $a, array $b): int => strcmp($a['addon_code'], $b['addon_code']) ?: strcmp($a['operation_id'], $b['operation_id']));
         $cleanupPending = count(array_filter($this->cleanup->scanBackups(), fn ($backup): bool => $backup->backupStatus === 'cleanup_pending'));
         $status = $manual > 0 || $corrupt > 0 ? 'manual_intervention_required' : (($items !== [] || $cleanupPending > 0) ? 'degraded' : 'healthy');
         $codes = array_values(array_unique(array_column($items, 'addon_code')));
         sort($codes);
+        $rollbackCandidates = $this->rollbackCandidates($policy['max']);
 
         return [
             'status' => $status,
@@ -83,8 +96,75 @@ final class AddonRecoveryHealthService
             'affected_addon_codes' => $codes,
             'diagnostic_codes' => array_values(array_unique(array_column($items, 'diagnostic'))),
             'items' => $items,
+            'rollback_candidates' => $rollbackCandidates,
             'truncated' => count($assessments) >= $policy['max'],
         ];
+    }
+
+    private function journalDebt(int $limit): array
+    {
+        $manualSources = [];
+        $standalone = [];
+        foreach (['addons/recovery-journal' => 'recovery', 'addons/rollback-journal' => 'rollback'] as $root => $type) {
+            foreach (array_slice(Storage::disk('addons')->allFiles($root), 0, $limit) as $path) {
+                $journal = json_decode((string) Storage::disk('addons')->get($path), true);
+                if (! is_array($journal)) {
+                    continue;
+                }
+                $state = (string) ($journal['state'] ?? 'unknown');
+                if (in_array($state, ['completed', 'compensated_to_current', 'reconciled'], true)) {
+                    continue;
+                }
+                $id = $journal[$type === 'recovery' ? 'recovery_id' : 'rollback_id'] ?? null;
+                $source = $journal['source_operation_id'] ?? null;
+                if (! is_string($id) || ! is_string($journal['code'] ?? null)) {
+                    continue;
+                }
+                if ($state === 'manual_intervention_required' && is_string($source)) {
+                    $manualSources[$source] = true;
+                }
+                $time = is_string($journal['finished_at'] ?? $journal['started_at'] ?? null) ? strtotime($journal['finished_at'] ?? $journal['started_at']) : false;
+                $age = $time === false ? null : max(0, time() - $time);
+                $standalone[] = [
+                    'operation' => substr($id, 0, 8), 'operation_id' => $id, 'addon_code' => $journal['code'],
+                    'source_operation_id' => is_string($source) ? $source : null,
+                    'operation_type' => $type, 'state' => $state === 'manual_intervention_required' ? $state : 'active',
+                    'classification' => $journal['classification'] ?? $state, 'automatic' => false,
+                    'proposed_action' => 'manual_intervention',
+                    'integrity' => ['live' => 'not_verifiable', 'backup' => 'not_verifiable', 'candidate' => 'not_verifiable', 'staging' => 'not_verifiable'],
+                    'age_seconds' => $age,
+                    'diagnostic' => $state === 'manual_intervention_required' ? 'recovery_manual_intervention_required' : $type.'_operation_active',
+                ];
+            }
+        }
+
+        return ['manual_sources' => $manualSources, 'standalone' => $standalone];
+    }
+
+    private function rollbackCandidates(int $limit): array
+    {
+        $rows = [];
+        foreach (array_slice(Storage::disk('addons')->allFiles('addons/install-journal'), 0, $limit) as $path) {
+            $journal = json_decode((string) Storage::disk('addons')->get($path), true);
+            if (! is_array($journal) || ($journal['state'] ?? null) !== 'completed' || ($journal['operation_type'] ?? null) !== 'update'
+                || ! is_string($journal['operation_id'] ?? null) || ! is_string($journal['code'] ?? null)) {
+                continue;
+            }
+            $plan = $this->rollback->assess($journal['code'], $journal['operation_id']);
+            $rows[] = [
+                'operation' => substr($journal['operation_id'], 0, 8),
+                'operation_id' => $journal['operation_id'],
+                'addon_code' => $journal['code'],
+                'current_version' => $plan['current_version'] ?? $journal['target_version'] ?? null,
+                'target_version' => $plan['target_version'] ?? $journal['previous_version'] ?? null,
+                'eligible' => (bool) ($plan['success'] ?? false),
+                'code' => $plan['code'] ?? 'rollback_source_not_eligible',
+                'blocking' => $plan['blocking'] ?? [],
+            ];
+        }
+        usort($rows, fn (array $a, array $b): int => strcmp($a['addon_code'], $b['addon_code']) ?: strcmp($a['operation_id'], $b['operation_id']));
+
+        return $rows;
     }
 
     private function operationUpdatedAt(string $id): ?int
@@ -141,6 +221,6 @@ final class AddonRecoveryHealthService
             'manual_intervention_count' => 0, 'active_operation_count' => 0, 'corrupt_backup_count' => 0,
             'cleanup_pending_count' => 0, 'oldest_unresolved_age_seconds' => null, 'last_successful_recovery_at' => null,
             'last_operation_failure' => null, 'affected_addon_codes' => [], 'diagnostic_codes' => ['recovery_health_config_invalid'],
-            'items' => [], 'truncated' => false];
+            'items' => [], 'rollback_candidates' => [], 'truncated' => false];
     }
 }
