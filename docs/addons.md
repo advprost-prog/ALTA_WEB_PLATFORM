@@ -260,6 +260,16 @@ External repositories must produce a root manifest, package-local source/config/
 - Outside those conditions demo seeding is skipped with an explicit console warning.
 - Demo skeleton addon files in `modules/Demo/...` and `extensions/Demo/...` stay in repository for discovery/tests.
 
+### Portable Backup & Restore integration gate
+
+The generic external-package tests are self-contained. The real Backup & Restore addon lifecycle gate is opt-in because its source repository may be private or unavailable in public CI. Run it locally with a validated standalone addon checkout:
+
+```bash
+ALTA_BACKUP_RESTORE_ADDON_PATH=/path/to/alta-addon-backup-restore php artisan test --filter=ExternalAddonPackageLifecycleTest
+```
+
+The supplied root must match addon ID `alta.backup-restore`, provider `Alta\BackupRestore\BackupRestoreServiceProvider`, and the package PSR-4 contract. The test canonicalizes and reads only the required package files, copies them into isolated test storage, uses the PHPUnit in-memory SQLite database, and removes the copy and runtime state afterward. When the variable is absent, only the real-addon case skips with a clear reason; generic package coverage continues to run.
+
 Operational note:
 
 - Marketplace and remote package install are not implemented in Phase 1.

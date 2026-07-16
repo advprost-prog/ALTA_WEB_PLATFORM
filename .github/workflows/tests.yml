@@ -1,0 +1,46 @@
+name: PHP tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_ENV: testing
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      CACHE_STORE: array
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      MAIL_MAILER: array
+      QUEUE_CONNECTION: sync
+      SESSION_DRIVER: array
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, pdo_sqlite, sqlite3, zip, sodium
+          coverage: none
+          tools: composer:v2
+      - name: Validate Composer metadata
+        run: composer validate --no-check-publish
+      - name: Install dependencies safely
+        run: composer install --no-interaction --no-progress --prefer-dist --no-scripts
+      - name: Prepare disposable Laravel environment
+        run: |
+          cp .env.example .env
+          mkdir -p bootstrap/cache storage/framework/{cache,sessions,views} storage/logs
+          php artisan config:clear
+      - name: Check PHP formatting
+        run: vendor/bin/pint --test
+      - name: Run PHP tests
+        run: php artisan test
