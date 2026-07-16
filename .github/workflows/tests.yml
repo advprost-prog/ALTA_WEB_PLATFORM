@@ -16,6 +16,7 @@ jobs:
     env:
       APP_ENV: testing
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      ADDONS_MARKETPLACE_SHOW_DEVELOPMENT: 'true'
       CACHE_STORE: array
       DB_CONNECTION: sqlite
       DB_DATABASE: ':memory:'
