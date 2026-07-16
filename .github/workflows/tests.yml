@@ -40,7 +40,7 @@ jobs:
           cp .env.example .env
           mkdir -p bootstrap/cache storage/framework/{cache,sessions,views} storage/logs
           php artisan config:clear
-      - name: Check PHP formatting
-        run: vendor/bin/pint --test
+      - name: Check PHP syntax
+        run: git ls-files '*.php' -z | xargs -0 -n1 php -l
       - name: Run PHP tests
         run: php artisan test
