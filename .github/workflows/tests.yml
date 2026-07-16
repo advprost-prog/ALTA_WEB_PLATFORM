@@ -40,6 +40,18 @@ jobs:
           cp .env.example .env
           mkdir -p bootstrap/cache storage/framework/{cache,sessions,views} storage/logs
           php artisan config:clear
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install locked frontend dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build disposable Vite assets
+        run: npm run build
+      - name: Verify Vite manifest
+        run: test -r public/build/manifest.json
       - name: Check PHP syntax
         run: git ls-files '*.php' -z | xargs -0 -n1 php -l
       - name: Run PHP tests
