@@ -155,12 +155,16 @@ return new class extends Migration
             }
         });
 
-        DB::table('products')
-            ->whereNull('status')
-            ->orWhere('status', '')
-            ->update([
-                'status' => DB::raw("CASE WHEN is_active = 1 THEN 'active' ELSE 'draft' END"),
-            ]);
+        $productsWithoutStatus = DB::table('products')
+            ->where(fn ($query) => $query
+                ->whereNull('status')
+                ->orWhere('status', ''));
+
+        (clone $productsWithoutStatus)
+            ->where('is_active', true)
+            ->update(['status' => 'active']);
+
+        $productsWithoutStatus->update(['status' => 'draft']);
     }
 
     private function createProductVariantsTable(): void

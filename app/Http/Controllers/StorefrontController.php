@@ -11,6 +11,7 @@ use App\Models\Product;
 use App\Models\Promotion;
 use App\Services\Commerce\CheckoutService;
 use App\Services\Commerce\ProductPricingService;
+use App\Support\Database\PortableTextSearch;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -21,6 +22,7 @@ use RuntimeException;
 class StorefrontController extends Controller
 {
     private const CHECKOUT_TOKEN_SESSION_KEY = 'storefront_checkout_token';
+
     private const CHECKOUT_PROCESSING_TOKEN_SESSION_KEY = 'storefront_checkout_processing_token';
 
     public function __construct(
@@ -36,18 +38,19 @@ class StorefrontController extends Controller
             ->withCount(['products' => fn ($query) => $query->active()])
             ->orderBy('sort_order')
             ->orderBy('name')
+            ->orderBy('id')
             ->get();
 
         return view('storefront.home', [
-            'heroBanner' => Banner::active()->where('placement', 'home_hero')->orderBy('sort_order')->first(),
-            'promoBanners' => Banner::active()->where('placement', 'home_promo')->orderBy('sort_order')->take(2)->get(),
+            'heroBanner' => Banner::active()->where('placement', 'home_hero')->orderBy('sort_order')->orderBy('id')->first(),
+            'promoBanners' => Banner::active()->where('placement', 'home_promo')->orderBy('sort_order')->orderBy('id')->take(2)->get(),
             'categories' => Category::buildHierarchy($categories)->take(8),
-            'featuredProducts' => Product::active()->featured()->with($productRelations)->latest()->take(8)->get(),
-            'saleProducts' => Product::active()->where('is_sale', true)->with($productRelations)->latest()->take(4)->get(),
-            'newProducts' => Product::active()->where('is_new', true)->with($productRelations)->latest()->take(4)->get(),
-            'hitProducts' => Product::active()->where('is_hit', true)->with($productRelations)->latest()->take(4)->get(),
-            'brands' => Brand::active()->withCount(['products' => fn ($query) => $query->active()])->orderBy('name')->take(8)->get(),
-            'promotions' => Promotion::active()->orderBy('sort_order')->take(3)->get(),
+            'featuredProducts' => Product::active()->featured()->with($productRelations)->latest()->orderByDesc('id')->take(8)->get(),
+            'saleProducts' => Product::active()->where('is_sale', true)->with($productRelations)->latest()->orderByDesc('id')->take(4)->get(),
+            'newProducts' => Product::active()->where('is_new', true)->with($productRelations)->latest()->orderByDesc('id')->take(4)->get(),
+            'hitProducts' => Product::active()->where('is_hit', true)->with($productRelations)->latest()->orderByDesc('id')->take(4)->get(),
+            'brands' => Brand::active()->withCount(['products' => fn ($query) => $query->active()])->orderBy('name')->orderBy('id')->take(8)->get(),
+            'promotions' => Promotion::active()->orderBy('sort_order')->orderBy('id')->take(3)->get(),
         ]);
     }
 
@@ -57,13 +60,13 @@ class StorefrontController extends Controller
             ->paginate(12)
             ->withQueryString();
 
-        $categories = Category::active()->orderBy('sort_order')->orderBy('name')->get();
+        $categories = Category::active()->orderBy('sort_order')->orderBy('name')->orderBy('id')->get();
 
         return view('storefront.catalog', [
             'products' => $products,
             'categories' => Category::buildHierarchy($categories),
-            'brands' => Brand::active()->orderBy('name')->get(),
-            'catalogBanner' => Banner::active()->where('placement', 'catalog_top')->orderBy('sort_order')->first(),
+            'brands' => Brand::active()->orderBy('name')->orderBy('id')->get(),
+            'catalogBanner' => Banner::active()->where('placement', 'catalog_top')->orderBy('sort_order')->orderBy('id')->first(),
         ]);
     }
 
@@ -71,7 +74,7 @@ class StorefrontController extends Controller
     {
         abort_unless($category->is_active, 404);
 
-        $categories = Category::active()->orderBy('sort_order')->orderBy('name')->get();
+        $categories = Category::active()->orderBy('sort_order')->orderBy('name')->orderBy('id')->get();
 
         return view('storefront.category', [
             'category' => $category->load(['children', 'parent.parent']),
@@ -80,7 +83,7 @@ class StorefrontController extends Controller
                 ->paginate(12)
                 ->withQueryString(),
             'categories' => Category::buildHierarchy($categories),
-            'brands' => Brand::active()->orderBy('name')->get(),
+            'brands' => Brand::active()->orderBy('name')->orderBy('id')->get(),
         ]);
     }
 
@@ -99,6 +102,7 @@ class StorefrontController extends Controller
                 ->where('category_id', $product->category_id)
                 ->whereKeyNot($product->getKey())
                 ->with($this->checkoutService->productRelations())
+                ->orderBy('id')
                 ->take(4)
                 ->get(),
         ]);
@@ -299,10 +303,11 @@ class StorefrontController extends Controller
 
         $query = Product::active()
             ->with($this->checkoutService->productRelations())
-            ->when($search !== '', fn (Builder $query) => $query->where(fn (Builder $query) => $query
-                ->where('name', 'like', '%'.$search.'%')
-                ->orWhere('sku', 'like', '%'.$search.'%')
-                ->orWhere('short_description', 'like', '%'.$search.'%')))
+            ->when($search !== '', fn (Builder $query) => PortableTextSearch::apply(
+                $query,
+                ['name', 'sku', 'short_description'],
+                $search,
+            ))
             ->when($allowCategoryFilter && $request->filled('category'), fn (Builder $query) => $query->whereRelation('category', 'slug', (string) $request->input('category')))
             ->when($request->filled('brand'), fn (Builder $query) => $query->whereRelation('brand', 'slug', (string) $request->input('brand')))
             ->when($request->boolean('sale'), fn (Builder $query) => $query->where('is_sale', true))
@@ -312,10 +317,10 @@ class StorefrontController extends Controller
         $this->applyStockFilter($query, $request);
 
         match ($request->input('sort', 'new')) {
-            'cheap' => $query->orderBy('price')->orderByDesc('created_at'),
-            'expensive' => $query->orderByDesc('price')->orderByDesc('created_at'),
-            'popular' => $query->orderByDesc('is_hit')->orderByDesc('is_sale')->orderByDesc('created_at'),
-            default => $query->latest(),
+            'cheap' => $query->orderBy('price')->orderByDesc('created_at')->orderByDesc('id'),
+            'expensive' => $query->orderByDesc('price')->orderByDesc('created_at')->orderByDesc('id'),
+            'popular' => $query->orderByDesc('is_hit')->orderByDesc('is_sale')->orderByDesc('created_at')->orderByDesc('id'),
+            default => $query->latest()->orderByDesc('id'),
         };
 
         return $query;
