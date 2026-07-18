@@ -450,7 +450,7 @@ class CommerceHealthCheck extends Command
             ->select('product_id', DB::raw('COUNT(*) as defaults_count'))
             ->where('is_default', true)
             ->groupBy('product_id')
-            ->having('defaults_count', '>', 1)
+            ->havingRaw('COUNT(*) > 1')
             ->limit(20)
             ->get();
 

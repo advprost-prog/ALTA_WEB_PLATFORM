@@ -15,7 +15,7 @@ class PostgreSqlAcceptanceTest extends TestCase
 
     public function test_server_schema_timezone_collation_and_extensions_match_pg_h2_contract(): void
     {
-        $version = DB::selectOne('select current_setting(\'server_version\') as value')->value;
+        $version = (int) DB::selectOne('select current_setting(\'server_version_num\') as value')->value;
         $encoding = DB::selectOne('select current_setting(\'server_encoding\') as value')->value;
         $timezone = DB::selectOne("select current_setting('TimeZone') as value")->value;
         $extensions = DB::table('pg_extension')->orderBy('extname')->pluck('extname')->all();
@@ -24,7 +24,7 @@ class PostgreSqlAcceptanceTest extends TestCase
             ->where('collname', 'like', 'uk%')
             ->pluck('collname');
 
-        $this->assertTrue(version_compare($version, '18.4', '>='), "Unexpected PostgreSQL server: {$version}");
+        $this->assertGreaterThanOrEqual(180004, $version, "Unexpected PostgreSQL server version number: {$version}");
         $this->assertSame('UTF8', $encoding);
         $this->assertContains(strtoupper($timezone), ['UTC', 'ETC/UTC']);
         $this->assertSame(['plpgsql'], $extensions);
@@ -56,6 +56,26 @@ class PostgreSqlAcceptanceTest extends TestCase
         $this->assertGreaterThanOrEqual(31, $uniqueConstraints);
         $this->assertGreaterThanOrEqual(128, $indexes);
         $this->assertGreaterThan(20, $sequenceBackedIds);
+    }
+
+    public function test_database_cache_session_and_queue_tables_support_runtime_records(): void
+    {
+        $now = now()->timestamp;
+        $records = [
+            'cache' => ['key' => 'pg-h2-cache', 'value' => 'serialized-value', 'expiration' => $now + 60],
+            'cache_locks' => ['key' => 'pg-h2-lock', 'owner' => 'acceptance', 'expiration' => $now + 30],
+            'sessions' => ['id' => 'pg-h2-session', 'user_id' => null, 'ip_address' => '127.0.0.1', 'user_agent' => 'PG-H2', 'payload' => 'session-payload', 'last_activity' => $now],
+            'jobs' => ['queue' => 'pg-h2', 'payload' => '{"job":"unicode-черга"}', 'attempts' => 0, 'reserved_at' => null, 'available_at' => $now, 'created_at' => $now],
+            'failed_jobs' => ['uuid' => 'pg-h2-failed-job', 'connection' => 'database', 'queue' => 'pg-h2', 'payload' => '{}', 'exception' => 'acceptance fixture'],
+            'job_batches' => ['id' => 'pg-h2-batch', 'name' => 'Acceptance batch', 'total_jobs' => 1, 'pending_jobs' => 1, 'failed_jobs' => 0, 'failed_job_ids' => '[]', 'options' => '{"ключ":"значення"}', 'cancelled_at' => null, 'created_at' => $now, 'finished_at' => null],
+        ];
+
+        foreach ($records as $table => $record) {
+            DB::table($table)->insert($record);
+            $this->assertSame(1, DB::table($table)->count(), "{$table} record was not readable.");
+            $this->assertSame(1, DB::table($table)->delete(), "{$table} record was not deleted.");
+            $this->assertSame(0, DB::table($table)->count(), "{$table} cleanup was incomplete.");
+        }
     }
 
     public function test_last_host_migration_rolls_back_and_reapplies_without_manual_sql(): void

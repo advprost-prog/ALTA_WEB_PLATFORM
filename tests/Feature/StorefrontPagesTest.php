@@ -69,6 +69,13 @@ class StorefrontPagesTest extends TestCase
             'slug' => 'literal-underscore',
             'sku' => 'UNDERSCORE-1',
         ]);
+        $escape = $this->createProduct([
+            'category' => $category,
+            'brand' => $brand,
+            'name' => 'Filter!literal',
+            'slug' => 'literal-escape',
+            'sku' => 'ESCAPE-1',
+        ]);
         $ordinary = $this->createProduct([
             'category' => $category,
             'brand' => $brand,
@@ -83,6 +90,10 @@ class StorefrontPagesTest extends TestCase
 
         $this->get(route('catalog', ['q' => '_']))
             ->assertSee($underscore->name)
+            ->assertDontSee($ordinary->name);
+
+        $this->get(route('catalog', ['q' => '!']))
+            ->assertSee($escape->name)
             ->assertDontSee($ordinary->name);
     }
 

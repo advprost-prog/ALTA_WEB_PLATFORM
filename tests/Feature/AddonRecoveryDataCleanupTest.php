@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Support\Addons\Registry\BackupIntegrityService;
 use App\Support\Addons\Registry\RecoveryDataCleanupService;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -26,6 +28,16 @@ final class AddonRecoveryDataCleanupTest extends TestCase
             'addons-registry.cleanup.stale_after' => 60,
             'addons-registry.cleanup.tombstone_path' => 'addons/cleanup-journal/backups',
         ]);
+
+        if (Schema::hasTable('system_addons')) {
+            DB::table('system_addons')->insertOrIgnore([
+                'code' => 'alta.cleanup',
+                'type' => 'module',
+                'name' => 'Cleanup fixture',
+                'updated_at' => now(),
+                'created_at' => now(),
+            ]);
+        }
     }
 
     public function test_retention_is_deterministic_and_cleanup_preserves_tombstone(): void

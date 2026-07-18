@@ -139,7 +139,16 @@ jobs:
         shell: bash
         run: |
           docker exec "$PG_CONTAINER" psql -U "$DB_USERNAME" -d "$DB_DATABASE" -Atqc \
-            "select count(*) from migrations;"
+            "select 'server_version=' || current_setting('server_version'),
+                    'server_version_num=' || current_setting('server_version_num'),
+                    'encoding=' || current_setting('server_encoding'),
+                    'timezone=' || current_setting('TimeZone'),
+                    'schema=' || current_schema(),
+                    'extensions=' || coalesce(string_agg(extname, ',' order by extname), 'none')
+             from pg_extension;
+             select 'ukrainian_icu=' || string_agg(collname, ',' order by collname)
+             from (select collname from pg_collation where collprovider = 'i' and collname like 'uk%' order by collname limit 10) collations;
+             select 'migrations=' || count(*) from migrations;"
           test ! -e database/database.sqlite-wal
           test ! -e database/database.sqlite-shm
       - name: Cleanup disposable PostgreSQL
@@ -148,3 +157,5 @@ jobs:
         run: |
           docker rm --force "$PG_CONTAINER" >/dev/null 2>&1 || true
           docker volume rm --force "$PG_VOLUME" >/dev/null 2>&1 || true
+          test -z "$(docker ps --all --filter "name=^/${PG_CONTAINER}$" --format '{{.ID}}')"
+          test -z "$(docker volume ls --filter "name=^${PG_VOLUME}$" --format '{{.Name}}')"
