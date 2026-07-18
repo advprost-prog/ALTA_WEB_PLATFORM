@@ -4,6 +4,7 @@ namespace Tests\PostgreSQL;
 
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -55,6 +56,27 @@ class PostgreSqlAcceptanceTest extends TestCase
         $this->assertGreaterThanOrEqual(31, $uniqueConstraints);
         $this->assertGreaterThanOrEqual(128, $indexes);
         $this->assertGreaterThan(20, $sequenceBackedIds);
+    }
+
+    public function test_last_host_migration_rolls_back_and_reapplies_without_manual_sql(): void
+    {
+        $this->assertSame(0, Artisan::call('migrate:rollback', [
+            '--step' => 1,
+            '--force' => true,
+            '--no-interaction' => true,
+        ]));
+        $this->assertFalse(DB::getSchemaBuilder()->hasTable('system_addons'));
+        $this->assertFalse(DB::getSchemaBuilder()->hasTable('system_addon_settings'));
+        $this->assertFalse(DB::getSchemaBuilder()->hasTable('system_addon_events'));
+
+        $this->assertSame(0, Artisan::call('migrate', [
+            '--force' => true,
+            '--no-interaction' => true,
+        ]));
+        $this->assertTrue(DB::getSchemaBuilder()->hasTable('system_addons'));
+        $this->assertTrue(DB::getSchemaBuilder()->hasTable('system_addon_settings'));
+        $this->assertTrue(DB::getSchemaBuilder()->hasTable('system_addon_events'));
+        $this->assertSame(26, DB::table('migrations')->count());
     }
 
     public function test_postgresql_rejects_invalid_boolean_and_foreign_key_values(): void
