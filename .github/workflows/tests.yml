@@ -57,3 +57,91 @@ jobs:
         run: git ls-files '*.php' -z | xargs -0 -n1 php -l
       - name: Run PHP tests
         run: php artisan test
+
+  postgresql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      APP_ENV: testing
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      ADDONS_MARKETPLACE_SHOW_DEVELOPMENT: 'true'
+      DB_HOST: 127.0.0.1
+      DB_PORT: '55432'
+      DB_DATABASE: alta_pg_h2_ci
+      DB_USERNAME: alta_pg_h2
+      DB_SSLMODE: disable
+      PG_CONTAINER: alta-pg-h2-${{ github.run_id }}-${{ github.run_attempt }}
+      PG_VOLUME: alta-pg-h2-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate and mask disposable credential
+        shell: bash
+        run: |
+          secret="$(php -r 'echo bin2hex(random_bytes(32));')"
+          echo "::add-mask::$secret"
+          echo "PG_H2_PASSWORD=$secret" >> "$GITHUB_ENV"
+      - name: Start PostgreSQL 18.4
+        shell: bash
+        run: |
+          docker volume create "$PG_VOLUME" >/dev/null
+          docker run --detach --name "$PG_CONTAINER" \
+            --publish 127.0.0.1:55432:5432 \
+            --mount "type=volume,source=$PG_VOLUME,target=/var/lib/postgresql" \
+            --env POSTGRES_DB="$DB_DATABASE" \
+            --env POSTGRES_USER="$DB_USERNAME" \
+            --env POSTGRES_PASSWORD \
+            --env TZ=UTC \
+            postgres:18.4 >/dev/null
+          for attempt in $(seq 1 60); do
+            if docker exec "$PG_CONTAINER" pg_isready -U "$DB_USERNAME" -d "$DB_DATABASE" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Verify PostgreSQL server and client floor
+        shell: bash
+        run: |
+          test "$(docker exec "$PG_CONTAINER" psql --version | awk '{print $3}' | cut -d. -f1)" = 18
+          docker exec "$PG_CONTAINER" psql -U "$DB_USERNAME" -d "$DB_DATABASE" -Atqc \
+            "select current_setting('server_version_num')::int >= 180004;" | grep -qx t
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, pdo_pgsql, zip, sodium
+          coverage: none
+          tools: composer:v2
+      - name: Install dependencies safely
+        run: composer install --no-interaction --no-progress --prefer-dist --no-scripts
+      - name: Prepare disposable Laravel environment
+        shell: bash
+        run: |
+          mkdir -p bootstrap/cache storage/framework/{cache,sessions,views} storage/logs
+          php artisan config:clear
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Build disposable Vite assets
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          test -r public/build/manifest.json
+      - name: Run mandatory PostgreSQL provider matrix
+        run: php scripts/run-postgresql-tests.php
+      - name: Record sanitized final inventory
+        shell: bash
+        run: |
+          docker exec "$PG_CONTAINER" psql -U "$DB_USERNAME" -d "$DB_DATABASE" -Atqc \
+            "select count(*) from migrations;"
+          test ! -e database/database.sqlite-wal
+          test ! -e database/database.sqlite-shm
+      - name: Cleanup disposable PostgreSQL
+        if: always()
+        shell: bash
+        run: |
+          docker rm --force "$PG_CONTAINER" >/dev/null 2>&1 || true
+          docker volume rm --force "$PG_VOLUME" >/dev/null 2>&1 || true
