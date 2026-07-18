@@ -65,6 +65,7 @@ jobs:
       APP_ENV: testing
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       ADDONS_MARKETPLACE_SHOW_DEVELOPMENT: 'true'
+      DB_CONNECTION: pgsql
       DB_HOST: 127.0.0.1
       DB_PORT: '55432'
       DB_DATABASE: alta_pg_h2_ci
@@ -80,6 +81,7 @@ jobs:
           secret="$(php -r 'echo bin2hex(random_bytes(32));')"
           echo "::add-mask::$secret"
           echo "PG_H2_PASSWORD=$secret" >> "$GITHUB_ENV"
+          echo "DB_PASSWORD=$secret" >> "$GITHUB_ENV"
       - name: Start PostgreSQL 18.4
         shell: bash
         run: |

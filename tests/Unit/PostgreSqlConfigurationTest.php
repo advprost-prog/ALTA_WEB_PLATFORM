@@ -32,6 +32,8 @@ class PostgreSqlConfigurationTest extends TestCase
         $this->assertStringContainsString("  postgresql:\n", $workflow);
         $this->assertStringContainsString('postgres:18.4', $workflow);
         $this->assertStringContainsString('::add-mask::', $workflow);
+        $this->assertStringContainsString('DB_CONNECTION: pgsql', $workflow);
+        $this->assertStringContainsString('echo "DB_PASSWORD=$secret" >> "$GITHUB_ENV"', $workflow);
         $this->assertStringContainsString('export POSTGRES_PASSWORD="$PG_H2_PASSWORD"', $workflow);
         $this->assertStringContainsString('pdo_pgsql', $workflow);
         $this->assertStringNotContainsString('continue-on-error', $workflow);
