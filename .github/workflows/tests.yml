@@ -83,6 +83,7 @@ jobs:
       - name: Start PostgreSQL 18.4
         shell: bash
         run: |
+          export POSTGRES_PASSWORD="$PG_H2_PASSWORD"
           docker volume create "$PG_VOLUME" >/dev/null
           docker run --detach --name "$PG_CONTAINER" \
             --publish 127.0.0.1:55432:5432 \
