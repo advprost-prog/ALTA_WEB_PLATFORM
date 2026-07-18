@@ -117,7 +117,7 @@ npm run build
 php artisan test
 ```
 
-`composer install` створює `database/database.sqlite`, якщо його немає. Для повторного створення storage symlink можна використати:
+`composer install` створює `database/database.sqlite`, якщо його немає і поточний `DB_CONNECTION` не вибирає інший provider. PostgreSQL setup не створює і не використовує SQLite-файл. Для повторного створення storage symlink можна використати:
 
 ```bash
 php artisan storage:link --force
@@ -182,6 +182,49 @@ php artisan config:clear
 php artisan test
 ```
 
+### PostgreSQL 18.4 development matrix
+
+SQLite залишається default development provider. PG-H2 не переносить normal data та не перемикає `.env` застосунку.
+
+Для disposable PostgreSQL скопіюйте лише credential template; реальний local-файл ігнорується Git:
+
+```bash
+cp .env.postgresql.example .env.postgresql.local
+# Замініть placeholder PG_H2_PASSWORD випадковим локальним секретом.
+docker compose --env-file .env.postgresql.local -f compose.postgresql.yml up -d
+```
+
+Сервіс використовує офіційний `postgres:18.4`, UTC, UTF-8, named disposable volume і слухає тільки `127.0.0.1:55432`. Перед provider matrix експортуйте значення з local-файлу без виведення секрету в logs:
+
+```bash
+set -a
+. ./.env.postgresql.local
+set +a
+export DB_HOST=127.0.0.1 DB_PORT="${PG_H2_HOST_PORT:-55432}"
+export DB_DATABASE="${PG_H2_DATABASE:-alta_pg_h2_dev}"
+export DB_USERNAME="${PG_H2_USERNAME:-alta_pg_h2}"
+php scripts/run-postgresql-tests.php
+```
+
+Runner fail-closed перевіряє `alta_pg_h2_` prefix, local host, очищає config cache, виконує `migrate:fresh` тільки на disposable PostgreSQL і запускає повну suite разом із `tests/PostgreSQL`. Він не приймає production/external host і не має SQLite fallback.
+
+Зупинка зі збереженням disposable volume та повний reset:
+
+```bash
+docker compose --env-file .env.postgresql.local -f compose.postgresql.yml down
+docker compose --env-file .env.postgresql.local -f compose.postgresql.yml down --volumes
+```
+
+Не запускайте reset проти normal SQLite або production database. PostgreSQL 18.4 CI job є окремим обов'язковим provider gate; локальні PostgreSQL 16 clients не є acceptance substitute.
+
+Database policy у PG-H2:
+
+- application timestamps і PostgreSQL session timezone — UTC;
+- user-facing catalog search — Unicode case-insensitive з literal `%`/`_`;
+- SKU, addon codes, hashes, checksums і public IDs лишаються case-sensitive;
+- Ukrainian ICU display collation перевіряється на official image, але лишається provisional до підтвердження hosting;
+- `citext`, Redis, normal-data import і default connection switch не входять у PG-H2.
+
 Поточне покриття:
 
 - storefront pages;
@@ -207,6 +250,10 @@ touch database/database.sqlite
 php artisan migrate --seed
 ```
 
+### PostgreSQL profile refuses to start
+
+Перевірте, що всі `PG_H2_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` задані, database має disposable prefix `alta_pg_h2_`, а host дорівнює `127.0.0.1`, `localhost` або Compose service `postgresql`. Не друкуйте local env або password у діагностичний output.
+
 ### Storage link already exists
 
 ```bash
@@ -231,6 +278,6 @@ npm run build
 
 ## Production notes
 
-- Для MySQL/PostgreSQL змініть `DB_CONNECTION`, `DB_HOST`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` у `.env`.
+- Production PostgreSQL switch не авторизований PG-H2. Перед майбутнім switch окремо підтвердьте PostgreSQL 18.4+, SSL, UTC, locale/collation, backup tools і hosting privileges.
 - Не використовуйте демо-паролі в production.
 - Для імпорту товарів Excel/CSV краще додавати окремий модуль після стабілізації MVP.

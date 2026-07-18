@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.postgresql.example
 /vendor/
 /node_modules/
 /public/build/
