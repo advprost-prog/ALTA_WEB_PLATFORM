@@ -99,6 +99,20 @@ return [
             'sslmode' => env('DB_SSLMODE', 'prefer'),
         ],
 
+        'pgsql_transition' => [
+            'driver' => 'pgsql',
+            'host' => env('PG_TRANSITION_HOST'),
+            'port' => env('PG_TRANSITION_PORT'),
+            'database' => env('PG_TRANSITION_DATABASE'),
+            'username' => env('PG_TRANSITION_USERNAME'),
+            'password' => env('PG_TRANSITION_PASSWORD'),
+            'charset' => 'utf8',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'search_path' => 'public',
+            'sslmode' => env('PG_TRANSITION_SSLMODE', 'disable'),
+        ],
+
         'sqlsrv' => [
             'driver' => 'sqlsrv',
             'url' => env('DB_URL'),

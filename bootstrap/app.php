@@ -17,6 +17,7 @@ use App\Console\Commands\CommerceHealthCheck;
 use App\Console\Commands\DiagnoseProductImages;
 use App\Console\Commands\ResetAdminAccess;
 use App\Console\Commands\SendPendingNotifications;
+use App\Console\Commands\SqliteToPostgreSql;
 use App\Console\Commands\TestNotificationEmail;
 use App\Console\Commands\TestProductImageImport;
 use App\Console\Commands\TestStorage;
@@ -48,6 +49,7 @@ return Application::configure(basePath: dirname(__DIR__))
         DiagnoseProductImages::class,
         ResetAdminAccess::class,
         SendPendingNotifications::class,
+        SqliteToPostgreSql::class,
         TestNotificationEmail::class,
         TestProductImageImport::class,
         TestStorage::class,
