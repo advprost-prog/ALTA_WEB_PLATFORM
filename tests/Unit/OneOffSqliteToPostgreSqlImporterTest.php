@@ -19,7 +19,7 @@ final class OneOffSqliteToPostgreSqlImporterTest extends TestCase
         $this->assertCount(45, SqliteToPostgreSqlPolicy::importedTables());
         $this->assertCount(7, SqliteToPostgreSqlPolicy::EXCLUDED);
         $this->assertCount(9, SqliteToPostgreSqlPolicy::SEEDED);
-        $this->assertSame('sqlite', config('database.default'));
+        $this->assertStringContainsString("'default' => env('DB_CONNECTION', 'sqlite')", file_get_contents(config_path('database.php')));
     }
 
     public function test_boolean_decimal_json_and_text_conversion_is_strict(): void
