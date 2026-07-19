@@ -2,9 +2,18 @@
 
 namespace Tests\Feature;
 
+use Alta\BackupRestore\Contracts\HostRestoreBridge;
+use Alta\BackupRestore\Filament\Pages\BackupRestoreDashboard;
+use Alta\BackupRestore\Filament\Resources\ProfileResource;
+use Alta\BackupRestore\Filament\Resources\ScheduleResource;
+use Alta\BackupRestore\Models\Artifact;
+use Alta\BackupRestore\Models\BackupRun;
+use Alta\BackupRestore\Models\Profile;
+use Alta\BackupRestore\Services\HostRestoreBridgeProxy;
 use App\Models\SystemAddon;
 use App\Support\Addons\AddonManager;
 use App\Support\Addons\AddonRegistry;
+use Filament\Facades\Filament;
 use FilesystemIterator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -103,11 +112,47 @@ final class ExternalAddonPackageLifecycleTest extends TestCase
         $manager->bootEnabledAddons();
         $this->assertSame($events, DB::table('system_addon_events')->count());
         $this->assertSame($beforeFiles, $this->filesystemSnapshot($root));
+        $this->assertInstanceOf(HostRestoreBridgeProxy::class, app(HostRestoreBridge::class));
+        $this->assertContains(BackupRestoreDashboard::class, Filament::getPages());
+        $this->assertContains(ProfileResource::class, Filament::getResources());
+        $this->assertContains(ScheduleResource::class, Filament::getResources());
 
-        $migration = require $root.'/database/migrations/2026_07_15_000001_create_backup_restore_foundation.php';
-        $migration->up();
+        $migrations = [];
+        foreach (['2026_07_15_000001_create_backup_restore_foundation.php', '2026_07_17_000002_add_file_limits_to_backup_profiles.php', '2026_07_18_000003_create_restore_planning_tables.php', '2026_07_18_000004_create_files_restore_execution_tables.php', '2026_07_18_000005_create_postgresql_staging_verifications.php'] as $file) {
+            $migrations[] = require $root.'/database/migrations/'.$file;
+            $migrations[array_key_last($migrations)]->up();
+        }
         $this->assertTrue(Schema::hasTable('alta_backup_restore_profiles'));
-        $migration->down();
+        $profile = Profile::create(['name' => 'Lifecycle guard', 'status' => 'active', 'include_database' => false, 'include_files' => true, 'source_roots' => ['public_uploads'], 'destination' => 'local']);
+        $preservedRun = BackupRun::create(['profile_id' => $profile->id, 'status' => 'completed', 'trigger_type' => 'manual']);
+        $preservedArtifact = Artifact::create(['backup_run_id' => $preservedRun->id, 'status' => 'available', 'disk' => 'local', 'relative_path' => 'addons/alta.backup-restore/artifacts/v060.zip', 'original_filename' => 'v060.zip']);
+        File::ensureDirectoryExists(storage_path('app/private/addons/alta.backup-restore/artifacts'));
+        File::put(storage_path('app/private/'.$preservedArtifact->relative_path), 'v060-artifact');
+        $v1Migration = require $root.'/database/migrations/2026_07_19_000006_complete_v1_operations.php';
+        $v1Migration->up();
+        $migrations[] = $v1Migration;
+        $this->assertDatabaseHas('alta_backup_restore_artifacts', ['id' => $preservedArtifact->id]);
+        $this->assertFileExists(storage_path('app/private/'.$preservedArtifact->relative_path));
+        $run = BackupRun::create(['profile_id' => $profile->id, 'status' => 'running', 'trigger_type' => 'manual']);
+        try {
+            $manager->disable($addon->code);
+            $this->fail('Active backup must block addon disable.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('backup_conflicting_operation', $exception->getMessage());
+        }
+        try {
+            $addon->version = '1.0.1';
+            $addon->save();
+            $this->fail('Active backup must block addon code update.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('backup_conflicting_operation', $exception->getMessage());
+            $addon->refresh();
+        }
+        $run->forceFill(['status' => 'completed'])->save();
+
+        foreach (array_reverse($migrations) as $migration) {
+            $migration->down();
+        }
         $this->assertFalse(Schema::hasTable('alta_backup_restore_profiles'));
 
         $manager->disable($addon->code);
