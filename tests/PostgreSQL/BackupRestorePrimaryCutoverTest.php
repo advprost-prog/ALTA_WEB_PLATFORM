@@ -14,17 +14,18 @@ final class BackupRestorePrimaryCutoverTest extends TestCase
         $role = 'alta_phase3_cutover_admin';
         $live = 'alta_phase3_cutover_live';
         $staged = 'alta_restore_phase3_cutover';
+        $base = config('database.connections.pgsql');
+        $password = (string) $base['password'];
 
         $this->cleanup($root, [$live, $staged, 'alta_rollback_phase3cutover', 'alta_failed_'.substr(hash('sha256', $live.'|alta_rollback_phase3cutover'), 0, 24)]);
         $root->exec('DROP ROLE IF EXISTS "'.$role.'"');
-        $root->exec('CREATE ROLE "'.$role.'" LOGIN NOSUPERUSER CREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS');
+        $root->exec('CREATE ROLE "'.$role.'" LOGIN NOSUPERUSER CREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '.$root->quote($password));
         $root->exec('GRANT pg_signal_backend TO "'.$role.'"');
         $root->exec('CREATE DATABASE "'.$live.'" OWNER "'.$role.'"');
         $root->exec('CREATE DATABASE "'.$staged.'" OWNER "'.$role.'"');
 
-        $base = config('database.connections.pgsql');
-        config()->set('database.connections.phase3_live', array_merge($base, ['database' => $live, 'username' => $role, 'password' => null]));
-        config()->set('database.connections.phase3_admin', array_merge($base, ['database' => config('database.connections.pgsql.database'), 'username' => $role, 'password' => null]));
+        config()->set('database.connections.phase3_live', array_merge($base, ['database' => $live, 'username' => $role, 'password' => $password]));
+        config()->set('database.connections.phase3_admin', array_merge($base, ['database' => config('database.connections.pgsql.database'), 'username' => $role, 'password' => $password]));
         config()->set('backup-restore-host.allowed_connections', ['phase3_live']);
         config()->set('backup-restore-host.allowed_databases', [$live]);
         config()->set('backup-restore-host.allowed_backend_roles', [$role]);
@@ -33,7 +34,7 @@ final class BackupRestorePrimaryCutoverTest extends TestCase
         try {
             DB::connection('phase3_live')->statement('CREATE TABLE restore_marker (value text NOT NULL)');
             DB::connection('phase3_live')->table('restore_marker')->insert(['value' => 'original']);
-            $stagedPdo = new \PDO(sprintf('pgsql:host=%s;port=%d;dbname=%s', $base['host'], $base['port'], $staged), $role, null, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+            $stagedPdo = new \PDO(sprintf('pgsql:host=%s;port=%d;dbname=%s', $base['host'], $base['port'], $staged), $role, $password, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
             $stagedPdo->exec("CREATE TABLE restore_marker (value text NOT NULL); INSERT INTO restore_marker VALUES ('restored')");
             $stagedPdo = null;
 
