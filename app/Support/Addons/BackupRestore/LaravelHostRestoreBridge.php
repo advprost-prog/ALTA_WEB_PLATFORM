@@ -147,6 +147,7 @@ final class LaravelHostRestoreBridge
             $live = $this->identifier(config('database.connections.'.$connection.'.database'));
             $rollback = $this->identifier($switch['rollback_database']);
             $admin = config('backup-restore-host.admin_connection');
+            $this->drain($request);
             $pdo = $this->database->connection($admin)->getPdo();
             $failed = $this->identifier('alta_failed_'.substr(hash('sha256', $live.'|'.$rollback), 0, 24));
             $pdo->exec(sprintf('ALTER DATABASE "%s" RENAME TO "%s"', $live, $failed));

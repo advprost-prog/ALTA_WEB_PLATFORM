@@ -48,6 +48,21 @@ final class AddonProviderResolverTest extends TestCase
         $this->assertSame(1, $this->loaders->count());
     }
 
+    public function test_loaded_provider_reregisters_package_loader_after_unregister(): void
+    {
+        $addon = $this->package('Reloaded', 'tests.valid', 'Vendor\\Reloaded\\', 'ReloadedProvider');
+        $root = dirname(base_path($addon->manifest_path));
+        file_put_contents($root.'/src/AuxiliaryService.php', "<?php\nnamespace Vendor\\Reloaded;\nfinal class AuxiliaryService {}\n");
+        $resolver = app(AddonProviderResolver::class);
+
+        $this->assertTrue($resolver->load($addon));
+        $resolver->unregister($addon->code);
+        $this->assertFalse($this->loaders->isRegistered($addon->code));
+        $this->assertTrue($resolver->load($addon));
+        $this->assertTrue($this->loaders->isRegistered($addon->code));
+        $this->assertTrue(class_exists('Vendor\\Reloaded\\AuxiliaryService'));
+    }
+
     public function test_existing_bundled_module_convention_remains_supported(): void
     {
         $addon = new SystemAddon([

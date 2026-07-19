@@ -21,10 +21,6 @@ final class PackageScopedAutoloadRegistry
 
         $this->assertNoCollision($provider);
 
-        if (class_exists($provider->providerClass, false)) {
-            return $this->validateLoadedProvider($provider);
-        }
-
         $existing = $this->loaders[$provider->addonCode] ?? null;
 
         if ($existing !== null && $existing['root'] !== $provider->packageRoot) {
@@ -43,7 +39,9 @@ final class PackageScopedAutoloadRegistry
         }
 
         try {
-            require_once $provider->providerFile;
+            if (! class_exists($provider->providerClass, false)) {
+                require_once $provider->providerFile;
+            }
 
             return $this->validateLoadedProvider($provider);
         } catch (Throwable $exception) {
