@@ -38,11 +38,54 @@ class AddonServiceProvider extends ServiceProvider
 
         try {
             $manager->bootEnabledAddons();
+            $this->configureBackupRestorePostgreSqlTools();
         } catch (Throwable $exception) {
             $events->error(null, 'addon_boot_manager_failed', 'Addon boot manager failed.', [
                 'exception' => $exception::class,
                 'error' => $exception->getMessage(),
             ]);
         }
+    }
+
+    private function configureBackupRestorePostgreSqlTools(): void
+    {
+        $host = config('backup-restore-host.postgresql_backup', []);
+        if (! is_array($host) || ($host['enabled'] ?? false) !== true || ! config()->has('alta-backup-restore.database.postgresql')) {
+            return;
+        }
+
+        $directory = $host['client_directory'] ?? null;
+        $libraryPath = $host['library_path'] ?? null;
+        $connections = array_values(array_filter((array) ($host['connections'] ?? []), 'is_string'));
+        $majors = array_values(array_filter((array) ($host['server_major_versions'] ?? []), 'is_int'));
+        if (! is_string($directory) || $directory === '' || ! is_string($libraryPath) || $libraryPath === '' || $connections === [] || $majors === []) {
+            return;
+        }
+
+        $definitions = [];
+        foreach ($connections as $connection) {
+            if (config('database.connections.'.$connection.'.driver') !== 'pgsql') {
+                continue;
+            }
+            $definitions[$connection] = [
+                'engine' => 'postgresql',
+                'role' => 'primary',
+                'backup_enabled' => true,
+                'restore_enabled' => false,
+                'allowed_server_major_versions' => $majors,
+                'expected_schemas' => ['public'],
+            ];
+        }
+        if ($definitions === []) {
+            return;
+        }
+
+        config([
+            'alta-backup-restore.execution.backup_enabled' => true,
+            'alta-backup-restore.database.postgresql.enabled' => true,
+            'alta-backup-restore.database.postgresql.trusted_binary_directories' => [$directory],
+            'alta-backup-restore.database.postgresql.process_environment.LD_LIBRARY_PATH' => $libraryPath,
+            'alta-backup-restore.database.allowed_connections' => $definitions,
+        ]);
     }
 }
