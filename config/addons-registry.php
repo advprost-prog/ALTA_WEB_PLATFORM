@@ -76,7 +76,15 @@ return [
     'trust' => [
         'require_signature' => env('ADDONS_REGISTRY_REQUIRE_SIGNATURE', true),
         'signature_verification_max_bytes' => (int) env('ADDONS_REGISTRY_SIGNATURE_MAX_BYTES', 20 * 1024 * 1024),
-        'keys' => [],
+        'keys' => [
+            [
+                'publisher_id' => '60d5b834-5814-4fb7-92e5-131de44e9e97',
+                'key_id' => 'backup-restore-primary-1',
+                'algorithm' => 'ed25519',
+                'public_key' => 'C8D/xaHnwr7DYC+grZDMAeabTt9APlK7vhjXQBo0III=',
+                'status' => 'active',
+            ],
+        ],
         'trusted_keys' => env('APP_ENV') === 'testing' ? [
             'alta-demo-key-1' => 'mCWvikNz7pfcagq5odfFiCa1nhsa17D4Up02EkZ4alM=',
         ] : [],
