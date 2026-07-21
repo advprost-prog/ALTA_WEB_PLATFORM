@@ -35,6 +35,7 @@ class AddonArtifactDownloadTest extends TestCase
     {
         parent::setUp();
 
+        Storage::fake('addons');
         Storage::disk('addons')->deleteDirectory('addons/quarantine');
     }
 
@@ -52,6 +53,7 @@ class AddonArtifactDownloadTest extends TestCase
     private function configureRegistry(bool $downloadsEnabled, array $overrides = []): void
     {
         $realTrust = config('addons-registry.trust', []);
+        $realTrust['keys'] = [];
 
         $config = array_merge([
             'enabled' => true,

@@ -62,9 +62,11 @@ class DoctorAddons extends Command
             }
 
             if (($promotion['status'] ?? null) === ArtifactPromotionStatus::PROMOTED) {
-                $info[] = $this->diagnostic('artifact_promoted_not_discovered', 'Artifact files are promoted but addon is not discovered/installed/enabled.', [
-                    $code.' -> '.($promotion['live_path'] ?? '—'),
-                ]);
+                if (($row['installed_version'] ?? null) === null) {
+                    $info[] = $this->diagnostic('artifact_promoted_not_discovered', 'Artifact files are promoted but addon is not discovered/installed/enabled.', [
+                        $code.' -> '.($promotion['live_path'] ?? '—'),
+                    ]);
+                }
                 if (($promotion['idempotent_ready'] ?? false) === true) {
                     $info[] = $this->diagnostic('artifact_promotion_idempotent_ready', 'Promoted artifact is idempotent-ready.', [$code]);
                 }

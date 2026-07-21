@@ -374,7 +374,7 @@ final class ArtifactReviewManager
         $downloadsConfig = Config::get('addons-registry.downloads', []);
         $disk = (string) ($downloadsConfig['disk'] ?? 'addons');
         $quarantinePath = (string) ($downloadsConfig['quarantine_path'] ?? 'addons/quarantine');
-        $filename = basename(parse_url($artifact['url'], PHP_URL_PATH) ?: $code.'.zip');
+        $filename = ArtifactDownloader::safeFilename($code, $registryItem->version);
         $directory = rtrim($quarantinePath.'/'.$code.'/'.$registryItem->version, '/');
         $path = $directory.'/'.$filename;
         $metadataPath = $directory.'/metadata.json';
@@ -391,10 +391,16 @@ final class ArtifactReviewManager
 
         $trustConfig = Config::get('addons-registry.trust', []);
         $requireSignature = (bool) ($trustConfig['require_signature'] ?? true);
-        $trustedKeys = is_array($trustConfig['trusted_keys'] ?? null) ? $trustConfig['trusted_keys'] : [];
+        $signature = is_array($artifact['signature'] ?? null) ? $artifact['signature'] : null;
+        $publisherId = is_string($registryItem->raw['publisher']['public_id'] ?? null) ? $registryItem->raw['publisher']['public_id'] : '';
+        $keyId = is_string($signature['key_id'] ?? null) ? $signature['key_id'] : '';
+        $trustedKey = (new PublisherTrustStore(is_array($trustConfig) ? $trustConfig : []))->find($publisherId, $keyId);
+        $trustedKeys = ($trustedKey['allowed'] ?? false) && is_string($trustedKey['public_key'] ?? null)
+            ? [$keyId => base64_encode($trustedKey['public_key'])]
+            : [];
 
         $signatureResult = $this->verifier->verify(
-            $artifact['signature'] ?? null,
+            $signature,
             $bytes,
             $requireSignature,
             $trustedKeys,

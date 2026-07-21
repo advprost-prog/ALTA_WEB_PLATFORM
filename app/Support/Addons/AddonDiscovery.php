@@ -141,24 +141,27 @@ class AddonDiscovery
      */
     private function manifestCandidates(): array
     {
-        $patterns = [
-            SystemAddon::TYPE_MODULE => base_path('modules/*/*/module.json'),
-            SystemAddon::TYPE_EXTENSION => base_path('extensions/*/*/extension.json'),
+        $roots = [
+            SystemAddon::TYPE_MODULE => [base_path('modules'), (string) config('addons-registry.live_roots.modules_path')],
+            SystemAddon::TYPE_EXTENSION => [base_path('extensions'), (string) config('addons-registry.live_roots.extensions_path')],
         ];
 
         $candidates = [];
 
-        foreach ($patterns as $type => $pattern) {
-            foreach (glob($pattern) ?: [] as $path) {
-                $candidates[] = [
-                    'path' => $path,
-                    'relative_path' => $this->relativePath($path),
-                    'type' => $type,
-                ];
+        foreach ($roots as $type => $configuredRoots) {
+            foreach (array_unique(array_filter($configuredRoots)) as $root) {
+                $manifest = $type === SystemAddon::TYPE_MODULE ? 'module.json' : 'extension.json';
+                foreach (glob(rtrim($root, '/')."/*/*/{$manifest}") ?: [] as $path) {
+                    $candidates[$path] = [
+                        'path' => $path,
+                        'relative_path' => $this->relativePath($path),
+                        'type' => $type,
+                    ];
+                }
             }
         }
 
-        return $candidates;
+        return array_values($candidates);
     }
 
     /**

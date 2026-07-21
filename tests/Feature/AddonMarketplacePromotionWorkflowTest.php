@@ -351,6 +351,14 @@ class AddonMarketplacePromotionWorkflowTest extends TestCase
         $this->assertFalse(Storage::disk('addons')->exists($state['staging_path']));
         $this->assertCount(1, Storage::disk('addons')->allFiles('addons/install-journal/'.self::CODE));
         $this->assertFalse(app()->bound(self::CODE.'.booted'));
+        $marketplaceRow = collect(app(MarketplaceManager::class)->resolve()['rows'])->first(
+            fn (array $row): bool => $row['item']->code === self::CODE,
+        );
+        $this->assertSame('installed', $marketplaceRow['status']);
+        $this->assertSame('1.0.0', $marketplaceRow['installed_version']);
+        $this->assertSame('local_remote', $marketplaceRow['source']);
+        Artisan::call('addons:doctor');
+        $this->assertStringNotContainsString('artifact_promoted_not_discovered', Artisan::output());
     }
 
     public function test_verified_update_preserves_enabled_intent_and_retains_backup_without_boot(): void
@@ -475,6 +483,7 @@ class AddonMarketplacePromotionWorkflowTest extends TestCase
         Config::set('addons-registry.allow_localhost', true);
         Config::set('addons-registry.mode', 'read_only');
         Config::set('addons-registry.trust.require_signature', true);
+        Config::set('addons-registry.trust.keys', []);
         Config::set('addons-registry.trust.trusted_keys', ['review-key' => base64_encode($this->signingPublic)]);
         Config::set('addons-registry.trust.legacy_publishers', ['review-key' => '11111111-1111-4111-8111-111111111111']);
         Config::set('addons-registry.downloads.enabled', true);

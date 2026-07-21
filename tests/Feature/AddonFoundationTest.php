@@ -62,6 +62,26 @@ class AddonFoundationTest extends TestCase
         ]);
     }
 
+    public function test_discovery_includes_configured_marketplace_live_roots(): void
+    {
+        $liveRoot = storage_path('framework/testing/addon-live/modules');
+        File::deleteDirectory(dirname($liveRoot));
+        File::ensureDirectoryExists($liveRoot.'/ALTA/BackupRestore');
+        File::put($liveRoot.'/ALTA/BackupRestore/module.json', $this->manifestJson([
+            'code' => 'alta.backup-restore',
+            'name' => 'ALTA Backup & Restore',
+        ]));
+        Config::set('addons-registry.live_roots.modules_path', $liveRoot);
+
+        app(AddonManager::class)->discover();
+
+        $this->assertDatabaseHas('system_addons', [
+            'code' => 'alta.backup-restore',
+            'status' => 'discovered',
+        ]);
+        File::deleteDirectory(dirname($liveRoot));
+    }
+
     public function test_invalid_manifest_is_reported_without_crashing(): void
     {
         $this->writeModuleManifest('InvalidModule', '{ invalid json');

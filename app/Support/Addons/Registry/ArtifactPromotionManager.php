@@ -551,7 +551,7 @@ final class ArtifactPromotionManager
         $artifact = $item->raw['artifact'];
         $disk = (string) Config::get('addons-registry.downloads.disk', 'addons');
         $dir = trim((string) Config::get('addons-registry.downloads.quarantine_path', 'addons/quarantine'), '/').'/'.$code.'/'.$item->version;
-        $path = $dir.'/'.basename(parse_url($artifact['url'], PHP_URL_PATH) ?: $code.'.zip');
+        $path = $dir.'/'.ArtifactDownloader::safeFilename($code, $item->version);
         $metadataPath = $dir.'/metadata.json';
         $storage = Storage::disk($disk);
 

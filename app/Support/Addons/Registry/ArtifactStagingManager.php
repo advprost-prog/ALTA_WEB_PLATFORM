@@ -39,6 +39,8 @@ final class ArtifactStagingManager
         if ($storage->exists($final.'/staging.json')) {
             $existing = json_decode($storage->get($final.'/staging.json'), true);
             if (is_array($existing) && ($existing['source']['artifact_sha256'] ?? null) === $sha && ($existing['code'] ?? null) === $code) {
+                $this->updateSummary($resolved, $final, $existing, false);
+
                 return ArtifactStagingResult::success($code, $resolved['version'], 'Artifact уже підготовлений у staging.', $this->resultData($final, $existing));
             }
 
@@ -182,7 +184,7 @@ final class ArtifactStagingManager
         $artifact = $item->raw['artifact'];
         $disk = (string) Config::get('addons-registry.downloads.disk', 'addons');
         $dir = trim((string) Config::get('addons-registry.downloads.quarantine_path', 'addons/quarantine'), '/').'/'.$code.'/'.$item->version;
-        $path = $dir.'/'.basename(parse_url($artifact['url'], PHP_URL_PATH) ?: $code.'.zip');
+        $path = $dir.'/'.ArtifactDownloader::safeFilename($code, $item->version);
         $metadataPath = $dir.'/metadata.json';
         $storage = Storage::disk($disk);
         if (! $storage->exists($path) || ! $storage->exists($metadataPath)) {

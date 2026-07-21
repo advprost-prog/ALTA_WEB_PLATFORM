@@ -34,6 +34,7 @@ class AddonArtifactTrustTest extends TestCase
     {
         parent::setUp();
 
+        Storage::fake('addons');
         Storage::disk('addons')->deleteDirectory('addons/quarantine');
     }
 
@@ -431,6 +432,60 @@ class AddonArtifactTrustTest extends TestCase
         $this->assertSame('trusted', $report['status']);
         $this->assertSame('valid', $report['report']['signature_status']);
         $this->assertSame('valid', $report['report']['manifest_status']);
+    }
+
+    public function test_inspect_uses_structured_publisher_key_binding(): void
+    {
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+        $signature = ['type' => 'ed25519', 'value' => $this->sign($bytes, $keypair['secret']), 'key_id' => 'structured-key'];
+
+        $this->configureRegistry(true, true, []);
+        config(['addons-registry.trust.keys' => [[
+            'publisher_id' => '11111111-1111-4111-8111-111111111111',
+            'key_id' => 'structured-key',
+            'algorithm' => 'ed25519',
+            'public_key' => $keypair['public_b64'],
+            'status' => 'active',
+        ]]]);
+        $this->fakeRegistryWithArtifact(['signature' => $signature], $bytes);
+
+        $manager = app(MarketplaceManager::class);
+        $this->assertTrue($manager->downloadArtifact('core.analytics')->success);
+        $report = $manager->inspectArtifact('core.analytics');
+
+        $this->assertTrue($report['success']);
+        $this->assertSame('valid', $report['report']['signature_status']);
+        $this->assertSame('valid', $report['report']['manifest_status']);
+        $this->assertSame('trusted', $report['report']['trust_status']);
+    }
+
+    public function test_inspect_rejects_same_key_bound_to_different_publisher(): void
+    {
+        $keypair = $this->makeKeypair();
+        $bytes = $this->realArtifactBytes();
+        $signature = ['type' => 'ed25519', 'value' => $this->sign($bytes, $keypair['secret']), 'key_id' => 'structured-key'];
+
+        $this->configureRegistry(true, true, []);
+        config(['addons-registry.trust.keys' => [[
+            'publisher_id' => '11111111-1111-4111-8111-111111111111',
+            'key_id' => 'structured-key',
+            'algorithm' => 'ed25519',
+            'public_key' => $keypair['public_b64'],
+            'status' => 'active',
+        ]]]);
+        $this->fakeRegistryWithArtifact(['signature' => $signature], $bytes);
+
+        $manager = app(MarketplaceManager::class);
+        $this->assertTrue($manager->downloadArtifact('core.analytics')->success);
+        config(['addons-registry.trust.keys.0.publisher_id' => '22222222-2222-4222-8222-222222222222']);
+
+        $report = $manager->inspectArtifact('core.analytics');
+
+        $this->assertTrue($report['success']);
+        $this->assertSame('unknown_key', $report['report']['signature_status']);
+        $this->assertSame('valid', $report['report']['manifest_status']);
+        $this->assertSame('untrusted', $report['report']['trust_status']);
     }
 
     public function test_unsigned_registry_item_fails_closed_before_download(): void

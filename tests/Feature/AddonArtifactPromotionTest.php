@@ -394,7 +394,9 @@ class AddonArtifactPromotionTest extends TestCase
         Config::set('addons-registry.allow_localhost', true);
         Config::set('addons-registry.mode', 'read_only');
         Config::set('addons-registry.trust.require_signature', true);
+        Config::set('addons-registry.trust.keys', []);
         Config::set('addons-registry.trust.trusted_keys', ['review-key' => base64_encode($this->signingPublic)]);
+        Config::set('addons-registry.trust.legacy_publishers', ['review-key' => '11111111-1111-4111-8111-111111111111']);
         Config::set('addons-registry.downloads.disk', 'addons');
         Config::set('addons-registry.downloads.quarantine_path', 'addons/quarantine');
         Config::set('addons-registry.review.enabled', true);

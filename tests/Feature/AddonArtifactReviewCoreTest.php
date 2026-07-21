@@ -33,7 +33,7 @@ class AddonArtifactReviewCoreTest extends TestCase
 
     private string $registryUrl = 'http://127.0.0.1:9001/review-registry.json';
 
-    private string $artifactUrl = 'http://127.0.0.1:9001/core.analytics-1.0.0.zip';
+    private string $artifactUrl = 'http://127.0.0.1:9001/api/v1/artifacts/review-artifact/download';
 
     private string $metadataPath = 'addons/quarantine/core.analytics/1.0.0/metadata.json';
 
@@ -264,9 +264,14 @@ class AddonArtifactReviewCoreTest extends TestCase
         $this->assertTrue(Storage::disk('addons')->exists($first->stagingPath.'/staging.json'));
         $this->assertTrue(Storage::disk('addons')->exists($this->metadataPath));
 
+        $summaryLost = $this->metadata();
+        $summaryLost['staging_status'] = 'not_staged';
+        $summaryLost['staging_path'] = null;
+        $this->writeMetadata($summaryLost);
         $second = $manager->stage(self::CODE, ArtifactReviewActor::cli('test'));
         $this->assertTrue($second->success);
         $this->assertSame($first->stagingPath, $second->stagingPath);
+        $this->assertSame('staged', $this->metadata()['staging_status']);
 
         $unstaged = $manager->unstage(self::CODE, 'cleanup', ArtifactReviewActor::cli('test'));
         $this->assertTrue($unstaged->success);
@@ -357,7 +362,14 @@ class AddonArtifactReviewCoreTest extends TestCase
             'addons-registry.allow_localhost' => true,
             'addons-registry.mode' => 'read_only',
             'addons-registry.trust.require_signature' => true,
-            'addons-registry.trust.trusted_keys' => ['review-key' => base64_encode($this->signingPublic)],
+            'addons-registry.trust.keys' => [[
+                'publisher_id' => '11111111-1111-4111-8111-111111111111',
+                'key_id' => 'review-key',
+                'algorithm' => 'ed25519',
+                'public_key' => base64_encode($this->signingPublic),
+                'status' => 'active',
+            ]],
+            'addons-registry.trust.trusted_keys' => [],
             'addons-registry.downloads.disk' => 'addons',
             'addons-registry.downloads.quarantine_path' => 'addons/quarantine',
             'addons-registry.review.enabled' => true,

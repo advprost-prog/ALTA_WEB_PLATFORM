@@ -21,6 +21,7 @@ use App\Support\Addons\Registry\ArtifactStagingManager;
 use App\Support\Addons\Registry\ArtifactStagingResult;
 use App\Support\Addons\Registry\ArtifactStagingStatus;
 use App\Support\Addons\Registry\ArtifactTrustEvaluator;
+use App\Support\Addons\Registry\PublisherTrustStore;
 use App\Support\Addons\Registry\QuarantinedArtifactInspector;
 use App\Support\Addons\Registry\RegistryCatalog;
 use App\Support\Addons\Registry\RegistryClient;
@@ -88,6 +89,27 @@ final class MarketplaceManager
                         continue 2;
                     }
                 }
+            }
+
+            $installedAddon = $this->registry->find($code);
+            if ($installedAddon !== null) {
+                $manifest = is_array($installedAddon->metadata['manifest'] ?? null) ? $installedAddon->metadata['manifest'] : [];
+                $item = MarketplaceItem::fromArray([
+                    'code' => $installedAddon->code, 'type' => $installedAddon->type, 'vendor' => $installedAddon->vendor ?: $remoteItem->vendor,
+                    'name' => $installedAddon->name, 'description' => $installedAddon->description ?: $remoteItem->description,
+                    'version' => $installedAddon->version, 'category' => $remoteItem->category, 'path' => $installedAddon->manifest_path,
+                    'dependencies' => $manifest['dependencies'] ?? [], 'visibility' => 'production',
+                    'implementation_state' => 'functional', 'audit_classification' => 'production_addon',
+                ]);
+                $localItems[$code] = $item;
+                $row = $this->resolveItem($item, $remoteItem);
+                $row['source'] = 'local_remote';
+                $row['remote_version'] = $remoteItem->version;
+                $row['local_catalog_version'] = $item->version;
+                $row['registry_metadata'] = $remoteItem->raw;
+                $rows[] = $row;
+
+                continue;
             }
 
             $row = $this->resolveRemoteOnlyItem($remoteItem);
@@ -607,11 +629,17 @@ final class MarketplaceManager
 
         $trustConfig = config('addons-registry.trust', []);
         $requireSignature = (bool) ($trustConfig['require_signature'] ?? true);
-        $trustedKeys = is_array($trustConfig['trusted_keys'] ?? null) ? $trustConfig['trusted_keys'] : [];
+        $signature = is_array($artifact['signature'] ?? null) ? $artifact['signature'] : null;
+        $publisherId = is_string($item->raw['publisher']['public_id'] ?? null) ? $item->raw['publisher']['public_id'] : '';
+        $keyId = is_string($signature['key_id'] ?? null) ? $signature['key_id'] : '';
+        $trustedKey = (new PublisherTrustStore(is_array($trustConfig) ? $trustConfig : []))->find($publisherId, $keyId);
+        $trustedKeys = ($trustedKey['allowed'] ?? false) && is_string($trustedKey['public_key'] ?? null)
+            ? [$keyId => base64_encode($trustedKey['public_key'])]
+            : [];
 
         $verifier = new ArtifactSignatureVerifier;
         $signatureResult = $verifier->verify(
-            $artifact['signature'] ?? null,
+            $signature,
             $bytes,
             $requireSignature,
             $trustedKeys,
