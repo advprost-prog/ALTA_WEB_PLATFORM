@@ -108,6 +108,20 @@ class AddonManifestValidator
             $errors[] = 'Manifest [service_provider] must be a class string or null.';
         }
 
+        if (array_key_exists('filament', $manifest)) {
+            $filament = $manifest['filament'];
+            if (! is_array($filament) || array_diff(array_keys($filament), ['pages', 'resources']) !== []) {
+                $errors[] = 'Manifest [filament] must contain only pages and resources arrays.';
+            } else {
+                foreach (['pages', 'resources'] as $componentType) {
+                    if (! is_array($filament[$componentType] ?? null)
+                        || collect($filament[$componentType])->contains(fn (mixed $class): bool => ! is_string($class) || preg_match('/^[A-Za-z_][A-Za-z0-9_]*(\\\\[A-Za-z_][A-Za-z0-9_]*)+$/', $class) !== 1)) {
+                        $errors[] = "Manifest [filament.{$componentType}] must be an array of class strings.";
+                    }
+                }
+            }
+        }
+
         foreach ($manifest['dependencies'] ?? [] as $dependency) {
             $dependencyCode = is_array($dependency) ? ($dependency['code'] ?? null) : $dependency;
 

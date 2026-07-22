@@ -4,6 +4,7 @@ namespace App\Support\Addons\Providers;
 
 use App\Models\SystemAddon;
 use JsonException;
+use ReflectionClass;
 
 final class AddonProviderResolver
 {
@@ -44,6 +45,21 @@ final class AddonProviderResolver
     public function unregister(string $addonCode): void
     {
         $this->autoloaders->unregister($addonCode);
+    }
+
+    public function ownsClass(SystemAddon $addon, string $class): bool
+    {
+        try {
+            $resolved = $this->resolve($addon);
+            if (! $this->load($addon) || ! class_exists($class)) {
+                return false;
+            }
+            $file = (new ReflectionClass($class))->getFileName();
+
+            return is_string($file) && $this->inside($file, $resolved->packageRoot);
+        } catch (AddonProviderException) {
+            return false;
+        }
     }
 
     private function resolveBundled(SystemAddon $addon, string $root, string $provider, string $prefix): ResolvedAddonProvider

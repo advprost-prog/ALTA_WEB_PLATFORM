@@ -222,6 +222,11 @@ class AddonLifecycle
         $this->providers->unregister($addonCode);
     }
 
+    public function ownsRuntimeClass(SystemAddon $addon, string $class): bool
+    {
+        return $this->providers->ownsClass($addon, $class);
+    }
+
     /**
      * @return array<int, string>
      */

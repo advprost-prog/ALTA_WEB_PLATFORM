@@ -11,13 +11,17 @@ use Alta\BackupRestore\Models\BackupRun;
 use Alta\BackupRestore\Models\Profile;
 use Alta\BackupRestore\Services\HostRestoreBridgeProxy;
 use App\Models\SystemAddon;
+use App\Providers\Filament\AdminPanelProvider;
 use App\Support\Addons\AddonManager;
 use App\Support\Addons\AddonRegistry;
+use App\Support\Addons\FilamentAddonComponents;
 use Filament\Facades\Filament;
+use Filament\Panel;
 use FilesystemIterator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use RecursiveDirectoryIterator;
@@ -34,6 +38,8 @@ final class ExternalAddonPackageLifecycleTest extends TestCase
     {
         parent::setUp();
         $this->integrationRoot = base_path('modules/ExternalContract');
+        config()->set('addons-registry.live_roots.modules_path', base_path('modules'));
+        config()->set('addons-registry.live_roots.extensions_path', base_path('extensions'));
         File::deleteDirectory($this->integrationRoot);
         File::ensureDirectoryExists($this->integrationRoot);
     }
@@ -113,9 +119,29 @@ final class ExternalAddonPackageLifecycleTest extends TestCase
         $this->assertSame($events, DB::table('system_addon_events')->count());
         $this->assertSame($beforeFiles, $this->filesystemSnapshot($root));
         $this->assertInstanceOf(HostRestoreBridgeProxy::class, app(HostRestoreBridge::class));
-        $this->assertContains(BackupRestoreDashboard::class, Filament::getPages());
-        $this->assertContains(ProfileResource::class, Filament::getResources());
-        $this->assertContains(ScheduleResource::class, Filament::getResources());
+        $components = app(FilamentAddonComponents::class)->enabled();
+        $this->assertContains(BackupRestoreDashboard::class, $components['pages']);
+        $this->assertContains(ProfileResource::class, $components['resources']);
+        $this->assertContains(ScheduleResource::class, $components['resources']);
+        $configuredPanel = (new AdminPanelProvider(app()))->panel(Panel::make());
+        $this->assertContains(BackupRestoreDashboard::class, $configuredPanel->getPages());
+        $this->assertContains(ProfileResource::class, $configuredPanel->getResources());
+        $this->assertContains(ScheduleResource::class, $configuredPanel->getResources());
+        $panel = Filament::getPanel('admin');
+        Route::name('filament.admin.')->prefix('admin')->group(function () use ($components, $panel): void {
+            foreach ($components['pages'] as $page) {
+                $page::registerRoutes($panel);
+            }
+            foreach ($components['resources'] as $resource) {
+                $resource::registerRoutes($panel);
+            }
+        });
+        app('router')->getRoutes()->refreshNameLookups();
+        $routeNames = collect(app('router')->getRoutes())->map(fn ($route) => $route->getName())->filter()->values()->all();
+        $this->assertContains('filament.admin.pages.backup-restore-dashboard', $routeNames);
+        $this->assertSame('/admin/backup-restore-dashboard', parse_url(route('filament.admin.pages.backup-restore-dashboard'), PHP_URL_PATH));
+        $this->assertTrue(Route::has('filament.admin.resources.profiles.index'));
+        $this->assertTrue(Route::has('filament.admin.resources.schedules.index'));
 
         $migrations = [];
         foreach (['2026_07_15_000001_create_backup_restore_foundation.php', '2026_07_17_000002_add_file_limits_to_backup_profiles.php', '2026_07_18_000003_create_restore_planning_tables.php', '2026_07_18_000004_create_files_restore_execution_tables.php', '2026_07_18_000005_create_postgresql_staging_verifications.php'] as $file) {
@@ -141,7 +167,7 @@ final class ExternalAddonPackageLifecycleTest extends TestCase
             $this->assertSame('backup_conflicting_operation', $exception->getMessage());
         }
         try {
-            $addon->version = '1.0.1';
+            $addon->version = '9.9.9';
             $addon->save();
             $this->fail('Active backup must block addon code update.');
         } catch (\RuntimeException $exception) {
@@ -158,6 +184,10 @@ final class ExternalAddonPackageLifecycleTest extends TestCase
         $manager->disable($addon->code);
         $manager->bootEnabledAddons();
         $this->assertFalse($addon->refresh()->is_enabled);
+        $this->assertSame(['pages' => [], 'resources' => []], app(FilamentAddonComponents::class)->enabled());
+        $manager->enable($addon->code);
+        $this->assertContains(BackupRestoreDashboard::class, app(FilamentAddonComponents::class)->enabled()['pages']);
+        $manager->disable($addon->code);
         $manager->uninstall($addon->code);
         $this->assertFalse($addon->refresh()->is_installed);
     }
